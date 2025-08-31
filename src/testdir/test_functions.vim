@@ -939,9 +939,13 @@ endfunc
 func Test_append()
   enew!
   split
-  call append(0, ["foo"])
-  call append(1, [])
-  call append(1, test_null_list())
+  call assert_equal(0, append(1, []))
+  call assert_equal(0, append(1, test_null_list()))
+  call assert_equal(0, append(0, ["foo"]))
+  call assert_equal(0, append(1, []))
+  call assert_equal(0, append(1, test_null_list()))
+  call assert_equal(0, append(8, []))
+  call assert_equal(0, append(9, test_null_list()))
   call assert_equal(['foo', ''], getline(1, '$'))
   split
   only
@@ -1480,7 +1484,8 @@ func Test_col()
   call assert_equal(0, col([1, 100]))
   call assert_equal(0, col([1]))
   call assert_equal(0, col(test_null_list()))
-  call assert_fails('let c = col({})', 'E731:')
+  call assert_fails('let c = col({})', 'E1222:')
+  call assert_fails('let c = col(".", [])', 'E1210:')
 
   " test for getting the visual start column
   func T()
@@ -1509,6 +1514,15 @@ func Test_col()
   call cursor(1, 10)
   call assert_equal(4, col('.'))
   set virtualedit&
+
+  " Test for getting the column number in another window
+  let winid = win_getid()
+  new
+  call win_execute(winid, 'normal 1G$')
+  call assert_equal(3, col('.', winid))
+  call win_execute(winid, 'normal 2G')
+  call assert_equal(8, col('$', winid))
+  call assert_equal(0, col('.', 5001))
 
   bw!
 endfunc
@@ -1608,6 +1622,19 @@ func Test_inputlist()
   call assert_fails('call inputlist(test_null_list())', 'E686:')
 endfunc
 
+func Test_range_inputlist()
+  " flush out any garbage left in the buffer
+  while getchar(0)
+  endwhile
+
+  call feedkeys(":let result = inputlist(range(10))\<CR>1\<CR>", 'x')
+  call assert_equal(1, result)
+  call feedkeys(":let result = inputlist(range(3, 10))\<CR>1\<CR>", 'x')
+  call assert_equal(1, result)
+
+  unlet result
+endfunc
+
 func Test_balloon_show()
   CheckFeature balloon_eval
 
@@ -1621,7 +1648,7 @@ endfunc
 
 func Test_setbufvar_options()
   " This tests that aucmd_prepbuf() and aucmd_restbuf() properly restore the
-  " window layout.
+  " window layout and cursor position.
   call assert_equal(1, winnr('$'))
   split dummy_preview
   resize 2
@@ -1635,11 +1662,20 @@ func Test_setbufvar_options()
   execute 'belowright vertical split #' . dummy_buf
   call assert_equal(wh, winheight(0))
   let dum1_id = win_getid()
+  call setline(1, 'foo')
+  normal! V$
+  call assert_equal(4, col('.'))
+  call setbufvar('dummy_preview', '&buftype', 'nofile')
+  call assert_equal(4, col('.'))
 
   wincmd h
   let wh = winheight(0)
+  call setline(1, 'foo')
+  normal! V$
+  call assert_equal(4, col('.'))
   let dummy_buf = bufnr('dummy_buf2', v:true)
   eval 'nofile'->setbufvar(dummy_buf, '&buftype')
+  call assert_equal(4, col('.'))
   execute 'belowright vertical split #' . dummy_buf
   call assert_equal(wh, winheight(0))
 
@@ -2536,12 +2572,6 @@ func Test_range()
   call assert_equal(1, index(range(1, 5), 2))
   call assert_fails("echo index([1, 2], 1, [])", 'E745:')
 
-  " inputlist()
-  call feedkeys(":let result = inputlist(range(10))\<CR>1\<CR>", 'x')
-  call assert_equal(1, result)
-  call feedkeys(":let result = inputlist(range(3, 10))\<CR>1\<CR>", 'x')
-  call assert_equal(1, result)
-
   " insert()
   call assert_equal([42, 1, 2, 3, 4, 5], insert(range(1, 5), 42))
   call assert_equal([42, 1, 2, 3, 4, 5], insert(range(1, 5), 42, 0))
@@ -2876,6 +2906,12 @@ func Test_getmousepos()
   bwipe!
 endfunc
 
+func Test_getmouseshape()
+  CheckFeature mouseshape
+
+  call assert_equal('arrow', getmouseshape())
+endfunc
+
 " Test for glob()
 func Test_glob()
   call assert_equal('', glob(test_null_string()))
@@ -2938,6 +2974,25 @@ func Test_builtin_check()
   let g:bar = 123
   call extend(g:, #{bar: { -> "foo" }}, "keep")
   call assert_fails('call extend(g:, #{bar: { -> "foo" }}, "force")', 'E704:')
+  unlet g:bar
+
+  call assert_fails('call extend(l:, #{foo: { -> "foo" }})', 'E704:')
+  let bar = 123
+  call extend(l:, #{bar: { -> "foo" }}, "keep")
+  call assert_fails('call extend(l:, #{bar: { -> "foo" }}, "force")', 'E704:')
+  unlet bar
+
+  call assert_fails('call extend(g:, #{foo: function("extend")})', 'E704:')
+  let g:bar = 123
+  call extend(g:, #{bar: function("extend")}, "keep")
+  call assert_fails('call extend(g:, #{bar: function("extend")}, "force")', 'E704:')
+  unlet g:bar
+
+  call assert_fails('call extend(l:, #{foo: function("extend")})', 'E704:')
+  let bar = 123
+  call extend(l:, #{bar: function("extend")}, "keep")
+  call assert_fails('call extend(l:, #{bar: function("extend")}, "force")', 'E704:')
+  unlet bar
 endfunc
 
 func Test_funcref_to_string()
@@ -2992,5 +3047,32 @@ func Test_virtcol()
   call assert_equal([4, 8], virtcol('.', v:true))
   bwipe!
 endfunc
+
+func Test_delfunc_while_listing()
+  CheckRunVimInTerminal
+
+  let lines =<< trim END
+      set nocompatible
+      for i in range(1, 999)
+        exe 'func ' .. 'MyFunc' .. i .. '()'
+        endfunc
+      endfor
+      au CmdlineLeave : call timer_start(0, {-> execute('delfunc MyFunc622')})
+  END
+  call writefile(lines, 'Xfunctionclear', 'D')
+  let buf = RunVimInTerminal('-S Xfunctionclear', {'rows': 12})
+
+  " This was using freed memory.  The height of the terminal must be so that
+  " the next function to be listed with "j" is the one that is deleted in the
+  " timer callback, tricky!
+  call term_sendkeys(buf, ":func /MyFunc\<CR>")
+  call TermWait(buf, 50)
+  call term_sendkeys(buf, "j")
+  call TermWait(buf, 50)
+  call term_sendkeys(buf, "\<CR>")
+
+  call StopVimInTerminal(buf)
+endfunc
+
 
 " vim: shiftwidth=2 sts=2 expandtab

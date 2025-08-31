@@ -1741,7 +1741,7 @@ msgstr ""
 msgid "--startuptime <file>\tWrite startup timing messages to <file>"
 msgstr "--startuptime <файл>\tЗаписать временные метки запуска в <файл>"
 
-msgid "--log <file>\tStart logging to <file> early"
+msgid "--log <file>\t\tStart logging to <file> early"
 msgstr ""
 "--log <файл>\t\tНачать запись журнала в <файл> на раннем этапе\n"
 "\t\t\t\tинициализации"
@@ -7696,8 +7696,8 @@ msgstr "E1112: Элемент %d в списке задаёт неправиль
 msgid "E1113: Overlapping ranges for 0x%lx"
 msgstr "E1113: Перекрывающиеся диапазоны для 0x%lx"
 
-msgid "E1114: Only values of 0x100 and higher supported"
-msgstr "E1114: Поддерживаются только значения от 0x100 и выше"
+msgid "E1114: Only values of 0x80 and higher supported"
+msgstr "E1114: Поддерживаются только значения от 0x80 и выше"
 
 msgid "E1115: \"assert_fails()\" fourth argument must be a number"
 msgstr ""

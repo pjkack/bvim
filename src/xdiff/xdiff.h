@@ -67,6 +67,11 @@ extern "C" {
 /* merge output styles */
 #define XDL_MERGE_DIFF3 1
 
+// VIM: from stdint.h
+typedef unsigned char		uint8_t;
+typedef unsigned short		uint16_t;
+typedef unsigned int		uint32_t;
+
 typedef struct s_mmfile {
 	char *ptr;
 	long size;

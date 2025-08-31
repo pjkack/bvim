@@ -1730,7 +1730,7 @@ msgstr "--servername <Name>\tBenutze den Vim-Server <Name>"
 msgid "--startuptime <file>\tWrite startup timing messages to <file>"
 msgstr "--startuptime <Datei>\tSchreibe Start Zeitmessung in <Datei>"
 
-msgid "--log <file>\tStart logging to <file> early"
+msgid "--log <file>\t\tStart logging to <file> early"
 msgstr "--log <Datei>\tLogge frühzeitig in <Datei>"
 
 msgid "-i <viminfo>\t\tUse <viminfo> instead of .viminfo"
@@ -7836,8 +7836,8 @@ msgstr "E1112: Listenwert %d Zellbreite ungültig"
 msgid "E1113: Overlapping ranges for 0x%lx"
 msgstr "E1113: Überlappender Bereich für 0x%lx"
 
-msgid "E1114: Only values of 0x100 and higher supported"
-msgstr "E1114: Nur Werte oberhalb 0x100 unterstützt"
+msgid "E1114: Only values of 0x80 and higher supported"
+msgstr "E1114: Nur Werte oberhalb 0x80 unterstützt"
 
 msgid "E1115: \"assert_fails()\" fourth argument must be a number"
 msgstr "E1115: \"assert_fails()\" viertes Argument muss eine Zahl sein"

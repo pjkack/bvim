@@ -1,7 +1,7 @@
 " Tests for maparg(), mapcheck(), mapset(), maplist()
 " Also test utf8 map with a 0x80 byte.
 
-func s:SID()     
+func s:SID()
   return str2nr(matchstr(expand('<sfile>'), '<SNR>\zs\d\+\ze_SID$'))
 endfunc
 
@@ -18,7 +18,7 @@ func Test_maparg()
   call assert_equal({'silent': 0, 'noremap': 0, 'script': 0, 'lhs': 'foo<C-V>',
         \ 'lhsraw': "foo\x80\xfc\x04V", 'lhsrawalt': "foo\x16",
         \ 'mode': ' ', 'nowait': 0, 'expr': 0, 'sid': sid, 'scriptversion': 1,
-        \ 'lnum': lnum + 1, 
+        \ 'lnum': lnum + 1,
 	\ 'rhs': 'is<F4>foo', 'buffer': 0, 'abbr': 0, 'mode_bits': 0x47},
 	\ maparg('foo<C-V>', '', 0, 1))
   call assert_equal({'silent': 1, 'noremap': 1, 'script': 1, 'lhs': 'bar',
@@ -559,7 +559,7 @@ def Test_maplist()
   assert_equal(len(maps_maplist), len(map_set))
 
   # For everything returned by maplist, should be the same as from maparg.
-  # Except for "map dup", bacause maparg returns the <buffer> version
+  # Except for "map dup", because maparg returns the <buffer> version
   for d in maps_maplist
     if d.lhs == 'dup' && d.buffer == 0
       continue

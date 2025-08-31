@@ -1616,8 +1616,8 @@ msgid "--startuptime <file>\tWrite startup timing messages to <file>"
 msgstr ""
 "--startuptime <file>\tScrivi tutti i messaggi iniziali di timing in <file>"
 
-msgid "--log <file>\tStart logging to <file> early"
-msgstr "--log <file>\tInizia registrazione a <file> appena possibile"
+msgid "--log <file>\t\tStart logging to <file> early"
+msgstr "--log <file>\t\tInizia registrazione a <file> appena possibile"
 
 msgid "-i <viminfo>\t\tUse <viminfo> instead of .viminfo"
 msgstr "-i <viminfo>\t\tUsa <viminfo> invece di .viminfo"
@@ -6995,8 +6995,8 @@ msgstr "E1112: Elemento di Lista %d con larghezza di cella non valida"
 msgid "E1113: Overlapping ranges for 0x%lx"
 msgstr "E1113: Intervalli sovrapposti per 0x%lx"
 
-msgid "E1114: Only values of 0x100 and higher supported"
-msgstr "E1114: Solo valori 0x100 o più elevati sono supportati"
+msgid "E1114: Only values of 0x80 and higher supported"
+msgstr "E1114: Solo valori 0x80 o più elevati sono supportati"
 
 msgid "E1115: \"assert_fails()\" fourth argument must be a number"
 msgstr "E1115: Il quarto argomento di \"assert_fails()\" dev'essere un Numero"

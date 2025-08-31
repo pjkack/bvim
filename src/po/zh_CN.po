@@ -1676,8 +1676,8 @@ msgstr "--servername <名称>\t发送到或成为 Vim 服务器 <名称>"
 msgid "--startuptime <file>\tWrite startup timing messages to <file>"
 msgstr "--startuptime <文件>\t将启动计时信息写入 <文件>"
 
-msgid "--log <file>\tStart logging to <file> early"
-msgstr "--log <文件>\t尽早开始记录日志到 <文件>"
+msgid "--log <file>\t\tStart logging to <file> early"
+msgstr "--log <文件>\t\t尽早开始记录日志到 <文件>"
 
 msgid "-i <viminfo>\t\tUse <viminfo> instead of .viminfo"
 msgstr "-i <viminfo>\t\t使用 <viminfo> 取代 .viminfo"
@@ -7511,8 +7511,8 @@ msgstr "E1112: 列表项 %d 单元格宽度无效"
 msgid "E1113: Overlapping ranges for 0x%lx"
 msgstr "E1113: 重叠范围为 0x%lx"
 
-msgid "E1114: Only values of 0x100 and higher supported"
-msgstr "E1114: 只支持 0x100 或更高的值"
+msgid "E1114: Only values of 0x80 and higher supported"
+msgstr "E1114: 只支持 0x80 或更高的值"
 
 msgid "E1115: \"assert_fails()\" fourth argument must be a number"
 msgstr "E1115: \"assert_fails()\" 第四个参数必须是一个整数"

@@ -73,8 +73,6 @@ static void redraw_custom_statusline(win_T *wp);
 static int  did_update_one_window;
 #endif
 
-static void win_redr_status(win_T *wp, int ignore_pum);
-
 /*
  * Based on the current value of curwin->w_topline, transfer a screenfull
  * of stuff from Filemem to ScreenLines[], and update curwin->w_botline.
@@ -423,7 +421,7 @@ statusline_row(win_T *wp)
  * If "ignore_pum" is TRUE, also redraw statusline when the popup menu is
  * displayed.
  */
-    static void
+    void
 win_redr_status(win_T *wp, int ignore_pum UNUSED)
 {
     int		row;
@@ -548,6 +546,16 @@ win_redr_status(win_T *wp, int ignore_pum UNUSED)
 						   - 1 + wp->w_wincol), attr);
 
 	win_redr_ruler(wp, TRUE, ignore_pum);
+
+	// Draw the 'showcmd' information if 'showcmdloc' == "statusline".
+	if (p_sc && *p_sloc == 's')
+	{
+	    int	width = MIN(10, this_ru_col - len - 2);
+
+	    if (width > 0)
+		screen_puts_len(showcmd_buf, width, row,
+				wp->w_wincol + this_ru_col - width - 1, attr);
+	}
     }
 
     /*
@@ -573,7 +581,6 @@ win_redr_status(win_T *wp, int ignore_pum UNUSED)
 redraw_custom_statusline(win_T *wp)
 {
     static int	    entered = FALSE;
-    int		    saved_did_emsg = did_emsg;
 
     // When called recursively return.  This can happen when the statusline
     // contains an expression that triggers a redraw.
@@ -581,18 +588,7 @@ redraw_custom_statusline(win_T *wp)
 	return;
     entered = TRUE;
 
-    did_emsg = FALSE;
     win_redr_custom(wp, FALSE);
-    if (did_emsg)
-    {
-	// When there is an error disable the statusline, otherwise the
-	// display is messed up with errors and a redraw triggers the problem
-	// again and again.
-	set_string_option_direct((char_u *)"statusline", -1,
-		(char_u *)"", OPT_FREE | (*wp->w_p_stl != NUL
-					? OPT_LOCAL : OPT_GLOBAL), SID_ERROR);
-    }
-    did_emsg |= saved_did_emsg;
     entered = FALSE;
 }
 #endif
@@ -673,12 +669,7 @@ win_redr_ruler(win_T *wp, int always, int ignore_pum)
 #ifdef FEAT_STL_OPT
     if (*p_ruf)
     {
-	int	called_emsg_before = called_emsg;
-
 	win_redr_custom(wp, TRUE);
-	if (called_emsg > called_emsg_before)
-	    set_string_option_direct((char_u *)"rulerformat", -1,
-					   (char_u *)"", OPT_FREE, SID_ERROR);
 	return;
     }
 #endif
@@ -2934,7 +2925,6 @@ updateWindow(win_T *wp)
 }
 #endif
 
-#if defined(FEAT_TERMRESPONSE) || defined(PROTO)
 /*
  * Redraw as soon as possible.  When the command line is not scrolled redraw
  * right away and restore what was on the command line.
@@ -3066,7 +3056,6 @@ redraw_asap(int type)
 
     return ret;
 }
-#endif
 
 /*
  * Invoked after an asynchronous callback is called.

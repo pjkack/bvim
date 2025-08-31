@@ -1,4 +1,4 @@
-" Test for all comand modifiers in 
+" Test for all command modifiers in
 
 def Test_cmdmods_array()
   # Get all the command modifiers from ex_cmds.h.
@@ -14,6 +14,16 @@ def Test_cmdmods_array()
   var bot = search('^};') - 1
   lines = getline(top, bot)
   var mods = lines->map((_, v) => substitute(v, '.*"\(\k*\)".*', '\1', ''))
+
+  # Add the other commands that use ex_wrongmodifier.
+  mods->extend([
+                'endclass',
+                'endenum',
+                'endinterface',
+                'public',
+                'static',
+                'this',
+              ])
 
   # Check the lists are equal.  Convert them to a dict to get a clearer error
   # message.

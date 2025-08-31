@@ -16,7 +16,7 @@ func ListMonths()
   if !empty(entered)
     let mth = filter(mth, 'v:val=~"^".entered')
   endif
-  call complete(1, mth) 
+  call complete(1, mth)
   return ''
 endfunc
 
@@ -74,7 +74,7 @@ func Test_popup_complete()
   call feedkeys("aJu\<f5>\<c-p>l\<c-y>", 'tx')
   call assert_equal(["Jul"], getline(1,2))
   %d
-  
+
   " any-non printable, non-white character: Add this character and
   " reduce number of matches
   call feedkeys("aJu\<f5>\<c-p>l\<c-n>\<c-y>", 'tx')
@@ -96,7 +96,7 @@ func Test_popup_complete()
   call feedkeys("aJ\<f5>".repeat("\<c-n>",3)."\<c-l>\<esc>", 'tx')
   call assert_equal(["J"], getline(1,2))
   %d
-  
+
   " <c-l> - Insert one character from the current match
   call feedkeys("aJ\<f5>".repeat("\<c-n>",4)."\<c-l>\<esc>", 'tx')
   call assert_equal(["January"], getline(1,2))
@@ -856,13 +856,12 @@ func Test_popup_position()
   call term_sendkeys(buf, "jI123456789_\<Esc>")
   call term_sendkeys(buf, "GA\<C-N>")
   call VerifyScreenDump(buf, 'Test_popup_position_04', {'rows': 10})
-  
+
   call term_sendkeys(buf, "\<Esc>u")
   call StopVimInTerminal(buf)
 endfunc
 
 func Test_popup_command()
-  CheckScreendump
   CheckFeature menu
 
   menu Test.Foo Foo
@@ -870,13 +869,18 @@ func Test_popup_command()
   call assert_fails('popup Test.Foo.X', 'E327:')
   call assert_fails('popup Foo', 'E337:')
   unmenu Test.Foo
+endfunc
+
+func Test_popup_command_dump()
+  CheckFeature menu
+  CheckScreendump
 
   let script =<< trim END
     func StartTimer()
       call timer_start(100, {-> ChangeMenu()})
     endfunc
     func ChangeMenu()
-      nunmenu PopUp.&Paste
+      aunmenu PopUp.&Paste
       nnoremenu 1.40 PopUp.&Paste :echomsg "pasted"<CR>
       echomsg 'changed'
     endfunc

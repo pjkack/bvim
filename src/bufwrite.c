@@ -802,8 +802,15 @@ buf_write(
 	if (fname == buf->b_sfname)
 	    buf_fname_s = TRUE;
 
-	// set curwin/curbuf to buf and save a few things
+	// Set curwin/curbuf to buf and save a few things.
 	aucmd_prepbuf(&aco, buf);
+	if (curbuf != buf)
+	{
+	    // Could not find a window for "buf".  Doing more might cause
+	    // problems, better bail out.
+	    return FAIL;
+	}
+
 	set_bufref(&bufref, buf);
 
 	if (append)
@@ -1475,7 +1482,7 @@ buf_write(
 			{
 			    if (buf_write_bytes(&write_info) == FAIL)
 			    {
-				errmsg = (char_u *)_(e_canot_write_to_backup_file_add_bang_to_override);
+				errmsg = (char_u *)_(e_cant_write_to_backup_file_add_bang_to_override);
 				break;
 			    }
 			    ui_breakcheck();
@@ -2050,10 +2057,6 @@ restore_backup:
 		len = 0;
 		write_info.bw_start_lnum = lnum;
 	    }
-	    if (!buf->b_p_fixeol && buf->b_p_eof)
-		// write trailing CTRL-Z
-		(void)write_eintr(write_info.bw_fd, "\x1a", 1);
-
 	    // write failed or last line has no EOL: stop here
 	    if (end == 0
 		    || (lnum == end
@@ -2156,6 +2159,13 @@ restore_backup:
 	    if (buf_write_bytes(&write_info) == FAIL)
 		end = 0;		    // write error
 	    nchars += len;
+	}
+
+	if (!buf->b_p_fixeol && buf->b_p_eof)
+	{
+	    // write trailing CTRL-Z
+	    (void)write_eintr(write_info.bw_fd, "\x1a", 1);
+	    nchars++;
 	}
 
 	// Stop when writing done or an error was encountered.
@@ -2589,23 +2599,26 @@ nofail:
 
 	// Apply POST autocommands.
 	// Careful: The autocommands may call buf_write() recursively!
+	// Only do this when a window was found for "buf".
 	aucmd_prepbuf(&aco, buf);
+	if (curbuf == buf)
+	{
+	    if (append)
+		apply_autocmds_exarg(EVENT_FILEAPPENDPOST, fname, fname,
+							   FALSE, curbuf, eap);
+	    else if (filtering)
+		apply_autocmds_exarg(EVENT_FILTERWRITEPOST, NULL, fname,
+							   FALSE, curbuf, eap);
+	    else if (reset_changed && whole)
+		apply_autocmds_exarg(EVENT_BUFWRITEPOST, fname, fname,
+							   FALSE, curbuf, eap);
+	    else
+		apply_autocmds_exarg(EVENT_FILEWRITEPOST, fname, fname,
+							   FALSE, curbuf, eap);
 
-	if (append)
-	    apply_autocmds_exarg(EVENT_FILEAPPENDPOST, fname, fname,
-							  FALSE, curbuf, eap);
-	else if (filtering)
-	    apply_autocmds_exarg(EVENT_FILTERWRITEPOST, NULL, fname,
-							  FALSE, curbuf, eap);
-	else if (reset_changed && whole)
-	    apply_autocmds_exarg(EVENT_BUFWRITEPOST, fname, fname,
-							  FALSE, curbuf, eap);
-	else
-	    apply_autocmds_exarg(EVENT_FILEWRITEPOST, fname, fname,
-							  FALSE, curbuf, eap);
-
-	// restore curwin/curbuf and a few other things
-	aucmd_restbuf(&aco);
+	    // restore curwin/curbuf and a few other things
+	    aucmd_restbuf(&aco);
+	}
 
 #ifdef FEAT_EVAL
 	if (aborting())	    // autocmds may abort script processing

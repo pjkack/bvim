@@ -137,7 +137,6 @@ endfunc
 
 " Test the ":wincmd ^" and "<C-W>^" commands.
 func Test_window_split_edit_alternate()
-
   " Test for failure when the alternate buffer/file no longer exists.
   edit Xfoo | %bw
   call assert_fails(':wincmd ^', 'E23:')
@@ -170,7 +169,6 @@ endfunc
 
 " Test the ":[count]wincmd ^" and "[count]<C-W>^" commands.
 func Test_window_split_edit_bufnr()
-
   %bwipeout
   let l:nr = bufnr('%') + 1
   call assert_fails(':execute "normal! ' . l:nr . '\<C-W>\<C-^>"', 'E92:')
@@ -1267,7 +1265,7 @@ endfunc
 
 " Test for jumping to a vertical/horizontal neighbor window based on the
 " current cursor position
-func Test_window_goto_neightbor()
+func Test_window_goto_neighbor()
   %bw!
 
   " Vertical window movement
@@ -1483,23 +1481,33 @@ func Test_win_move_separator()
   call assert_equal(w0, winwidth(0))
   call assert_true(win_move_separator(0, -1))
   call assert_equal(w0, winwidth(0))
+
   " check that win_move_separator doesn't error with offsets beyond moving
   " possibility
   call assert_true(win_move_separator(id, 5000))
   call assert_true(winwidth(id) > w)
   call assert_true(win_move_separator(id, -5000))
   call assert_true(winwidth(id) < w)
+
   " check that win_move_separator returns false for an invalid window
   wincmd =
   let w = winwidth(0)
   call assert_false(win_move_separator(-1, 1))
   call assert_equal(w, winwidth(0))
+
   " check that win_move_separator returns false for a popup window
   let id = popup_create(['hello', 'world'], {})
   let w = winwidth(id)
   call assert_false(win_move_separator(id, 1))
   call assert_equal(w, winwidth(id))
   call popup_close(id)
+
+  " check that using another tabpage fails without crash
+  let id = win_getid()
+  tabnew
+  call assert_fails('call win_move_separator(id, -1)', 'E1308:')
+  tabclose
+
   %bwipe!
 endfunc
 
@@ -1545,23 +1553,33 @@ func Test_win_move_statusline()
     call assert_true(id->win_move_statusline(-offset))
     call assert_equal(h, winheight(id))
   endfor
+
   " check that win_move_statusline doesn't error with offsets beyond moving
   " possibility
   call assert_true(win_move_statusline(id, 5000))
   call assert_true(winheight(id) > h)
   call assert_true(win_move_statusline(id, -5000))
   call assert_true(winheight(id) < h)
+
   " check that win_move_statusline returns false for an invalid window
   wincmd =
   let h = winheight(0)
   call assert_false(win_move_statusline(-1, 1))
   call assert_equal(h, winheight(0))
+
   " check that win_move_statusline returns false for a popup window
   let id = popup_create(['hello', 'world'], {})
   let h = winheight(id)
   call assert_false(win_move_statusline(id, 1))
   call assert_equal(h, winheight(id))
   call popup_close(id)
+
+  " check that using another tabpage fails without crash
+  let id = win_getid()
+  tabnew
+  call assert_fails('call win_move_statusline(id, -1)', 'E1308:')
+  tabclose
+
   %bwipe!
 endfunc
 
@@ -1733,9 +1751,9 @@ func Test_splitkeep_options()
     call assert_equal(1, line("w0"))
     call assert_equal(curpos, getcurpos())
 
-    " Scroll when cursor becomes invalid in insert mode
+    " Scroll when cursor becomes invalid in insert mode.
     norm Lic
-    call assert_equal(curpos, getcurpos())
+    call assert_equal(curpos, getcurpos(), 'run ' .. run)
 
     " No scroll when topline not equal to 1
     only | execute "norm gg5\<C-e>" | split | wincmd k
@@ -1754,7 +1772,7 @@ func Test_splitkeep_options()
   let &t_WS = save_WS
 endfunc
 
-function Test_splitkeep_cmdwin_cursor_position()
+func Test_splitkeep_cmdwin_cursor_position()
   set splitkeep=screen
   call setline(1, range(&lines))
 
@@ -1779,9 +1797,9 @@ function Test_splitkeep_cmdwin_cursor_position()
 
   %bwipeout!
   set splitkeep&
-endfunction
+endfunc
 
-function Test_splitkeep_misc()
+func Test_splitkeep_misc()
   set splitkeep=screen
   set splitbelow
 
@@ -1814,7 +1832,7 @@ function Test_splitkeep_misc()
   set splitkeep&
 endfunc
 
-function Test_splitkeep_callback()
+func Test_splitkeep_callback()
   CheckScreendump
   let lines =<< trim END
     set splitkeep=screen
@@ -1843,9 +1861,11 @@ function Test_splitkeep_callback()
 
   call term_sendkeys(buf, ":quit\<CR>Gt")
   call VerifyScreenDump(buf, 'Test_splitkeep_callback_4', {})
+
+  call StopVimInTerminal(buf)
 endfunc
 
-function Test_splitkeep_fold()
+func Test_splitkeep_fold()
   CheckScreendump
 
   let lines =<< trim END
@@ -1873,6 +1893,60 @@ function Test_splitkeep_fold()
 
   call term_sendkeys(buf, ":wincmd k\<CR>:quit\<CR>")
   call VerifyScreenDump(buf, 'Test_splitkeep_fold_4', {})
-endfunction
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_splitkeep_status()
+  CheckScreendump
+
+  let lines =<< trim END
+    call setline(1, ['a', 'b', 'c'])
+    set nomodified
+    set splitkeep=screen
+    let win = winnr()
+    wincmd s
+    wincmd j
+  END
+  call writefile(lines, 'XTestSplitkeepStatus', 'D')
+  let buf = RunVimInTerminal('-S XTestSplitkeepStatus', #{rows: 10})
+
+  call term_sendkeys(buf, ":call win_move_statusline(win, 1)\<CR>")
+  call VerifyScreenDump(buf, 'Test_splitkeep_status_1', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_new_help_window_on_error()
+  help change.txt
+  execute "normal! /CTRL-@\<CR>"
+  silent! execute "normal! \<C-W>]"
+
+  let wincount = winnr('$')
+  help 'mod'
+
+  call assert_equal(wincount, winnr('$'))
+  call assert_equal(expand("<cword>"), "'mod'")
+endfunc
+
+func Test_smoothscroll_in_zero_width_window()
+  let save_lines = &lines
+  let save_columns = &columns
+
+  winsize 0 24
+  set cpo+=n
+  exe "noremap 0 \<C-W>n\<C-W>L"
+  norm 000000
+  set number smoothscroll
+  exe "norm \<C-Y>"
+
+  only!
+  let &lines = save_lines
+  let &columns = save_columns
+  set cpo-=n
+  unmap 0
+  set nonumber nosmoothscroll
+endfunc
+
 
 " vim: shiftwidth=2 sts=2 expandtab
