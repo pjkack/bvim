@@ -76,6 +76,10 @@ static char *(main_errors[]) =
 // Various parameters passed between main() and other functions.
 static mparm_T	params;
 
+#ifdef _IOLBF
+static void *s_vbuf = NULL;		// buffer for setvbuf()
+#endif
+
 #ifndef NO_VIM_MAIN	// skip this for unittests
 
 static char_u *start_dir = NULL;	// current working dir on startup
@@ -140,6 +144,11 @@ main
     atexit(vim_mem_profile_dump);
 #endif
 
+    /*
+     * Various initialisations #1 shared with tests.
+     */
+    common_init_1();
+
 #if defined(STARTUPTIME) || defined(FEAT_JOB_CHANNEL)
     // Need to find "--startuptime" and "--log" before actually parsing
     // arguments.
@@ -181,9 +190,9 @@ main
 #endif
 
     /*
-     * Various initialisations shared with tests.
+     * Various initialisations #2 shared with tests.
      */
-    common_init(&params);
+    common_init_2(&params);
 
 #ifdef VIMDLL
     // Check if the current executable file is for the GUI subsystem.
@@ -305,7 +314,7 @@ main
 	params.want_full_screen = FALSE;
 
     /*
-     * When certain to start the GUI, don't check capabilities of terminal.
+     * When certain to start the GUI, don't check terminal capabilities.
      * For GTK we can't be sure, but when started from the desktop it doesn't
      * make sense to try using a terminal.
      */
@@ -353,10 +362,14 @@ main
     check_tty(&params);
 
 #ifdef _IOLBF
-    // Ensure output works usefully without a tty: buffer lines instead of
-    // fully buffered.
     if (silent_mode)
-	setvbuf(stdout, NULL, _IOLBF, 0);
+    {
+	// Ensure output works usefully without a tty: buffer lines instead of
+	// fully buffered.
+	s_vbuf = malloc(BUFSIZ);
+	if (s_vbuf != NULL)
+	    setvbuf(stdout, s_vbuf, _IOLBF, BUFSIZ);
+    }
 #endif
 
     // This message comes before term inits, but after setting "silent_mode"
@@ -435,6 +448,36 @@ main
 }
 #endif // NO_VIM_MAIN
 #endif // PROTO
+
+#if defined(FEAT_X11) && defined(FEAT_XCLIPBOARD) && defined(FEAT_CLIPBOARD)
+/*
+ * Restore the state after a fatal X error.
+ */
+    static void
+x_restore_state(void)
+{
+    State = MODE_NORMAL;
+    VIsual_active = FALSE;
+    got_int = TRUE;
+    need_wait_return = FALSE;
+    global_busy = FALSE;
+    exmode_active = 0;
+    skip_redraw = FALSE;
+    RedrawingDisabled = 0;
+    no_wait_return = 0;
+    vgetc_busy = 0;
+# ifdef FEAT_EVAL
+    emsg_skip = 0;
+# endif
+    emsg_off = 0;
+    setmouse();
+    settmode(TMODE_RAW);
+    starttermcap();
+    scroll_start();
+    redraw_later_clear();
+    choose_clipmethod();
+}
+#endif
 
 /*
  * vim_main2() is needed for FEAT_MZSCHEME, but we define it always to keep
@@ -625,13 +668,34 @@ vim_main2(void)
 # endif
     {
 	setup_term_clip();
-	TIME_MSG("setup clipboard");
+	TIME_MSG("setup x11 clipboard");
     }
 #endif
 
 #ifdef FEAT_CLIENTSERVER
     // Prepare for being a Vim server.
     prepare_server(&params);
+#endif
+
+#ifdef FEAT_WAYLAND
+# ifdef FEAT_GUI
+    if (!gui.in_use)
+# endif
+    {
+	if (wayland_init_client(wayland_display_name) == OK)
+	{
+	    TIME_MSG("connected to Wayland display");
+
+# ifdef FEAT_WAYLAND_CLIPBOARD
+	    if (wayland_cb_init((char*)p_wse) == OK)
+		TIME_MSG("setup Wayland clipboard");
+	}
+# endif
+    }
+#endif
+
+#ifdef FEAT_CLIPBOARD
+    choose_clipmethod();
 #endif
 
     /*
@@ -647,7 +711,7 @@ vim_main2(void)
 #if defined(UNIX) || defined(VMS)
     // When switching screens and something caused a message from a vimrc
     // script, need to output an extra newline on exit.
-    if ((did_emsg || msg_didout) && *T_TI != NUL)
+    if ((did_emsg || msg_didout) && *T_TI != NUL && params.edit_type != EDIT_STDIN)
 	newline_on_exit = TRUE;
 #endif
 
@@ -777,9 +841,28 @@ vim_main2(void)
 	    getout(1);
     }
 
-    // Execute any "+", "-c" and "-S" arguments.
-    if (params.n_commands > 0)
-	exe_commands(&params);
+#if defined(FEAT_X11) && defined(FEAT_XCLIPBOARD)
+    // Temporarily set x_jump_env to here in case there is an X11 IO error,
+    // because x_jump_env is only actually set in main_loop(), before
+    // exe_commands(). May not be the best solution since commands passed via
+    // the command line can be very broad like sourcing a file, in which case
+    // an X IO error results in the command being partially done. In theory we
+    // could use SETJMP in RealWaitForChar(), but the stack frame for that may
+    // possibly exit and then LONGJMP is called on it.
+    int jump_result = SETJMP(x_jump_env);
+
+    if (jump_result == 0)
+    {
+#endif
+	// Execute any "+", "-c" and "-S" arguments.
+	if (params.n_commands > 0)
+	    exe_commands(&params);
+#if defined(FEAT_X11) && defined(FEAT_XCLIPBOARD)
+    }
+    else
+	// Restore state and continue just like what main_loop() does.
+	x_restore_state();
+#endif
 
     // Must come before the may_req_ calls.
     starting = 0;
@@ -800,8 +883,6 @@ vim_main2(void)
     // Requesting the termresponse is postponed until here, so that a "-c q"
     // argument doesn't make it appear in the shell Vim was started from.
     may_req_termresponse();
-
-    may_req_bg_color();
 #endif
 
     // start in insert mode
@@ -892,10 +973,10 @@ vim_main2(void)
 }
 
 /*
- * Initialisation shared by main() and some tests.
+ * Initialisation #1 shared by main() and some tests.
  */
     void
-common_init(mparm_T *paramp)
+common_init_1(void)
 {
     estack_init();
     cmdline_init();
@@ -917,7 +998,15 @@ common_init(mparm_T *paramp)
 	    || (NameBuff = alloc(MAXPATHL)) == NULL)
 	mch_exit(0);
     TIME_MSG("Allocated generic buffers");
+}
 
+
+/*
+ * Initialisation #2 shared by main() and some tests.
+ */
+    void
+common_init_2(mparm_T *paramp)
+{
 #ifdef NBDEBUG
     // Wait a moment for debugging NetBeans.  Must be after allocating
     // NameBuff.
@@ -1003,6 +1092,13 @@ common_init(mparm_T *paramp)
 #ifdef FEAT_SIGNS
     init_signs();
 #endif
+
+#ifdef FEAT_QUICKFIX
+    // initialize quickfix list
+    // don't send an error message when memory allocation fails
+    // do it when the user tries to access the quickfix list
+    qf_init_stack();
+#endif
 }
 
 /*
@@ -1026,6 +1122,21 @@ is_not_a_term_or_gui(void)
 #endif
 	;
 }
+
+#if defined(EXITFREE) || defined(PROTO)
+    void
+free_vbuf(void)
+{
+# ifdef _IOLBF
+    if (s_vbuf != NULL)
+    {
+	setvbuf(stdout, NULL, _IONBF, 0);
+	free(s_vbuf);
+	s_vbuf = NULL;
+    }
+# endif
+}
+#endif
 
 #if defined(FEAT_GUI) || defined(PROTO)
 /*
@@ -1075,7 +1186,7 @@ is_safe_now(void)
 }
 
 /*
- * Trigger SafeState if currently in s safe state, that is "safe" is TRUE and
+ * Trigger SafeState if currently in a safe state, that is "safe" is TRUE and
  * there is no typeahead.
  */
     void
@@ -1199,30 +1310,10 @@ main_loop(
 #if defined(FEAT_X11) && defined(FEAT_XCLIPBOARD)
     // Setup to catch a terminating error from the X server.  Just ignore
     // it, restore the state and continue.  This might not always work
-    // properly, but at least we don't exit unexpectedly when the X server
-    // exits while Vim is running in a console.
+    // properly, but at least we hopefully don't exit unexpectedly when the X
+    // server exits while Vim is running in a console.
     if (!cmdwin && !noexmode && SETJMP(x_jump_env))
-    {
-	State = MODE_NORMAL;
-	VIsual_active = FALSE;
-	got_int = TRUE;
-	need_wait_return = FALSE;
-	global_busy = FALSE;
-	exmode_active = 0;
-	skip_redraw = FALSE;
-	RedrawingDisabled = 0;
-	no_wait_return = 0;
-	vgetc_busy = 0;
-# ifdef FEAT_EVAL
-	emsg_skip = 0;
-# endif
-	emsg_off = 0;
-	setmouse();
-	settmode(TMODE_RAW);
-	starttermcap();
-	scroll_start();
-	redraw_later_clear();
-    }
+	x_restore_state();
 #endif
 
     clear_oparg(&oa);
@@ -1290,7 +1381,11 @@ main_loop(
 	 * update cursor and redraw.
 	 */
 	if (skip_redraw || exmode_active)
+	{
 	    skip_redraw = FALSE;
+	    setcursor();
+	    cursor_on();
+	}
 	else if (do_redraw || stuff_empty())
 	{
 #ifdef FEAT_GUI
@@ -1521,7 +1616,7 @@ main_loop(
 		    && !skip_term_loop)
 	    {
 		// If terminal_loop() returns OK we got a key that is handled
-		// in Normal model.  With FAIL we first need to position the
+		// in Normal mode.  With FAIL we first need to position the
 		// cursor and the screen needs to be redrawn.
 		if (terminal_loop(TRUE) == OK)
 		    normal_cmd(&oa, TRUE);
@@ -1553,7 +1648,7 @@ getout_preserve_modified(int exitval)
     // Ignore SIGHUP, because a dropped connection causes a read error, which
     // makes Vim exit and then handling SIGHUP causes various reentrance
     // problems.
-    signal(SIGHUP, SIG_IGN);
+    mch_signal(SIGHUP, SIG_IGN);
 # endif
 
     ml_close_notmod();		    // close all not-modified buffers
@@ -1619,7 +1714,7 @@ getout(int exitval)
 	    next_tp = tp->tp_next;
 	    FOR_ALL_WINDOWS_IN_TAB(tp, wp)
 	    {
-		if (wp->w_buffer == NULL)
+		if (wp->w_buffer == NULL || !buf_valid(wp->w_buffer))
 		    // Autocmd must have close the buffer already, skip.
 		    continue;
 		buf = wp->w_buffer;
@@ -1667,7 +1762,11 @@ getout(int exitval)
     }
 
 #ifdef FEAT_VIMINFO
-    if (*p_viminfo != NUL)
+    if (
+# ifdef EXITFREE
+	    entered_free_all_mem == FALSE &&
+# endif
+	    *p_viminfo != NUL)
 	// Write out the registers, history, marks etc, to the viminfo file
 	write_viminfo(NULL, FALSE);
 #endif
@@ -1754,7 +1853,8 @@ getout(int exitval)
  * Get the name of the display, before gui_prepare() removes it from
  * argv[].  Used for the xterm-clipboard display.
  *
- * Also find the --server... arguments and --socketid and --windowid
+ * Also find the --server, --clientserver... arguments and --socketid and
+ * --windowid
  */
     static void
 early_arg_scan(mparm_T *parmp UNUSED)
@@ -1799,6 +1899,22 @@ early_arg_scan(mparm_T *parmp UNUSED)
 		gui.dofork = FALSE;
 #  endif
 	}
+#  if defined(FEAT_X11) && defined(FEAT_SOCKETSERVER)
+	else if (STRNICMP(argv[i], "--clientserver", 14) == 0)
+	{
+	    char_u *arg;
+	    if (i == argc - 1)
+		mainerr_arg_missing((char_u *)argv[i]);
+	    arg = (char_u *)argv[++i];
+
+	    if (STRICMP(arg, "socket") == 0)
+		clientserver_method = CLIENTSERVER_METHOD_SOCKET;
+	    else if (STRICMP(arg, "x11") == 0)
+		clientserver_method = CLIENTSERVER_METHOD_X11;
+	    else
+		mainerr(ME_UNKNOWN_OPTION, arg);
+	}
+#  endif
 # endif
 
 # if defined(FEAT_GUI_GTK) || defined(FEAT_GUI_MSWIN)
@@ -1995,7 +2111,19 @@ command_line_scan(mparm_T *parmp)
 	{
 	    want_argument = FALSE;
 	    c = argv[0][argv_idx++];
-#ifdef VMS
+#if defined( VMS)
+	    /* 2025-05-13  SMS
+	     * On sufficiently recent non-VAX systems, case preservation
+	     * of the command line is possible/routine.  And quotation
+	     * always works, and is the expected method in such cases.
+	     * However, leaving this slash-prefix scheme available is
+	     * nearly harmless.  But note that it doesn't help with the
+	     * case of other command-line arguments, such as file names.
+	     * For details, see os_vms.c:vms_init().
+	     * On VAX and old non-VAX systems, or with SET PROC/PARSE=TRAD,
+	     * DCL upcases the command line, and the C RTL downcases it.
+	     * I would not say "only uses upper case command lines".
+	     */
 	    /*
 	     * VMS only uses upper case command lines.  Interpret "-X" as "-x"
 	     * and "-/X" as "-X".
@@ -2005,9 +2133,12 @@ command_line_scan(mparm_T *parmp)
 		c = argv[0][argv_idx++];
 		c = TOUPPER_ASC(c);
 	    }
-	    else
-		c = TOLOWER_ASC(c);
-#endif
+	    /* Note that although DCL might upcase things, the C RTL
+	     * will only downcase them, so there should be no need for
+	     * the following (additional?) downcasing (which spoils the
+	     * preserve-case results):
+	     */
+#endif /* defined( VMS) */
 	    switch (c)
 	    {
 	    case NUL:		// "vim -"  read from stdin
@@ -2104,7 +2235,11 @@ command_line_scan(mparm_T *parmp)
 		else if (STRNICMP(argv[0] + argv_idx, "serverlist", 10) == 0)
 		    ; // already processed -- no arg
 		else if (STRNICMP(argv[0] + argv_idx, "servername", 10) == 0
-		       || STRNICMP(argv[0] + argv_idx, "serversend", 10) == 0)
+		       || STRNICMP(argv[0] + argv_idx, "serversend", 10) == 0
+# if defined(FEAT_X11) && defined(FEAT_SOCKETSERVER)
+		       || STRNICMP(argv[0] + argv_idx, "clientserver", 12) == 0
+# endif
+		       )
 		{
 		    // already processed -- snatch the following arg
 		    if (argc > 1)
@@ -2379,6 +2514,11 @@ command_line_scan(mparm_T *parmp)
 	    case 'X':		// "-X"  don't connect to X server
 #if (defined(UNIX) || defined(VMS)) && defined(FEAT_X11)
 		x_no_connect = TRUE;
+#endif
+		break;
+	    case 'Y':		// "-Y" don't connect to Wayland compositor
+#if defined(FEAT_WAYLAND)
+		wayland_no_connect = TRUE;
 #endif
 		break;
 
@@ -3097,21 +3237,21 @@ exe_pre_commands(mparm_T *parmp)
     char_u	**cmds = parmp->pre_commands;
     int		cnt = parmp->n_pre_commands;
     int		i;
-    ESTACK_CHECK_DECLARATION
+    ESTACK_CHECK_DECLARATION;
 
     if (cnt <= 0)
 	return;
 
     curwin->w_cursor.lnum = 0; // just in case..
     estack_push(ETYPE_ARGS, (char_u *)_("pre-vimrc command line"), 0);
-    ESTACK_CHECK_SETUP
+    ESTACK_CHECK_SETUP;
 # ifdef FEAT_EVAL
-	current_sctx.sc_sid = SID_CMDARG;
+    current_sctx.sc_sid = SID_CMDARG;
 # endif
-	for (i = 0; i < cnt; ++i)
-	    do_cmdline_cmd(cmds[i]);
-    ESTACK_CHECK_NOW
-	estack_pop();
+    for (i = 0; i < cnt; ++i)
+	do_cmdline_cmd(cmds[i]);
+    ESTACK_CHECK_NOW;
+    estack_pop();
 # ifdef FEAT_EVAL
     current_sctx.sc_sid = 0;
 # endif
@@ -3125,7 +3265,7 @@ exe_pre_commands(mparm_T *parmp)
 exe_commands(mparm_T *parmp)
 {
     int		i;
-    ESTACK_CHECK_DECLARATION
+    ESTACK_CHECK_DECLARATION;
 
     /*
      * We start commands on line 0, make "vim +/pat file" match a
@@ -3136,7 +3276,7 @@ exe_commands(mparm_T *parmp)
     if (parmp->tagname == NULL && curwin->w_cursor.lnum <= 1)
 	curwin->w_cursor.lnum = 0;
     estack_push(ETYPE_ARGS, (char_u *)"command line", 0);
-    ESTACK_CHECK_SETUP
+    ESTACK_CHECK_SETUP;
 #ifdef FEAT_EVAL
     current_sctx.sc_sid = SID_CARG;
     current_sctx.sc_seq = 0;
@@ -3147,7 +3287,7 @@ exe_commands(mparm_T *parmp)
 	if (parmp->cmds_tofree[i])
 	    vim_free(parmp->commands[i]);
     }
-    ESTACK_CHECK_NOW
+    ESTACK_CHECK_NOW;
     estack_pop();
 #ifdef FEAT_EVAL
     current_sctx.sc_sid = 0;
@@ -3194,7 +3334,7 @@ source_startup_scripts(mparm_T *parmp)
 	{
 	    if (do_source((char_u *)VIM_DEFAULTS_FILE, FALSE, DOSO_NONE, NULL)
 									 != OK)
-		emsg(e_failed_to_source_defaults);
+		emsg(_(e_failed_to_source_defaults));
 	}
 	else if (STRCMP(parmp->use_vimrc, "NONE") == 0
 				     || STRCMP(parmp->use_vimrc, "NORC") == 0)
@@ -3249,6 +3389,10 @@ source_startup_scripts(mparm_T *parmp)
 		&& do_source((char_u *)USR_VIMRC_FILE2, TRUE,
 						      DOSO_VIMRC, NULL) == FAIL
 #endif
+#ifdef XDG_VIMRC_FILE
+		&& do_source((char_u *)XDG_VIMRC_FILE, TRUE,
+						      DOSO_VIMRC, NULL) == FAIL
+#endif
 #ifdef USR_VIMRC_FILE3
 		&& do_source((char_u *)USR_VIMRC_FILE3, TRUE,
 						      DOSO_VIMRC, NULL) == FAIL
@@ -3269,7 +3413,7 @@ source_startup_scripts(mparm_T *parmp)
 		// When no .vimrc file was found: source defaults.vim.
 		if (do_source((char_u *)VIM_DEFAULTS_FILE, FALSE, DOSO_NONE,
 								 NULL) == FAIL)
-		    emsg(e_failed_to_source_defaults);
+		    emsg(_(e_failed_to_source_defaults));
 	    }
 	}
 
@@ -3366,8 +3510,7 @@ process_env(
 {
     char_u	*initstr;
     sctx_T	save_current_sctx;
-
-    ESTACK_CHECK_DECLARATION
+    ESTACK_CHECK_DECLARATION;
 
     if ((initstr = mch_getenv(env)) == NULL || *initstr == NUL)
 	return FAIL;
@@ -3375,8 +3518,8 @@ process_env(
     if (is_viminit)
 	vimrc_found(NULL, NULL);
     estack_push(ETYPE_ENV, env, 0);
-    ESTACK_CHECK_SETUP
-	save_current_sctx = current_sctx;
+    ESTACK_CHECK_SETUP;
+    save_current_sctx = current_sctx;
     current_sctx.sc_version = 1;
 #ifdef FEAT_EVAL
     current_sctx.sc_sid = SID_ENV;
@@ -3386,8 +3529,8 @@ process_env(
 
     do_cmdline_cmd(initstr);
 
-    ESTACK_CHECK_NOW
-	estack_pop();
+    ESTACK_CHECK_NOW;
+    estack_pop();
     current_sctx = save_current_sctx;
     return OK;
 }
@@ -3501,9 +3644,10 @@ usage(void)
 	    break;
 	mch_msg(_("\n   or:"));
     }
-#ifdef VMS
-    mch_msg(_("\nWhere case is ignored prepend / to make flag upper case"));
-#endif
+#if defined( VMS)
+    mch_msg(_("\nWhere command is down-cased, prepend / (like: -/R) to treat flag as upper-case."));
+    mch_msg(_("\nOr, where supported, SET PROC/PARSE=EXT, or else quote upper-case material."));
+#endif /* defined( VMS) */
 
     mch_msg(_("\n\nArguments:\n"));
     main_msg(_("--\t\t\tOnly file names after this"));
@@ -3583,7 +3727,13 @@ usage(void)
 # endif
     main_msg(_("-X\t\t\tDo not connect to X server"));
 #endif
+#if defined(FEAT_WAYLAND)
+    main_msg(_("-Y\t\t\tDo not connect to Wayland compositor"));
+#endif
 #ifdef FEAT_CLIENTSERVER
+# if defined(FEAT_X11) && defined(FEAT_SOCKETSERVER)
+    main_msg(_("--clientserver <socket|x11> Backend for clientserver communication"));
+# endif
     main_msg(_("--remote <files>\tEdit <files> in a Vim server if possible"));
     main_msg(_("--remote-silent <files>  Same, don't complain if there is no server"));
     main_msg(_("--remote-wait <files>  As --remote but wait for files to have been edited"));

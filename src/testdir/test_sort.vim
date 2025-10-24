@@ -1,7 +1,5 @@
 " Tests for the "sort()" function and for the ":sort" command.
 
-source check.vim
-
 func Compare1(a, b) abort
   call sort(range(3), 'Compare2')
   return a:a - a:b
@@ -58,6 +56,7 @@ endfunc
 func Test_sort_numbers()
   call assert_equal([3, 13, 28], sort([13, 28, 3], 'N'))
   call assert_equal(['3', '13', '28'], sort(['13', '28', '3'], 'N'))
+  vim9cmd call assert_equal(['3', '13', '28'], sort(['13', '28', '3'], 'N'))
   call assert_equal([3997, 4996], sort([4996, 3997], 'Compare1'))
 endfunc
 

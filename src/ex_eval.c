@@ -562,6 +562,10 @@ throw_exception(void *value, except_type_T type, char_u *cmdname)
 	excp->throw_lnum = SOURCING_LNUM;
     }
 
+    excp->stacktrace = stacktrace_create();
+    if (excp->stacktrace != NULL)
+	excp->stacktrace->lv_refcount = 1;
+
     if (p_verbose >= 13 || debug_break_level > 0)
     {
 	int	save_msg_silent = msg_silent;
@@ -647,6 +651,7 @@ discard_exception(except_T *excp, int was_finished)
     if (excp->type == ET_ERROR)
 	free_msglist(excp->messages);
     vim_free(excp->throw_name);
+    list_unref(excp->stacktrace);
     vim_free(excp);
 }
 
@@ -671,6 +676,7 @@ catch_exception(except_T *excp)
     excp->caught = caught_stack;
     caught_stack = excp;
     set_vim_var_string(VV_EXCEPTION, (char_u *)excp->value, -1);
+    set_vim_var_list(VV_STACKTRACE, excp->stacktrace);
     if (*excp->throw_name != NUL)
     {
 	if (excp->throw_lnum != 0)
@@ -712,7 +718,7 @@ catch_exception(except_T *excp)
 /*
  * Remove an exception from the caught stack.
  */
-    static void
+    void
 finish_exception(except_T *excp)
 {
     if (excp != caught_stack)
@@ -721,6 +727,7 @@ finish_exception(except_T *excp)
     if (caught_stack != NULL)
     {
 	set_vim_var_string(VV_EXCEPTION, (char_u *)caught_stack->value, -1);
+	set_vim_var_list(VV_STACKTRACE, caught_stack->stacktrace);
 	if (*caught_stack->throw_name != NUL)
 	{
 	    if (caught_stack->throw_lnum != 0)
@@ -741,10 +748,53 @@ finish_exception(except_T *excp)
     {
 	set_vim_var_string(VV_EXCEPTION, NULL, -1);
 	set_vim_var_string(VV_THROWPOINT, NULL, -1);
+	set_vim_var_list(VV_STACKTRACE, NULL);
     }
 
     // Discard the exception, but use the finish message for 'verbose'.
     discard_exception(excp, TRUE);
+}
+
+/*
+ * Save the current exception state in "estate"
+ */
+    void
+exception_state_save(exception_state_T *estate)
+{
+    estate->estate_current_exception = current_exception;
+    estate->estate_did_throw = did_throw;
+    estate->estate_need_rethrow = need_rethrow;
+    estate->estate_trylevel = trylevel;
+    estate->estate_did_emsg = did_emsg;
+}
+
+/*
+ * Restore the current exception state from "estate"
+ */
+    void
+exception_state_restore(exception_state_T *estate)
+{
+    // Handle any outstanding exceptions before restoring the state
+    if (did_throw)
+	handle_did_throw();
+    current_exception = estate->estate_current_exception;
+    did_throw = estate->estate_did_throw;
+    need_rethrow = estate->estate_need_rethrow;
+    trylevel = estate->estate_trylevel;
+    did_emsg = estate->estate_did_emsg;
+}
+
+/*
+ * Clear the current exception state
+ */
+    void
+exception_state_clear(void)
+{
+    current_exception = NULL;
+    did_throw = FALSE;
+    need_rethrow = FALSE;
+    trylevel = 0;
+    did_emsg = 0;
 }
 
 /*

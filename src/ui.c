@@ -407,7 +407,19 @@ inchar_loop(
 
 	if ((resize_func != NULL && resize_func(TRUE))
 #if defined(FEAT_CLIENTSERVER) && defined(UNIX)
-		|| server_waiting()
+		|| (
+# ifdef FEAT_X11
+		    (clientserver_method == CLIENTSERVER_METHOD_X11 &&
+		    server_waiting())
+# endif
+# if defined(FEAT_X11) && defined(FEAT_SOCKETSERVER)
+		    ||
+# endif
+# ifdef FEAT_SOCKETSERVER
+		    (clientserver_method == CLIENTSERVER_METHOD_SOCKET &&
+		     socket_server_waiting_accept())
+# endif
+		)
 #endif
 #ifdef MESSAGE_QUEUE
 		|| interrupted
@@ -1032,7 +1044,11 @@ fill_input_buf(int exit_on_error UNUSED)
 	    // If a CTRL-C was typed, remove it from the buffer and set
 	    // got_int.  Also recognize CTRL-C with modifyOtherKeys set, lower
 	    // and upper case, in two forms.
-	    if (ctrl_c_interrupts && (inbuf[inbufcount] == 3
+	    // If terminal key protocols are in use, we expect to receive
+	    // Ctrl_C as an escape sequence, ignore a raw Ctrl_C as this could
+	    // be paste data.
+	    if (ctrl_c_interrupts
+			&& ((inbuf[inbufcount] == Ctrl_C && !key_protocol_enabled())
 			|| (len >= 10 && STRNCMP(inbuf + inbufcount,
 						   "\033[27;5;99~", 10) == 0)
 			|| (len >= 10 && STRNCMP(inbuf + inbufcount,

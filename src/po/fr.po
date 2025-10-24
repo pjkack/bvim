@@ -2738,8 +2738,8 @@ msgstr " Complètement défini par l'utilisateur (^U^N^P)"
 msgid " Omni completion (^O^N^P)"
 msgstr " Complètement selon le type de fichier (Omni) (^O^N^P)"
 
-msgid " Spelling suggestion (s^N^P)"
-msgstr " Suggestion d'orthographe (s^N^P)"
+msgid " Spelling suggestion (^S^N^P)"
+msgstr " Suggestion d'orthographe (^S^N^P)"
 
 msgid " Keyword Local completion (^N^P)"
 msgstr " Complètement local de mot-clé (^N/^P)"
@@ -3967,7 +3967,7 @@ msgid "E354: Invalid register name: '%s'"
 msgstr "E354: Nom de registre invalide : '%s'"
 
 # DB - todo : mettre à jour ?
-msgid "Messages maintainer: Bram Moolenaar <Bram@vim.org>"
+msgid "Messages maintainer: The Vim Project"
 msgstr "Maintenance des messages : Dominique Pellé <dominique.pelle@gmail.com>"
 
 msgid "Interrupt: "

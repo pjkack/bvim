@@ -1745,7 +1745,7 @@ prt_resfile_skip_nonws(int offset)
     idx = prt_resfile.line_start + offset;
     while (idx < prt_resfile.line_end)
     {
-	if (isspace(prt_resfile.buffer[idx]))
+	if (SAFE_isspace(prt_resfile.buffer[idx]))
 	    return idx - prt_resfile.line_start;
 	idx++;
     }
@@ -1760,7 +1760,7 @@ prt_resfile_skip_ws(int offset)
     idx = prt_resfile.line_start + offset;
     while (idx < prt_resfile.line_end)
     {
-	if (!isspace(prt_resfile.buffer[idx]))
+	if (!SAFE_isspace(prt_resfile.buffer[idx]))
 	    return idx - prt_resfile.line_start;
 	idx++;
     }
@@ -2721,14 +2721,10 @@ mch_print_begin(prt_settings_T *psettings)
     struct prt_ps_resource_S *res_cmap;
     int		retval = FALSE;
 
-    res_prolog = (struct prt_ps_resource_S *)
-				      alloc(sizeof(struct prt_ps_resource_S));
-    res_encoding = (struct prt_ps_resource_S *)
-				      alloc(sizeof(struct prt_ps_resource_S));
-    res_cidfont = (struct prt_ps_resource_S *)
-				      alloc(sizeof(struct prt_ps_resource_S));
-    res_cmap = (struct prt_ps_resource_S *)
-				      alloc(sizeof(struct prt_ps_resource_S));
+    res_prolog = ALLOC_ONE(struct prt_ps_resource_S);
+    res_encoding = ALLOC_ONE(struct prt_ps_resource_S);
+    res_cidfont = ALLOC_ONE(struct prt_ps_resource_S);
+    res_cmap = ALLOC_ONE(struct prt_ps_resource_S);
     if (res_prolog == NULL || res_encoding == NULL
 	    || res_cidfont == NULL || res_cmap == NULL)
 	goto theend;
@@ -2746,7 +2742,7 @@ mch_print_begin(prt_settings_T *psettings)
 
     prt_dsc_textline("CreationDate", get_ctime(time(NULL), FALSE));
     prt_dsc_textline("DocumentData", "Clean8Bit");
-    prt_dsc_textline("Orientation", "Portrait");
+    prt_dsc_textline("Orientation", prt_portrait ? "Portrait" : "Landscape");
     prt_dsc_atend("Pages");
     prt_dsc_textline("PageOrder", "Ascend");
     // The bbox does not change with orientation - it is always in the default

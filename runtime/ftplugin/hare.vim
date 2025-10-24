@@ -1,27 +1,61 @@
-" Vim filetype plugin
-" Language: Hare
-" Maintainer: Amelia Clarke <me@rsaihe.dev>
-" Previous Maintainer: Drew DeVault <sir@cmpwn.com>
-" Last Updated: 2022-09-21
+" Vim filetype plugin.
+" Language:     Hare
+" Maintainer:   Amelia Clarke <selene@perilune.dev>
+" Last Updated: 2024 Oct 04
+" Upstream:     https://git.sr.ht/~sircmpwn/hare.vim
 
-" Only do this when not done yet for this buffer
 if exists('b:did_ftplugin')
   finish
 endif
-
-" Don't load another plugin for this buffer
 let b:did_ftplugin = 1
 
-setlocal noexpandtab
-setlocal tabstop=8
-setlocal shiftwidth=0
-setlocal softtabstop=0
-setlocal textwidth=80
+let s:cpo_save = &cpo
+set cpo&vim
+
+" Formatting settings.
+setlocal comments=://
 setlocal commentstring=//\ %s
+setlocal formatlistpat=^\ \\?-\ 
+setlocal formatoptions+=croqnlj/ formatoptions-=t
 
-" Set 'formatoptions' to break comment lines but not other lines,
-" and insert the comment leader when hitting <CR> or using "o".
-setlocal fo-=t fo+=croql
+" Search for Hare modules.
+setlocal include=^\\s*use\\>
+setlocal includeexpr=hare#FindModule(v:fname)
+setlocal isfname+=:
+setlocal suffixesadd=.ha
 
-compiler hare
-" vim: tabstop=2 shiftwidth=2 expandtab
+" Add HAREPATH to the default search paths.
+setlocal path-=/usr/include,,
+let &l:path .= ',' .. hare#GetPath() .. ',,'
+
+let b:undo_ftplugin = 'setl cms< com< flp< fo< inc< inex< isf< pa< sua< mp<'
+
+" Follow the Hare style guide by default.
+if get(g:, 'hare_recommended_style', 1)
+  setlocal noexpandtab
+  setlocal shiftwidth=0
+  setlocal softtabstop=0
+  setlocal tabstop=8
+  setlocal textwidth=80
+  let b:undo_ftplugin .= ' et< sts< sw< ts< tw<'
+endif
+
+augroup hare.vim
+  autocmd!
+
+  " Highlight whitespace errors by default.
+  if get(g:, 'hare_space_error', 1)
+    autocmd InsertEnter * hi link hareSpaceError NONE
+    autocmd InsertLeave * hi link hareSpaceError Error
+  endif
+augroup END
+
+if !exists('current_compiler')
+  let b:undo_ftplugin .= "| compiler make"
+  compiler hare
+endif
+
+let &cpo = s:cpo_save
+unlet s:cpo_save
+
+" vim: et sts=2 sw=2 ts=8

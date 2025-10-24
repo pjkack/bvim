@@ -1,12 +1,9 @@
 " Test for channel and job functions.
 
 " When +channel is supported then +job is too, so we don't check for that.
-source check.vim
 CheckFeature channel
 
-source shared.vim
-source screendump.vim
-source view_util.vim
+source util/screendump.vim
 
 let s:python = PythonProg()
 if s:python == ''
@@ -524,7 +521,7 @@ func Test_connect_waittime()
   let start = reltime()
   let handle = ch_open('localhost:9876', s:chopt)
   if ch_status(handle) != "fail"
-    " Oops, port does exists.
+    " Oops, port exists.
     call ch_close(handle)
   else
     let elapsed = reltime(start)
@@ -538,7 +535,7 @@ func Test_connect_waittime()
   try
     let handle = ch_open('localhost:9867', {'waittime': 500})
     if ch_status(handle) != "fail"
-      " Oops, port does exists.
+      " Oops, port exists.
       call ch_close(handle)
     else
       " Failed connection should wait about 500 msec.  Can be longer if the
@@ -1429,7 +1426,7 @@ func Test_exit_cb_wipes_buf()
   new
   let g:wipe_buf = bufnr('')
 
-  let job = job_start(has('win32') ? 'cmd /c echo:' : ['true'],
+  let job = job_start(has('win32') ? 'cmd /D /c echo:' : ['true'],
 	\ {'exit_cb': 'ExitCbWipe'})
   let timer = timer_start(300, {-> feedkeys("\<Esc>", 'nt')}, {'repeat': 5})
   call feedkeys(repeat('g', 1000) . 'o', 'ntx!')
@@ -1542,12 +1539,16 @@ func Ch_open_delay(port)
 endfunc
 
 func Test_open_delay()
+  " This fails on BSD (e.g. Cirrus-CI), why?
+  CheckNotBSD
   " The server will wait half a second before creating the port.
   call s:run_server('Ch_open_delay', 'delay')
 endfunc
 
 func Test_open_delay_ipv6()
   CheckIPv6
+  " This fails on BSD (e.g. Cirrus-CI), why?
+  CheckNotBSD
   call Test_open_delay()
 endfunc
 
@@ -1766,7 +1767,7 @@ func Test_job_start_fails()
   call assert_fails("call job_start('ls',
         \ {'err_io' : 'buffer', 'err_buf' : -1})", 'E475:')
 
-  let cmd = has('win32') ? "cmd /c dir" : "ls"
+  let cmd = has('win32') ? "cmd /D /c dir" : "ls"
 
   set nomodifiable
   call assert_fails("call job_start(cmd,
@@ -2304,7 +2305,7 @@ endfunc
 
 func Test_issue_5150()
   if has('win32')
-    let cmd = 'cmd /c pause'
+    let cmd = 'cmd /D /c pause'
   else
     let cmd = 'grep foo'
   endif
@@ -2434,7 +2435,7 @@ func Test_cb_with_input()
   let g:wait_exit_cb = 1
 
   if has('win32')
-    let cmd = 'cmd /c echo "Vim''s test"'
+    let cmd = 'cmd /D /c echo "Vim''s test"'
   else
     let cmd = 'echo "Vim''s test"'
   endif
@@ -2478,15 +2479,32 @@ func Test_job_start_with_invalid_argument()
   call assert_fails('call job_start([0zff])', 'E976:')
 endfunc
 
-" Test for the 'lsp' channel mode
+" Process requests received from the LSP server
+func LspProcessServerRequests(chan, msg)
+  if a:msg['method'] == 'server-req-in-middle'
+        \ && a:msg['params']['text'] == 'server-req'
+    call ch_sendexpr(a:chan, #{method: 'server-req-in-middle-resp',
+          \ id: a:msg['id'], params: #{text: 'client-resp'}})
+  endif
+endfunc
+
+" LSP channel message callback function
 func LspCb(chan, msg)
   call add(g:lspNotif, a:msg)
+  if a:msg->has_key('method')
+    call LspProcessServerRequests(a:chan, a:msg)
+  endif
 endfunc
 
+" LSP one-time message callback function (used for ch_sendexpr())
 func LspOtCb(chan, msg)
   call add(g:lspOtMsgs, a:msg)
+  if a:msg->has_key('method')
+    call LspProcessServerRequests(a:chan, a:msg)
+  endif
 endfunc
 
+" Test for the 'lsp' channel mode
 func LspTests(port)
   " call ch_logfile('Xlspclient.log', 'w')
   let ch = ch_open(s:localhost .. a:port, #{mode: 'lsp', callback: 'LspCb'})
@@ -2652,6 +2670,57 @@ func LspTests(port)
   " send a ping to make sure communication still works
   call assert_equal('alive', ch_evalexpr(ch, #{method: 'ping'}).result)
 
+  " Test for processing a request message from the server while the client
+  " is waiting for a response with the same identifier (sync-rpc)
+  let g:lspNotif = []
+  let resp = ch_evalexpr(ch, #{method: 'server-req-in-middle',
+        \ params: #{text: 'client-req'}})
+  call assert_equal(#{jsonrpc: '2.0', id: 28,
+        \ result: #{text: 'server-resp'}}, resp)
+  call assert_equal([
+        \ #{id: -1, jsonrpc: '2.0', method: 'server-req-in-middle',
+        \   params: #{text: 'server-notif'}},
+        \ #{id: 28, jsonrpc: '2.0', method: 'server-req-in-middle',
+        \   params: #{text: 'server-req'}}], g:lspNotif)
+
+  " Test for processing a request message from the server while the client
+  " is waiting for a response with the same identifier (async-rpc using the
+  " channel callback function)
+  let g:lspNotif = []
+  call ch_sendexpr(ch, #{method: 'server-req-in-middle', id: 500,
+        \ params: #{text: 'client-req'}})
+  " Send three pings to wait for all the notification messages to arrive
+  for i in range(3)
+    call assert_equal('alive', ch_evalexpr(ch, #{method: 'ping'}).result)
+  endfor
+  call assert_equal([
+        \ #{id: -1, jsonrpc: '2.0', method: 'server-req-in-middle',
+        \   params: #{text: 'server-notif'}},
+        \ #{id: 500, jsonrpc: '2.0', method: 'server-req-in-middle',
+        \   params: #{text: 'server-req'}},
+        \ #{id: 500, jsonrpc: '2.0', result: #{text: 'server-resp'}}
+        \ ], g:lspNotif)
+
+  " Test for processing a request message from the server while the client
+  " is waiting for a response with the same identifier (async-rpc using a
+  " one-time callback function)
+  let g:lspNotif = []
+  let g:lspOtMsgs = []
+  call ch_sendexpr(ch, #{method: 'server-req-in-middle',
+        \ params: #{text: 'client-req'}}, #{callback: 'LspOtCb'})
+  " Send a ping to wait for all the notification messages to arrive
+  for i in range(3)
+    call assert_equal('alive', ch_evalexpr(ch, #{method: 'ping'}).result)
+  endfor
+  call assert_equal([
+        \ #{id: 32, jsonrpc: '2.0', result: #{text: 'server-resp'}}],
+        \ g:lspOtMsgs)
+  call assert_equal([
+        \ #{id: -1, jsonrpc: '2.0', method: 'server-req-in-middle',
+        \ params: #{text: 'server-notif'}},
+        \ #{id: 32, jsonrpc: '2.0', method: 'server-req-in-middle',
+        \ params: {'text': 'server-req'}}], g:lspNotif)
+
   " Test for invoking an unsupported method
   let resp = ch_evalexpr(ch, #{method: 'xyz', params: {}}, #{timeout: 200})
   call assert_equal({}, resp)
@@ -2670,7 +2739,7 @@ func LspTests(port)
   " " Test for sending a raw message
   " let g:lspNotif = []
   " let s = "Content-Length: 62\r\n"
-  " let s ..= "Content-Type: application/vim-jsonrpc; charset=utf-8\r\n"
+  " let s ..= "Content-Type: application/vscode-jsonrpc; charset=utf-8\r\n"
   " let s ..= "\r\n"
   " let s ..= '{"method":"echo","jsonrpc":"2.0","params":{"m":"raw-message"}}'
   " call ch_sendraw(ch, s)
@@ -2690,7 +2759,47 @@ func LspTests(port)
 endfunc
 
 func Test_channel_lsp_mode()
+  " The channel lsp mode test is flaky and gives the same error.
+  let g:giveup_same_error = 0
   call RunServer('test_channel_lsp.py', 'LspTests', [])
+endfunc
+
+func Test_error_callback_terminal()
+  CheckUnix
+  CheckFeature terminal
+  let g:out = ''
+  let g:error = ''
+
+  func! s:Out(channel, msg)
+      let g:out .= string(a:msg)
+  endfunc
+
+  func! s:Err(channel, msg)
+      let g:error .= string(a:msg)
+  endfunc
+
+  let buf = term_start(['sh'], #{term_finish: 'close', out_cb: 's:Out', err_cb: 's:Err', err_io: 'pipe'})
+  let job = term_getjob(buf)
+  let dict = job_info(job).channel->ch_info()
+
+  call assert_true(dict.id != 0)
+  call assert_equal('open', dict.status)
+  call assert_equal('open', dict.out_status)
+  call assert_equal('RAW', dict.out_mode)
+  call assert_equal('buffer', dict.out_io)
+  call assert_equal('open', dict.err_status)
+  call assert_equal('RAW', dict.err_mode)
+  call assert_equal('pipe', dict.err_io)
+  call term_sendkeys(buf, "XXXX\<cr>")
+  call term_wait(buf)
+  call term_sendkeys(buf, "exit\<cr>")
+  call term_wait(buf)
+  call assert_match('XXX.*exit', g:out)
+  call assert_match('sh:.*XXXX:.*not found', g:error)
+
+  delfunc s:Out
+  delfunc s:Err
+  unlet! g:out g:error
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

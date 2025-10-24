@@ -20,7 +20,9 @@ SCRIPTS_TINY = \
 	test24 \
 	test25 \
 	test26 \
-	test27
+	test27 \
+	test28 \
+	test29
 
 SCRIPTS_TINY_OUT = \
 	test10.out \
@@ -31,7 +33,9 @@ SCRIPTS_TINY_OUT = \
 	test24.out \
 	test25.out \
 	test26.out \
-	test27.out
+	test27.out \
+	test28.out \
+	test29.out
 
 # Tests for Vim9 script.
 TEST_VIM9 = \
@@ -40,11 +44,15 @@ TEST_VIM9 = \
 	test_vim9_class \
 	test_vim9_cmd \
 	test_vim9_disassemble \
+	test_vim9_enum \
 	test_vim9_expr \
 	test_vim9_fails \
 	test_vim9_func \
+	test_vim9_generics \
 	test_vim9_import \
-	test_vim9_script
+	test_vim9_python3 \
+	test_vim9_script \
+	test_vim9_typealias
 
 TEST_VIM9_RES = \
 	test_vim9_assign.res \
@@ -52,11 +60,15 @@ TEST_VIM9_RES = \
 	test_vim9_class.res \
 	test_vim9_cmd.res \
 	test_vim9_disassemble.res \
+	test_vim9_enum.res \
 	test_vim9_expr.res \
 	test_vim9_fails.res \
 	test_vim9_func.res \
+	test_vim9_generics.res \
 	test_vim9_import.res \
-	test_vim9_script.res
+	test_vim9_python3.res \
+	test_vim9_script.res \
+	test_vim9_typealias.res
 
 # Benchmark scripts.
 SCRIPTS_BENCH = test_bench_regexp.res
@@ -92,6 +104,7 @@ NEW_TESTS = \
 	test_cindent \
 	test_cjk_linebreak \
 	test_clientserver \
+	test_clipmethod \
 	test_close_count \
 	test_cmd_lists \
 	test_cmdline \
@@ -105,6 +118,7 @@ NEW_TESTS = \
 	test_conceal \
 	test_const \
 	test_cpoptions \
+	test_crash \
 	test_crypt \
 	test_cscope \
 	test_cursor_func \
@@ -138,6 +152,7 @@ NEW_TESTS = \
 	test_file_perm \
 	test_file_size \
 	test_filechanged \
+	test_filecopy \
 	test_fileformat \
 	test_filetype \
 	test_filter_cmd \
@@ -150,10 +165,15 @@ NEW_TESTS = \
 	test_fnameescape \
 	test_fnamemodify \
 	test_fold \
+	test_format \
 	test_functions \
 	test_function_lists \
 	test_ga \
 	test_getcwd \
+	test_gettext \
+	test_gettext_cp1251 \
+	test_gettext_utf8 \
+	test_gettext_make \
 	test_getvar \
 	test_gf \
 	test_glob2regpat \
@@ -194,7 +214,6 @@ NEW_TESTS = \
 	test_listlbr_utf8 \
 	test_lua \
 	test_makeencoding \
-	test_man \
 	test_map_functions \
 	test_mapping \
 	test_marks \
@@ -218,10 +237,22 @@ NEW_TESTS = \
 	test_normal \
 	test_number \
 	test_options \
+	test_options_all \
 	test_packadd \
 	test_partial \
 	test_paste \
 	test_perl \
+	test_plugin_comment \
+	test_plugin_glvs \
+	test_plugin_helptoc \
+	test_plugin_man \
+	test_plugin_matchparen \
+	test_plugin_tar \
+	test_plugin_termdebug \
+	test_plugin_tohtml \
+	test_plugin_tutor \
+	test_plugin_zip \
+	test_plugin_colorresp \
 	test_plus_arg_edit \
 	test_popup \
 	test_popupwin \
@@ -243,6 +274,7 @@ NEW_TESTS = \
 	test_regexp_utf8 \
 	test_registers \
 	test_reltime \
+	test_remote \
 	test_rename \
 	test_restricted \
 	test_retab \
@@ -270,6 +302,8 @@ NEW_TESTS = \
 	test_spell \
 	test_spell_utf8 \
 	test_spellfile \
+	test_spellrare \
+	test_stacktrace \
 	test_startup \
 	test_startup_utf8 \
 	test_stat \
@@ -283,6 +317,7 @@ NEW_TESTS = \
 	test_tab \
 	test_tabline \
 	test_tabpage \
+	test_tabpanel \
 	test_tagcase \
 	test_tagfunc \
 	test_tagjump \
@@ -300,7 +335,9 @@ NEW_TESTS = \
 	test_timers \
 	test_true_false \
 	test_trycatch \
+	test_tuple \
 	test_undo \
+	test_uniq \
 	test_unlet \
 	test_user_func \
 	test_usercommands \
@@ -313,14 +350,17 @@ NEW_TESTS = \
 	test_vimscript \
 	test_virtualedit \
 	test_visual \
+	test_wayland \
 	test_winbar \
 	test_winbuf_close \
 	test_window_cmd \
 	test_window_id \
 	test_windows_home \
+	test_winfixbuf \
 	test_wnext \
 	test_wordcount \
 	test_writefile \
+	test_xdg \
 	test_xxd \
 	test_alot_latin \
 	test_alot_utf8 \
@@ -355,6 +395,7 @@ NEW_TESTS_RES = \
 	test_cindent.res \
 	test_cjk_linebreak.res \
 	test_clientserver.res \
+	test_clipmethod.res \
 	test_close_count.res \
 	test_cmd_lists.res \
 	test_cmdline.res \
@@ -367,6 +408,7 @@ NEW_TESTS_RES = \
 	test_conceal.res \
 	test_const.res \
 	test_cpoptions.res \
+	test_crash.res \
 	test_crypt.res \
 	test_cscope.res \
 	test_cursor_func.res \
@@ -391,6 +433,7 @@ NEW_TESTS_RES = \
 	test_expr.res \
 	test_file_size.res \
 	test_filechanged.res \
+	test_filecopy.res \
 	test_fileformat.res \
 	test_filetype.res \
 	test_filter_cmd.res \
@@ -402,9 +445,14 @@ NEW_TESTS_RES = \
 	test_float_func.res \
 	test_fnameescape.res \
 	test_fold.res \
+	test_format.res \
 	test_functions.res \
 	test_function_lists.res \
 	test_getcwd.res \
+	test_gettext.res \
+	test_gettext_cp1251.res \
+	test_gettext_utf8.res \
+	test_gettext_make.res \
 	test_getvar.res \
 	test_gf.res \
 	test_gn.res \
@@ -442,7 +490,6 @@ NEW_TESTS_RES = \
 	test_listlbr_utf8.res \
 	test_lua.res \
 	test_makeencoding.res \
-	test_man.res \
 	test_map_functions.res \
 	test_mapping.res \
 	test_marks.res \
@@ -464,10 +511,22 @@ NEW_TESTS_RES = \
 	test_normal.res \
 	test_number.res \
 	test_options.res \
+	test_options_all.res \
 	test_packadd.res \
 	test_partial.res \
 	test_paste.res \
 	test_perl.res \
+	test_plugin_comment.res \
+	test_plugin_glvs.res \
+	test_plugin_helptoc.res \
+	test_plugin_man.res \
+	test_plugin_matchparen.res \
+	test_plugin_tar.res \
+	test_plugin_termdebug.res \
+	test_plugin_tohtml.res \
+	test_plugin_tutor.res \
+	test_plugin_zip.res \
+	test_plugin_colorresp.res \
 	test_plus_arg_edit.res \
 	test_popup.res \
 	test_popupwin.res \
@@ -485,6 +544,7 @@ NEW_TESTS_RES = \
 	test_recover.res \
 	test_regex_char_classes.res \
 	test_registers.res \
+	test_remote.res \
 	test_rename.res \
 	test_restricted.res \
 	test_retab.res \
@@ -507,6 +567,8 @@ NEW_TESTS_RES = \
 	test_spell.res \
 	test_spell_utf8.res \
 	test_spellfile.res \
+	test_spellrare.res \
+	test_stacktrace.res \
 	test_startup.res \
 	test_stat.res \
 	test_statusline.res \
@@ -518,6 +580,7 @@ NEW_TESTS_RES = \
 	test_system.res \
 	test_tab.res \
 	test_tabpage.res \
+	test_tabpanel.res \
 	test_tagjump.res \
 	test_taglist.res \
 	test_tcl.res \
@@ -533,7 +596,9 @@ NEW_TESTS_RES = \
 	test_timers.res \
 	test_true_false.res \
 	test_trycatch.res \
+	test_tuple.res \
 	test_undo.res \
+	test_uniq.res \
 	test_user_func.res \
 	test_usercommands.res \
 	test_vartabs.res \
@@ -542,13 +607,16 @@ NEW_TESTS_RES = \
 	test_vimscript.res \
 	test_virtualedit.res \
 	test_visual.res \
+	test_wayland.res \
 	test_winbar.res \
 	test_winbuf_close.res \
 	test_window_cmd.res \
 	test_window_id.res \
 	test_windows_home.res \
+	test_winfixbuf.res \
 	test_wordcount.res \
 	test_writefile.res \
+	test_xdg.res \
 	test_xxd.res \
 	test_alot_latin.res \
 	test_alot_utf8.res \

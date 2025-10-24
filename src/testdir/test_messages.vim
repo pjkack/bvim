@@ -1,10 +1,6 @@
 " Tests for :messages, :echomsg, :echoerr
 
-source check.vim
-source shared.vim
-source term_util.vim
-source view_util.vim
-source screendump.vim
+source util/screendump.vim
 
 func Test_messages()
   let oldmore = &more
@@ -162,8 +158,18 @@ func Test_echospace()
   call assert_equal(&columns - 12, v:echospace)
   set showcmd ruler
   call assert_equal(&columns - 29, v:echospace)
+  set showcmdloc=statusline
+  call assert_equal(&columns - 19, v:echospace)
+  set showcmdloc=tabline
+  call assert_equal(&columns - 19, v:echospace)
+  call assert_fails('set showcmdloc=leap', 'E474:')
+  call assert_equal(&columns - 19, v:echospace)
+  set showcmdloc=last
+  call assert_equal(&columns - 29, v:echospace)
+  call assert_fails('set showcmdloc=jump', 'E474:')
+  call assert_equal(&columns - 29, v:echospace)
 
-  set ruler& showcmd&
+  set ruler& showcmd& showcmdloc&
 endfunc
 
 func Test_warning_scroll()
@@ -201,6 +207,7 @@ endfunc
 " Test more-prompt (see :help more-prompt).
 func Test_message_more()
   CheckRunVimInTerminal
+
   let buf = RunVimInTerminal('', {'rows': 6})
   call term_sendkeys(buf, ":call setline(1, range(1, 100))\n")
 
@@ -313,6 +320,7 @@ endfunc
 
 " Test more-prompt scrollback
 func Test_message_more_scrollback()
+  CheckScreendump
   CheckRunVimInTerminal
 
   let lines =<< trim END
@@ -336,11 +344,72 @@ func Test_message_more_scrollback()
   call StopVimInTerminal(buf)
 endfunc
 
+func Test_message_not_cleared_after_mode()
+  CheckScreendump
+  CheckRunVimInTerminal
+
+  let lines =<< trim END
+      nmap <silent> gx :call DebugSilent('normal')<CR>
+      vmap <silent> gx :call DebugSilent('visual')<CR>
+      function DebugSilent(arg)
+          echomsg "from DebugSilent" a:arg
+      endfunction
+      set showmode
+      set cmdheight=1
+      call test_settime(1)
+      call setline(1, ['one', 'NoSuchFile', 'three'])
+  END
+  call writefile(lines, 'XmessageMode', 'D')
+  let buf = RunVimInTerminal('-S XmessageMode', {'rows': 10})
+
+  call term_sendkeys(buf, 'gx')
+  call TermWait(buf)
+  call VerifyScreenDump(buf, 'Test_message_not_cleared_after_mode_1', {})
+
+  " removing the mode message used to also clear the intended message
+  call term_sendkeys(buf, 'vEgx')
+  call TermWait(buf)
+  call VerifyScreenDump(buf, 'Test_message_not_cleared_after_mode_2', {})
+
+  " removing the mode message used to also clear the error message
+  call term_sendkeys(buf, ":set cmdheight=2\<CR>")
+  call term_sendkeys(buf, '2GvEgf')
+  call TermWait(buf)
+  call VerifyScreenDump(buf, 'Test_message_not_cleared_after_mode_3', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_mode_cleared_after_silent_message()
+  CheckScreendump
+  CheckRunVimInTerminal
+
+  let lines =<< trim END
+    edit XsilentMessageMode.txt
+    call setline(1, 'foobar')
+    autocmd TextChanged * silent update
+  END
+  call writefile(lines, 'XsilentMessageMode', 'D')
+  let buf = RunVimInTerminal('-S XsilentMessageMode', {'rows': 10})
+
+  call term_sendkeys(buf, 'v')
+  call TermWait(buf)
+  call VerifyScreenDump(buf, 'Test_mode_cleared_after_silent_message_1', {})
+
+  call term_sendkeys(buf, 'd')
+  call TermWait(buf)
+  call VerifyScreenDump(buf, 'Test_mode_cleared_after_silent_message_2', {})
+
+  call StopVimInTerminal(buf)
+  call delete('XsilentMessageMode.txt')
+endfunc
+
 " Test verbose message before echo command
 func Test_echo_verbose_system()
+  CheckScreendump
   CheckRunVimInTerminal
   CheckUnix    " needs the "seq" command
-  CheckNotMac  " doesn't use /tmp
+  CheckNotMac  " the macos TMPDIR is too long for snapshot testing
 
   let buf = RunVimInTerminal('', {'rows': 10})
   call term_sendkeys(buf, ":4 verbose echo system('seq 20')\<CR>")
@@ -441,6 +510,29 @@ func Test_echo_string_partial()
   function CountSpaces()
   endfunction
   call assert_equal("function('CountSpaces', [{'ccccccccccc': ['ab', 'cd'], 'aaaaaaaaaaa': v:false, 'bbbbbbbbbbbb': ''}])", string(function('CountSpaces', [#{aaaaaaaaaaa: v:false, bbbbbbbbbbbb: '', ccccccccccc: ['ab', 'cd']}])))
+endfunc
+
+" Test that fileinfo is shown properly when 'cmdheight' has just decreased
+" due to switching tabpage and 'shortmess' doesn't contain 'o' or 'O'.
+func Test_fileinfo_tabpage_cmdheight()
+  CheckRunVimInTerminal
+
+  let content =<< trim END
+    set shortmess-=o
+    set shortmess-=O
+    set shortmess-=F
+    tabnew
+    set cmdheight=2
+    tabprev
+    edit Xfileinfo.txt
+  END
+
+  call writefile(content, 'Xtest_fileinfo_tabpage_cmdheight', 'D')
+  let buf = RunVimInTerminal('-S Xtest_fileinfo_tabpage_cmdheight', #{rows: 6})
+  call WaitForAssert({-> assert_match('^"Xfileinfo.txt" \[New\]', term_getline(buf, 6))})
+
+  " clean up
+  call StopVimInTerminal(buf)
 endfunc
 
 " Message output was previously overwritten by the fileinfo display, shown
@@ -589,5 +681,50 @@ func Test_echowin_showmode()
   call StopVimInTerminal(buf)
 endfunc
 
+func Test_messagesopt_history()
+  " After setting 'messagesopt' "history" to 2 and outputting a message 4 times
+  " with :echomsg, is the number of output lines of :messages 2?
+  set messagesopt=hit-enter,history:2
+  echomsg 'foo'
+  echomsg 'bar'
+  echomsg 'baz'
+  echomsg 'foobar'
+  call assert_equal(['baz', 'foobar'], GetMessages())
+
+  " When the number of messages is 10 and 'messagesopt' "history" is changed to
+  " 5, is the number of output lines of :messages 5?
+  set messagesopt=hit-enter,history:10
+  for num in range(1, 10)
+    echomsg num
+  endfor
+  set messagesopt=hit-enter,history:5
+  call assert_equal(5, len(GetMessages()))
+
+  " Check empty list
+  set messagesopt=hit-enter,history:0
+  call assert_true(empty(GetMessages()))
+
+  set messagesopt&
+endfunc
+
+func Test_messagesopt_wait()
+  CheckRunVimInTerminal
+
+  let buf = RunVimInTerminal('', {'rows': 6, 'cols': 45})
+  call term_sendkeys(buf, ":set cmdheight=1\n")
+
+  " Check hit-enter prompt
+  call term_sendkeys(buf, ":set messagesopt=hit-enter,history:500\n")
+  call term_sendkeys(buf, ":echo 'foo' | echo 'bar' | echo 'baz'\n")
+  call WaitForAssert({-> assert_equal('Press ENTER or type command to continue', term_getline(buf, 6))})
+
+  " Check no hit-enter prompt when "wait:" is set
+  call term_sendkeys(buf, ":set messagesopt=wait:100,history:500\n")
+  call term_sendkeys(buf, ":echo 'foo' | echo 'bar' | echo 'baz'\n")
+  call WaitForAssert({-> assert_equal('                           0,0-1         All', term_getline(buf, 6))})
+
+  " clean up
+  call StopVimInTerminal(buf)
+endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -93,7 +93,7 @@ gui_mch_create_beval_area(
 
     if (mesg != NULL && mesgCB != NULL)
     {
-	iemsg(_(e_cannot_create_ballooneval_with_both_message_and_callback));
+	iemsg(e_cannot_create_ballooneval_with_both_message_and_callback);
 	return NULL;
     }
 
@@ -404,8 +404,7 @@ pointer_event(BalloonEval *beval, int x, int y, unsigned state)
 	}
 	else
 	{
-	    beval->timerID = g_timeout_add((guint)p_bdlay,
-		    &timeout_cb, beval);
+	    beval->timerID = g_timeout_add((guint)p_bdlay, &timeout_cb, beval);
 	}
     }
 }
@@ -1012,6 +1011,7 @@ cancelBalloon(BalloonEval *beval)
 createBalloonEvalWindow(BalloonEval *beval)
 {
     beval->balloonShell = gtk_window_new(GTK_WINDOW_POPUP);
+    gtk_window_set_transient_for(GTK_WINDOW(beval->balloonShell), GTK_WINDOW(gui.mainwin));
 
     gtk_widget_set_app_paintable(beval->balloonShell, TRUE);
     gtk_window_set_resizable(GTK_WINDOW(beval->balloonShell), FALSE);

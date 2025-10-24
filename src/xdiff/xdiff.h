@@ -66,6 +66,7 @@ extern "C" {
 
 /* merge output styles */
 #define XDL_MERGE_DIFF3 1
+#define XDL_MERGE_ZEALOUS_DIFF3 2
 
 // VIM: from stdint.h
 typedef unsigned char		uint8_t;
@@ -131,6 +132,7 @@ typedef struct s_bdiffparam {
 #endif
 
 #define xdl_malloc(x) lalloc((x), TRUE)
+#define xdl_calloc(n, sz) lalloc_clear(n*sz, TRUE)
 #define xdl_free(ptr) vim_free(ptr)
 #define xdl_realloc(ptr,x) vim_realloc((ptr),(x))
 

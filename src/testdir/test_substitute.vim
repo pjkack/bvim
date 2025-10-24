@@ -1,8 +1,32 @@
 " Tests for the substitute (:s) command
 
-source shared.vim
-source check.vim
-source screendump.vim
+source util/screendump.vim
+
+" NOTE: This needs to be the first test to be
+"       run in the file, since it depends on
+"       that the previous substitution atom
+"       was not yet set.
+"
+" recursive call of :s and sub-replace special
+" (did cause heap-use-after free in < v9.0.2121)
+func Test_aaaa_substitute_expr_recursive_special()
+  func R()
+    " FIXME: leaving out the 'n' flag leaks memory, why?
+    %s/./\='.'/gn
+  endfunc
+  new Xfoobar_UAF
+  put ='abcdef'
+  let bufnr = bufnr('%')
+  try
+    silent! :s/./~\=R()/0
+    "call assert_fails(':s/./~\=R()/0', 'E939:')
+    let @/='.'
+    ~g
+  catch /^Vim\%((\a\+)\)\=:E565:/
+  endtry
+  delfunc R
+  exe bufnr .. "bw!"
+endfunc
 
 func Test_multiline_subst()
   enew!
@@ -148,6 +172,15 @@ func Test_substitute_repeat()
   bwipe!
 endfunc
 
+" Test :s with ? as delimiter.
+func Test_substitute_question_delimiter()
+  new
+  call setline(1, '??:??')
+  %s?\?\??!!?g
+  call assert_equal('!!:!!', getline(1))
+  bwipe!
+endfunc
+
 " Test %s/\n// which is implemented as a special case to use a
 " more efficient join rather than doing a regular substitution.
 func Test_substitute_join()
@@ -206,6 +239,7 @@ func Test_substitute_count()
   call assert_equal(['foo foo', 'foo foo', 'foo foo', 'bar foo', 'bar foo'],
         \           getline(1, '$'))
 
+  call assert_fails('s/./b/2147483647', 'E1510:')
   bwipe!
 endfunc
 
@@ -692,6 +726,7 @@ func Test_sub_cmd_9()
 endfunc
 
 func Test_sub_highlight_zero_match()
+  CheckScreendump
   CheckRunVimInTerminal
 
   let lines =<< trim END
@@ -770,7 +805,7 @@ func Test_replace_keeppatterns()
   a
 foobar
 
-substitute foo asdf
+substitute foo asdf foo
 
 one two
 .
@@ -779,21 +814,26 @@ one two
   /^substitute
   s/foo/bar/
   call assert_equal('foo', @/)
-  call assert_equal('substitute bar asdf', getline('.'))
+  call assert_equal('substitute bar asdf foo', getline('.'))
 
   /^substitute
   keeppatterns s/asdf/xyz/
   call assert_equal('^substitute', @/)
-  call assert_equal('substitute bar xyz', getline('.'))
+  call assert_equal('substitute bar xyz foo', getline('.'))
+
+  /^substitute
+  &
+  call assert_equal('^substitute', @/)
+  call assert_equal('substitute bar xyz bar', getline('.'))
 
   exe "normal /bar /e\<CR>"
   call assert_equal(15, col('.'))
   normal -
   keeppatterns /xyz
   call assert_equal('bar ', @/)
-  call assert_equal('substitute bar xyz', getline('.'))
+  call assert_equal('substitute bar xyz bar', getline('.'))
   exe "normal 0dn"
-  call assert_equal('xyz', getline('.'))
+  call assert_equal('xyz bar', getline('.'))
 
   close!
 endfunc
@@ -1414,6 +1454,21 @@ func Test_substitute_short_cmd()
   bw!
 endfunc
 
+" Check handling expanding "~" resulting in extremely long text.
+" FIXME: disabled, it takes too long to run on CI
+"func Test_substitute_tilde_too_long()
+"  enew!
+"
+"  s/.*/ixxx
+"  s//~~~~~~~~~AAAAAAA@(
+"
+"  " Either fails with "out of memory" or "text too long".
+"  " This can take a long time.
+"  call assert_fails('sil! norm &&&&&&&&&', ['E1240:\|E342:'])
+"
+"  bwipe!
+"endfunc
+
 " This should be done last to reveal a memory leak when vim_regsub_both() is
 " called to evaluate an expression but it is not used in a second call.
 func Test_z_substitute_expr_leak()
@@ -1422,6 +1477,53 @@ func Test_z_substitute_expr_leak()
   endfunc
   silent! s/\%')/\=SubExpr()
   delfunc SubExpr
+endfunc
+
+func Test_substitute_expr_switch_win()
+  func R()
+    wincmd x
+    return 'XXXX'
+  endfunc
+  new Xfoobar
+  let bufnr = bufnr('%')
+  put ='abcdef'
+  silent! s/\%')/\=R()
+  call assert_fails(':%s/./\=R()/g', 'E565:')
+  delfunc R
+  exe bufnr .. "bw!"
+endfunc
+
+" recursive call of :s using test-replace special
+func Test_substitute_expr_recursive()
+  func Q()
+    %s/./\='foobar'/gn
+    return "foobar"
+  endfunc
+  func R()
+    %s/./\=Q()/g
+  endfunc
+  new Xfoobar_UAF
+  let bufnr = bufnr('%')
+  put ='abcdef'
+  silent! s/./\=R()/g
+  call assert_fails(':%s/./\=R()/g', 'E565:')
+  delfunc R
+  delfunc Q
+  exe bufnr .. "bw!"
+endfunc
+
+" Test for changing 'cpo' in a substitute expression
+func Test_substitute_expr_cpo()
+  func XSubExpr()
+    set cpo=
+    return 'x'
+  endfunc
+
+  let save_cpo = &cpo
+  call assert_equal('xxx', substitute('abc', '.', '\=XSubExpr()', 'g'))
+  call assert_equal(save_cpo, &cpo)
+
+  delfunc XSubExpr
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

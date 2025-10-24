@@ -412,8 +412,8 @@ msgstr " Fuldførelse af brugerdefineret (^U^N^P)"
 msgid " Omni completion (^O^N^P)"
 msgstr " Fuldførelse af omni (^O^N^P)"
 
-msgid " Spelling suggestion (s^N^P)"
-msgstr " Staveforslag (s^N^P)"
+msgid " Spelling suggestion (^S^N^P)"
+msgstr " Staveforslag (^S^N^P)"
 
 msgid " Keyword Local completion (^N^P)"
 msgstr " Fuldførelse af nøgleord local (^N^P)"
@@ -3968,7 +3968,7 @@ msgstr "linje %4ld:"
 msgid "E354: Invalid register name: '%s'"
 msgstr "E354: Ugyldigt registernavn: '%s'"
 
-msgid "Messages maintainer: Bram Moolenaar <Bram@vim.org>"
+msgid "Messages maintainer: The Vim Project"
 msgstr "Oversætter: scootergrisen"
 
 msgid "Interrupt: "

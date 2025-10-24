@@ -226,7 +226,7 @@ lalloc(size_t size, int message)
     {
 	// Don't hide this message
 	emsg_silent = 0;
-	iemsg(_(e_internal_error_lalloc_zero));
+	iemsg(e_internal_error_lalloc_zero);
 	return NULL;
     }
 
@@ -580,6 +580,7 @@ free_all_mem(void)
 # ifdef FEAT_EVAL
     free_resub_eval_result();
 # endif
+    free_vbuf();
 }
 #endif
 
@@ -769,7 +770,10 @@ ga_concat_strings(garray_T *gap, char *sep)
     char_u	*p;
 
     for (i = 0; i < gap->ga_len; ++i)
-	len += (int)STRLEN(((char_u **)(gap->ga_data))[i]) + sep_len;
+	len += (int)STRLEN(((char_u **)(gap->ga_data))[i]);
+
+    if (gap->ga_len > 1)
+	len += (gap->ga_len - 1) * sep_len;
 
     s = alloc(len + 1);
     if (s == NULL)

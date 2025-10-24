@@ -1239,10 +1239,10 @@ browse_destroy_cb(GtkWidget *widget UNUSED)
  * dflt				default name
  * ext				not used (extension added)
  * initdir			initial directory, NULL for current dir
- * filter			not used (file name filter)
+ * filter			file name filter
  */
     char_u *
-gui_mch_browse(int saving UNUSED,
+gui_mch_browse(int saving,
 	       char_u *title,
 	       char_u *dflt,
 	       char_u *ext UNUSED,
@@ -1790,6 +1790,8 @@ gui_mch_dialog(int	type,	    // type of dialog
     dialog = create_message_dialog(type, title, message);
     dialoginfo.dialog = GTK_DIALOG(dialog);
     dialog_add_buttons(GTK_DIALOG(dialog), buttons);
+    gtk_window_set_type_hint(GTK_WINDOW(dialog),
+			     GDK_WINDOW_TYPE_HINT_POPUP_MENU);
 
     if (textfield != NULL)
     {

@@ -1,8 +1,5 @@
 " Tests for the writefile() function and some :write commands.
 
-source check.vim
-source term_util.vim
-
 func Test_writefile()
   let f = tempname()
   call writefile(["over", "written"], f, "bD")
@@ -173,7 +170,7 @@ func Test_writefile_autowrite()
   next
   call assert_equal(['aaa'], readfile('Xa'))
   call setline(1, 'bbb')
-  call assert_fails('edit XX')
+  call assert_fails('edit XX', 'E37: No write since last change (add ! to override)')
   call assert_false(filereadable('Xb'))
 
   set autowriteall
@@ -975,6 +972,29 @@ func Test_wq_quitpre_autocommand()
   bwipe!
   unlet g:seq
   call delete('Xsomefile')
+endfunc
+
+func Test_write_with_xattr_support()
+  CheckLinux
+  CheckFeature xattr
+  CheckExecutable setfattr
+
+  let contents = ["file with xattrs", "line two"]
+  call writefile(contents, 'Xwattr.txt', 'D')
+  " write a couple of xattr
+  call system('setfattr -n user.cookie -v chocolate Xwattr.txt')
+  call system('setfattr -n user.frieda -v bar Xwattr.txt')
+  call system('setfattr -n user.empty Xwattr.txt')
+
+  set backupcopy=no writebackup& backup&
+  sp Xwattr.txt
+  w
+  $r! getfattr -d %
+  let expected = ['file with xattrs', 'line two', '# file: Xwattr.txt', 'user.cookie="chocolate"', 'user.empty=""', 'user.frieda="bar"', '']
+  call assert_equal(expected, getline(1,'$'))
+
+  set backupcopy&
+  bw!
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -22,7 +22,7 @@
  * - Add a #define below.
  * - Add a message in the table above ex_version().
  * - Add a string to f_has().
- * - Add a feature to ":help feature-list" in doc/eval.txt.
+ * - Add a feature to ":help feature-list" in doc/builtin.txt.
  * - Add feature to ":help +feature-list" in doc/various.txt.
  * - Add comment for the documentation of commands that use the feature.
  */
@@ -138,11 +138,6 @@
  */
 
 /*
- * Message history is fixed at 200 messages.
- */
-#define MAX_MSG_HIST_LEN 200
-
-/*
  * +folding		Fold lines.
  */
 #ifdef FEAT_NORMAL
@@ -241,7 +236,7 @@
 /*
  * +cscope		Unix only: Cscope support.
  */
-#if defined(UNIX) && defined(FEAT_HUGE) && !defined(FEAT_CSCOPE) && !defined(MACOS_X)
+#if defined(UNIX) && defined(FEAT_HUGE) && defined(ENABLE_CSCOPE)
 # define FEAT_CSCOPE
 #endif
 
@@ -373,9 +368,9 @@
 #endif
 
 /*
- * libsodium - add cryptography support
+ * libsodium - add advanced cryptography support
  */
-#if defined(HAVE_SODIUM) && defined(FEAT_HUGE)
+#if defined(HAVE_SODIUM) && defined(FEAT_CRYPT)
 # define FEAT_SODIUM
 #endif
 
@@ -526,6 +521,13 @@
 	|| defined(FEAT_GUI_HAIKU) \
 	|| defined(FEAT_GUI_MSWIN))
 # define FEAT_GUI_TABLINE
+#endif
+
+/*
+ * +tabpanel		Tab SideBar
+ */
+#ifdef FEAT_HUGE
+# define FEAT_TABPANEL
 #endif
 
 /*
@@ -715,19 +717,31 @@
 
 /*
  * File names for:
- * FILETYPE_FILE	switch on file type detection
- * FTPLUGIN_FILE	switch on loading filetype plugin files
- * INDENT_FILE		switch on loading indent files
- * FTOFF_FILE		switch off file type detection
- * FTPLUGOF_FILE	switch off loading settings files
- * INDOFF_FILE		switch off loading indent files
+ * FILETYPE_FILE	used for file type detection
+ * FTPLUGIN_FILE	used for loading filetype plugin files
+ * INDENT_FILE		used for loading indent files
+ * FTOFF_FILE		used for file type detection
+ * FTPLUGOF_FILE	used for loading settings files
+ * INDOFF_FILE		used for loading indent files
  */
-// # define FILETYPE_FILE	"filetype.vim"
-// # define FTPLUGIN_FILE	"ftplugin.vim"
-// # define INDENT_FILE		"indent.vim"
-// # define FTOFF_FILE		"ftoff.vim"
-// # define FTPLUGOF_FILE	"ftplugof.vim"
-// # define INDOFF_FILE		"indoff.vim"
+#ifndef FILETYPE_FILE
+# define FILETYPE_FILE		"filetype.vim"
+#endif
+#ifndef FTPLUGIN_FILE
+# define FTPLUGIN_FILE		"ftplugin.vim"
+#endif
+#ifndef INDENT_FILE
+# define INDENT_FILE		"indent.vim"
+#endif
+#ifndef FTOFF_FILE
+# define FTOFF_FILE		"ftoff.vim"
+#endif
+#ifndef FTPLUGOF_FILE
+# define FTPLUGOF_FILE		"ftplugof.vim"
+#endif
+#ifndef INDOFF_FILE
+# define INDOFF_FILE		"indoff.vim"
+#endif
 
 /*
  * SYS_MENU_FILE	Name of the default menu.vim file.
@@ -799,6 +813,14 @@
 #endif
 
 /*
+ * +wayland		Unix only.  Include code for the Wayland protocol,
+ *                      only works if HAVE_WAYLAND is defined.
+ */
+#if defined(FEAT_NORMAL) && defined(UNIX)
+# define WANT_WAYLAND
+#endif
+
+/*
  * XSMP - X11 Session Management Protocol
  * It may be preferred to disable this if the GUI supports it (e.g.,
  * GNOME/KDE) and implement save-yourself etc. through that, but it may also
@@ -823,10 +845,10 @@
  * +mouse_gpm		Unix only: Include code for Linux console mouse
  *			handling.
  * +mouse_pterm		PTerm mouse support for QNX
- * +mouse_sgr		Unix only: Include code for for SGR-styled mouse.
+ * +mouse_sgr		Unix only: Include code for SGR-styled mouse.
  * +mouse_sysmouse	Unix only: Include code for FreeBSD and DragonFly
  *			console mouse handling.
- * +mouse_urxvt		Unix only: Include code for for urxvt mouse handling.
+ * +mouse_urxvt		Unix only: Include code for urxvt mouse handling.
  * +mouse		Any mouse support (any of the above enabled).
  *			Always included, since either FEAT_MOUSE_XTERM or
  *			DOS_MOUSE is defined.
@@ -898,6 +920,14 @@
 # endif
 #endif
 
+#if defined(FEAT_NORMAL) && defined(UNIX) \
+    && defined(HAVE_WAYLAND) && defined(WANT_WAYLAND)
+# define FEAT_WAYLAND_CLIPBOARD
+# ifndef FEAT_CLIPBOARD
+#  define FEAT_CLIPBOARD
+# endif
+#endif
+
 /*
  * +dnd		Drag'n'drop support.  Always used for the GTK+ GUI.
  */
@@ -916,10 +946,19 @@
 #endif
 
 /*
+ * +socketserver	 Use UNIX domain sockets for clientserver communication
+ */
+#if defined(UNIX) && (defined(WANT_SOCKETSERVER) || \
+	(defined(MAYBE_SOCKETSERVER) && !defined(HAVE_X11)))
+#define FEAT_SOCKETSERVER
+#endif
+
+/*
  * +clientserver	Remote control via the remote_send() function
  *			and the --remote argument
  */
-#if (defined(MSWIN) || defined(FEAT_XCLIPBOARD)) && defined(FEAT_EVAL)
+#if (defined(MSWIN) || defined(FEAT_XCLIPBOARD) || defined(FEAT_SOCKETSERVER)) \
+    && defined(FEAT_EVAL)
 # define FEAT_CLIENTSERVER
 #endif
 
@@ -1008,18 +1047,19 @@
  * +tgetent
  */
 
-/*
- * The Netbeans feature requires +eval.
- */
-#if !defined(FEAT_EVAL) && defined(FEAT_NETBEANS_INTG)
-# undef FEAT_NETBEANS_INTG
-#endif
 
 /*
  * The +channel feature requires +eval.
  */
 #if !defined(FEAT_EVAL) && defined(FEAT_JOB_CHANNEL)
 # undef FEAT_JOB_CHANNEL
+#endif
+
+/*
+ * The Netbeans feature requires +eval and +job_channel
+ */
+#if (!defined(FEAT_EVAL) || !defined(FEAT_JOB_CHANNEL)) && defined(FEAT_NETBEANS_INTG)
+# undef FEAT_NETBEANS_INTG
 #endif
 
 /*
@@ -1162,4 +1202,12 @@
 	|| defined(DYNAMIC_LUA) \
 	|| defined(FEAT_TERMINAL)
 # define USING_LOAD_LIBRARY
+#endif
+
+/*
+ * currently Unix only: XATTR support
+ */
+
+#if defined(FEAT_NORMAL) && defined(HAVE_XATTR) && !defined(MACOS_X)
+# define FEAT_XATTR
 #endif

@@ -241,13 +241,7 @@
 
 #if defined(FEAT_SPELL) || defined(PROTO)
 
-#ifndef UNIX		// it's in os_unix.h for Unix
-# include <time.h>	// for time_t
-#endif
-
-#ifndef UNIX		// it's in os_unix.h for Unix
-# include <time.h>	// for time_t
-#endif
+#include <time.h>	// for time_t
 
 // Special byte values for <byte>.  Some are only used in the tree for
 // postponed prefixes, some only in the other trees.  This is a bit messy...
@@ -356,7 +350,7 @@ spell_load_file(
     int		c = 0;
     int		res;
     int		did_estack_push = FALSE;
-    ESTACK_CHECK_DECLARATION
+    ESTACK_CHECK_DECLARATION;
 
     fd = mch_fopen((char *)fname, "r");
     if (fd == NULL)
@@ -397,7 +391,7 @@ spell_load_file(
 
     // Set sourcing_name, so that error messages mention the file name.
     estack_push(ETYPE_SPELL, fname, 0);
-    ESTACK_CHECK_SETUP
+    ESTACK_CHECK_SETUP;
     did_estack_push = TRUE;
 
     /*
@@ -588,7 +582,7 @@ endOK:
 	fclose(fd);
     if (did_estack_push)
     {
-	ESTACK_CHECK_NOW
+	ESTACK_CHECK_NOW;
 	estack_pop();
     }
 
@@ -2890,7 +2884,7 @@ spell_read_aff(spellinfo_T *spin, char_u *fname)
 		     || is_aff_rule(items, itemcnt, "REPSAL", 2))
 	    {
 		// Ignore REP/REPSAL count
-		if (!isdigit(*items[1]))
+		if (!SAFE_isdigit(*items[1]))
 		    smsg(_("Expected REP(SAL) count in %s line %d"),
 								 fname, lnum);
 	    }
@@ -2925,7 +2919,7 @@ spell_read_aff(spellinfo_T *spin, char_u *fname)
 		{
 		    // First line contains the count.
 		    found_map = TRUE;
-		    if (!isdigit(*items[1]))
+		    if (!SAFE_isdigit(*items[1]))
 			smsg(_("Expected MAP count in %s line %d"),
 								 fname, lnum);
 		}
@@ -3466,7 +3460,7 @@ spell_free_aff(afffile_T *aff)
     for (ht = &aff->af_pref; ; ht = &aff->af_suff)
     {
 	todo = (int)ht->ht_used;
-	for (hi = ht->ht_array; todo > 0; ++hi)
+	FOR_ALL_HASHTAB_ITEMS(ht, hi, todo)
 	{
 	    if (!HASHITEM_EMPTY(hi))
 	    {
@@ -5117,7 +5111,7 @@ write_vim_spell(spellinfo_T *spin, char_u *fname)
 	    hashitem_T	*hi;
 
 	    todo = (int)spin->si_commonwords.ht_used;
-	    for (hi = spin->si_commonwords.ht_array; todo > 0; ++hi)
+	    FOR_ALL_HASHTAB_ITEMS(&spin->si_commonwords, hi, todo)
 		if (!HASHITEM_EMPTY(hi))
 		{
 		    l = (int)STRLEN(hi->hi_key) + 1;
@@ -5877,7 +5871,7 @@ sug_write(spellinfo_T *spin, char_u *fname)
     {
 	// <sugline>: <sugnr> ... NUL
 	line = ml_get_buf(spin->si_spellbuf, lnum, FALSE);
-	len = (int)STRLEN(line) + 1;
+	len = ml_get_buf_len(spin->si_spellbuf, lnum) + 1;
 	if (fwrite(line, (size_t)len, (size_t)1, fd) == 0)
 	{
 	    emsg(_(e_error_while_writing));
@@ -6434,7 +6428,13 @@ init_spellfile(void)
 		l = (int)STRLEN(buf);
 		vim_snprintf((char *)buf + l, MAXPATHL - l, "/spell");
 		if (filewritable(buf) != 2)
-		    vim_mkdir(buf, 0755);
+		{
+		    if (vim_mkdir(buf, 0755) != 0)
+		    {
+			vim_free(buf);
+			return;
+		    }
+		}
 
 		l = (int)STRLEN(buf);
 		vim_snprintf((char *)buf + l, MAXPATHL - l,

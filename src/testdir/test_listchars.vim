@@ -1,8 +1,36 @@
 " Tests for 'listchars' display with 'list' and :list
 
-source check.vim
-source view_util.vim
-source screendump.vim
+source util/screendump.vim
+
+func Check_listchars(expected, end_lnum, end_scol = -1, leftcol = 0)
+  if a:leftcol > 0
+    let save_wrap = &wrap
+    set nowrap
+    call cursor(1, 1)
+    exe 'normal! ' .. a:leftcol .. 'zl'
+  endif
+
+  redraw!
+  for i in range(1, a:end_lnum)
+    if a:leftcol > 0
+      let col = virtcol2col(0, i, a:leftcol)
+      let col += getline(i)->strpart(col - 1, 1, v:true)->len()
+      call cursor(i, col)
+      redraw
+      call assert_equal(a:leftcol, winsaveview().leftcol)
+    else
+      call cursor(i, 1)
+    end
+
+    let end_scol = a:end_scol < 0 ? '$'->virtcol() - a:leftcol : a:end_scol
+    call assert_equal([a:expected[i - 1]->strcharpart(a:leftcol)],
+          \ ScreenLines(i, end_scol))
+  endfor
+
+  if a:leftcol > 0
+    let &wrap = save_wrap
+  endif
+endfunc
 
 func Test_listchars()
   enew!
@@ -24,11 +52,8 @@ func Test_listchars()
 	      \ 'dd........ee<<>-$',
 	      \ '<$'
 	      \ ]
-  redraw!
-  for i in range(1, 5)
-    call cursor(i, 1)
-    call assert_equal([expected[i - 1]], ScreenLines(i, '$'->virtcol()))
-  endfor
+  call Check_listchars(expected, 5)
+  call Check_listchars(expected, 4, -1, 5)
 
   set listchars-=trail:<
   let expected = [
@@ -38,11 +63,8 @@ func Test_listchars()
 	      \ 'dd........ee..>-$',
 	      \ '.$'
 	      \ ]
-  redraw!
-  for i in range(1, 5)
-    call cursor(i, 1)
-    call assert_equal([expected[i - 1]], ScreenLines(i, virtcol('$')))
-  endfor
+  call Check_listchars(expected, 5)
+  call Check_listchars(expected, 4, -1, 5)
 
   " tab with 3rd character.
   set listchars-=tab:>-
@@ -54,11 +76,8 @@ func Test_listchars()
 	      \ 'dd........ee--<>$',
 	      \ '-$'
 	      \ ]
-  redraw!
-  for i in range(1, 5)
-    call cursor(i, 1)
-    call assert_equal([expected[i - 1]], ScreenLines(i, virtcol('$')))
-  endfor
+  call Check_listchars(expected, 5)
+  call Check_listchars(expected, 4, -1, 5)
 
   " tab with 3rd character and linebreak set
   set listchars-=tab:<=>
@@ -71,11 +90,7 @@ func Test_listchars()
 	      \ 'dd........ee--<>$',
 	      \ '-$'
 	      \ ]
-  redraw!
-  for i in range(1, 5)
-    call cursor(i, 1)
-    call assert_equal([expected[i - 1]], ScreenLines(i, virtcol('$')))
-  endfor
+  call Check_listchars(expected, 5)
   set nolinebreak
   set listchars-=tab:<·>
   set listchars+=tab:<=>
@@ -88,11 +103,8 @@ func Test_listchars()
 	      \ 'dd........ee..<>$',
 	      \ '.$'
 	      \ ]
-  redraw!
-  for i in range(1, 5)
-    call cursor(i, 1)
-    call assert_equal([expected[i - 1]], ScreenLines(i, virtcol('$')))
-  endfor
+  call Check_listchars(expected, 5)
+  call Check_listchars(expected, 4, -1, 5)
 
   set listchars-=tab:<=>
   set listchars+=tab:>-
@@ -110,7 +122,8 @@ func Test_listchars()
 	      \ '..fff>--<<$',
 	      \ '>-------gg>-----$',
 	      \ '.....h>-$',
-	      \ 'iii<<<<><<$', '$'], l)
+	      \ 'iii<<<<><<$',
+	      \ '$'], l)
 
   " Test lead and trail
   normal ggdG
@@ -132,14 +145,10 @@ func Test_listchars()
 	      \ 'h<<<<<<<<<<<$',
 	      \ '<<<<<<<<<<<<$',
 	      \ '>>>>0xx0<<<<$',
-        \ '$'
+	      \ '$'
 	      \ ]
-  redraw!
-  for i in range(1, 5)
-    call cursor(i, 1)
-    call assert_equal([expected[i - 1]], ScreenLines(i, virtcol('$')))
-  endfor
-
+  call Check_listchars(expected, 6)
+  call Check_listchars(expected, 5, -1, 6)
   call assert_equal(expected, split(execute("%list"), "\n"))
 
   " Test multispace
@@ -162,14 +171,10 @@ func Test_listchars()
 	      \ ' hyYzZyYzZyY$',
 	      \ 'yYzZyYzZyYj $',
 	      \ 'yYzZ0yY0yYzZ$',
-        \ '$'
+	      \ '$'
 	      \ ]
-  redraw!
-  for i in range(1, 5)
-    call cursor(i, 1)
-    call assert_equal([expected[i - 1]], ScreenLines(i, virtcol('$')))
-  endfor
-
+  call Check_listchars(expected, 6)
+  call Check_listchars(expected, 5, -1, 6)
   call assert_equal(expected, split(execute("%list"), "\n"))
 
   " Test leadmultispace + multispace
@@ -192,15 +197,14 @@ func Test_listchars()
 	      \ ' hyYzZyYzZyY$',
 	      \ '.-+*.-+*.-j $',
 	      \ '.-+*0yY0yYzZ$',
-        \ '$'
+	      \ '$'
 	      \ ]
-  redraw!
   call assert_equal('eol:$,multispace:yYzZ,nbsp:S,leadmultispace:.-+*', &listchars)
-  for i in range(1, 5)
-    call cursor(i, 1)
-    call assert_equal([expected[i - 1]], ScreenLines(i, virtcol('$')))
-  endfor
-
+  call Check_listchars(expected, 6)
+  call Check_listchars(expected, 5, -1, 1)
+  call Check_listchars(expected, 5, -1, 2)
+  call Check_listchars(expected, 5, -1, 3)
+  call Check_listchars(expected, 5, -1, 6)
   call assert_equal(expected, split(execute("%list"), "\n"))
 
   " Test leadmultispace without multispace
@@ -223,16 +227,14 @@ func Test_listchars()
 	      \ '+h>>>>>>>>>>$',
 	      \ '.-+*.-+*.-j>$',
 	      \ '.-+*0++0>>>>$',
-        \ '$',
+	      \ '$'
 	      \ ]
-
-  redraw!
   call assert_equal('eol:$,nbsp:S,leadmultispace:.-+*,space:+,trail:>,eol:$', &listchars)
-  for i in range(1, 5)
-    call cursor(i, 1)
-    call assert_equal([expected[i - 1]], ScreenLines(i, virtcol('$')))
-  endfor
-
+  call Check_listchars(expected, 6)
+  call Check_listchars(expected, 5, -1, 1)
+  call Check_listchars(expected, 5, -1, 2)
+  call Check_listchars(expected, 5, -1, 3)
+  call Check_listchars(expected, 5, -1, 6)
   call assert_equal(expected, split(execute("%list"), "\n"))
 
   " Test leadmultispace only
@@ -255,15 +257,16 @@ func Test_listchars()
 	      \ ' h          ',
 	      \ '.-+*.-+*.-j ',
 	      \ '.-+*0  0    ',
-        \ ' ',
+	      \ ' '
 	      \ ]
-  redraw!
   call assert_equal('leadmultispace:.-+*', &listchars)
-  for i in range(1, 5)
-    call cursor(i, 1)
-    call assert_equal([expected[i - 1]], ScreenLines(i, 12))
-  endfor
+  call Check_listchars(expected, 5, 12)
   call assert_equal(expected, split(execute("%list"), "\n"))
+
+  " Changing the value of 'ambiwidth' twice shouldn't cause double-free when
+  " "leadmultispace" is specified.
+  set ambiwidth=double
+  set ambiwidth&
 
   " Test leadmultispace and lead and space
   normal ggdG
@@ -286,14 +289,14 @@ func Test_listchars()
 	      \ '<h----------$',
 	      \ '.-+*.-+*.-j-$',
 	      \ '.-+*0--0----$',
-        \ '$',
+	      \ '$'
 	      \ ]
-  redraw!
   call assert_equal('eol:$,lead:<,space:-,leadmultispace:.-+*', &listchars)
-  for i in range(1, 5)
-    call cursor(i, 1)
-    call assert_equal([expected[i - 1]], ScreenLines(i, virtcol('$')))
-  endfor
+  call Check_listchars(expected, 6)
+  call Check_listchars(expected, 5, -1, 1)
+  call Check_listchars(expected, 5, -1, 2)
+  call Check_listchars(expected, 5, -1, 3)
+  call Check_listchars(expected, 5, -1, 6)
   call assert_equal(expected, split(execute("%list"), "\n"))
 
   " the last occurrence of 'multispace:' is used
@@ -307,15 +310,11 @@ func Test_listchars()
 	      \ 'xhXyYXyYXyYX$',
 	      \ 'XyYXyYXyYXjx$',
 	      \ 'XyYX0Xy0XyYX$',
-        \ '$'
+	      \ '$'
 	      \ ]
-  redraw!
   call assert_equal('eol:$,multispace:yYzZ,space:x,multispace:XyY', &listchars)
-  for i in range(1, 5)
-    call cursor(i, 1)
-    call assert_equal([expected[i - 1]], ScreenLines(i, virtcol('$')))
-  endfor
-
+  call Check_listchars(expected, 6)
+  call Check_listchars(expected, 5, -1, 6)
   call assert_equal(expected, split(execute("%list"), "\n"))
 
   set listchars+=lead:>,trail:<
@@ -326,14 +325,10 @@ func Test_listchars()
 	      \ '>h<<<<<<<<<<$',
 	      \ '>>>>>>>>>>j<$',
 	      \ '>>>>0Xy0<<<<$',
-        \ '$'
+	      \ '$'
 	      \ ]
-  redraw!
-  for i in range(1, 5)
-    call cursor(i, 1)
-    call assert_equal([expected[i - 1]], ScreenLines(i, virtcol('$')))
-  endfor
-
+  call Check_listchars(expected, 6)
+  call Check_listchars(expected, 5, -1, 6)
   call assert_equal(expected, split(execute("%list"), "\n"))
 
   " removing 'multispace:'
@@ -346,14 +341,10 @@ func Test_listchars()
 	      \ '>h<<<<<<<<<<$',
 	      \ '>>>>>>>>>>j<$',
 	      \ '>>>>0xx0<<<<$',
-        \ '$'
+	      \ '$'
 	      \ ]
-  redraw!
-  for i in range(1, 5)
-    call cursor(i, 1)
-    call assert_equal([expected[i - 1]], ScreenLines(i, virtcol('$')))
-  endfor
-
+  call Check_listchars(expected, 6)
+  call Check_listchars(expected, 5, -1, 6)
   call assert_equal(expected, split(execute("%list"), "\n"))
 
   " test nbsp
@@ -365,15 +356,10 @@ func Test_listchars()
   call append(0, [ ">" .. nbsp .. "<" ])
 
   let expected = '>X< '
-
-  redraw!
-  call cursor(1, 1)
-  call assert_equal([expected], ScreenLines(1, virtcol('$')))
+  call Check_listchars([expected], 1)
 
   set listchars=nbsp:X
-  redraw!
-  call cursor(1, 1)
-  call assert_equal([expected], ScreenLines(1, virtcol('$')))
+  call Check_listchars([expected], 1)
 
   " test extends
   normal ggdG
@@ -383,16 +369,11 @@ func Test_listchars()
   call append(0, [ repeat('A', &columns + 1) ])
 
   let expected = repeat('A', &columns)
-
-  redraw!
-  call cursor(1, 1)
-  call assert_equal([expected], ScreenLines(1, &columns))
+  call Check_listchars([expected], 1, &columns)
 
   set list
   let expected = expected[:-2] . 'Z'
-  redraw!
-  call cursor(1, 1)
-  call assert_equal([expected], ScreenLines(1, &columns))
+  call Check_listchars([expected], 1, &columns)
 
   enew!
   set listchars& ff&
@@ -411,19 +392,20 @@ func Test_listchars_unicode()
   let nbsp = nr2char(0xa0)
   call append(0, ["        a\tb c" .. nbsp .. "d  "])
   let expected = ['≡≢≣≡≢≣≡≢a←↔↔↔↔↔→b␣c≠d≡≢⇔']
-  redraw!
-  call cursor(1, 1)
-  call assert_equal(expected, ScreenLines(1, virtcol('$')))
+  call Check_listchars(expected, 1)
+  call Check_listchars(expected, 1, -1, 3)
+  call Check_listchars(expected, 1, -1, 13)
 
   set listchars=eol:\\u21d4,space:\\u2423,multispace:≡\\u2262\\U00002263,nbsp:\\U00002260,tab:←↔\\u2192
-  redraw!
-  call assert_equal(expected, ScreenLines(1, virtcol('$')))
+  call Check_listchars(expected, 1)
+  call Check_listchars(expected, 1, -1, 3)
+  call Check_listchars(expected, 1, -1, 13)
 
   set listchars+=lead:⇨,trail:⇦
   let expected = ['⇨⇨⇨⇨⇨⇨⇨⇨a←↔↔↔↔↔→b␣c≠d⇦⇦⇔']
-  redraw!
-  call cursor(1, 1)
-  call assert_equal(expected, ScreenLines(1, virtcol('$')))
+  call Check_listchars(expected, 1)
+  call Check_listchars(expected, 1, -1, 3)
+  call Check_listchars(expected, 1, -1, 13)
 
   let &encoding=oldencoding
   enew!
@@ -445,52 +427,52 @@ func Test_listchars_invalid()
   call assert_fails('set listchars=leadmultispace', 'E474:')
 
   " Too short
-  call assert_fails('set listchars=space:', 'E474:')
-  call assert_fails('set listchars=tab:x', 'E474:')
-  call assert_fails('set listchars=multispace:', 'E474:')
-  call assert_fails('set listchars=leadmultispace:', 'E474:')
+  call assert_fails('set listchars=space:', 'E1511:')
+  call assert_fails('set listchars=tab:x', 'E1511:')
+  call assert_fails('set listchars=multispace:', 'E1511:')
+  call assert_fails('set listchars=leadmultispace:', 'E1511:')
 
   " One occurrence too short
-  call assert_fails('set listchars=space:,space:x', 'E474:')
-  call assert_fails('set listchars=space:x,space:', 'E474:')
-  call assert_fails('set listchars=tab:x,tab:xx', 'E474:')
-  call assert_fails('set listchars=tab:xx,tab:x', 'E474:')
-  call assert_fails('set listchars=multispace:,multispace:x', 'E474:')
-  call assert_fails('set listchars=multispace:x,multispace:', 'E474:')
-  call assert_fails('set listchars=leadmultispace:,leadmultispace:x', 'E474:')
-  call assert_fails('set listchars=leadmultispace:x,leadmultispace:', 'E474:')
+  call assert_fails('set listchars=space:x,space:', 'E1511:')
+  call assert_fails('set listchars=space:,space:x', 'E1511:')
+  call assert_fails('set listchars=tab:xx,tab:x', 'E1511:')
+  call assert_fails('set listchars=tab:x,tab:xx', 'E1511:')
+  call assert_fails('set listchars=multispace:,multispace:x', 'E1511:')
+  call assert_fails('set listchars=multispace:x,multispace:', 'E1511:')
+  call assert_fails('set listchars=leadmultispace:,leadmultispace:x', 'E1511:')
+  call assert_fails('set listchars=leadmultispace:x,leadmultispace:', 'E1511:')
 
   " Too long
-  call assert_fails('set listchars=space:xx', 'E474:')
-  call assert_fails('set listchars=tab:xxxx', 'E474:')
+  call assert_fails('set listchars=space:xx', 'E1511:')
+  call assert_fails('set listchars=tab:xxxx', 'E1511:')
 
   " Has double-width character
-  call assert_fails('set listchars=space:·', 'E474:')
-  call assert_fails('set listchars=tab:·x', 'E474:')
-  call assert_fails('set listchars=tab:x·', 'E474:')
-  call assert_fails('set listchars=tab:xx·', 'E474:')
-  call assert_fails('set listchars=multispace:·', 'E474:')
-  call assert_fails('set listchars=multispace:xxx·', 'E474:')
-  call assert_fails('set listchars=leadmultispace:·', 'E474:')
-  call assert_fails('set listchars=leadmultispace:xxx·', 'E474:')
+  call assert_fails('set listchars=space:·', 'E1512:')
+  call assert_fails('set listchars=tab:·x', 'E1512:')
+  call assert_fails('set listchars=tab:x·', 'E1512:')
+  call assert_fails('set listchars=tab:xx·', 'E1512:')
+  call assert_fails('set listchars=multispace:·', 'E1512:')
+  call assert_fails('set listchars=multispace:xxx·', 'E1512:')
+  call assert_fails('set listchars=leadmultispace:·', 'E1512:')
+  call assert_fails('set listchars=leadmultispace:xxx·', 'E1512:')
 
   " Has control character
-  call assert_fails("set listchars=space:\x01", 'E474:')
-  call assert_fails("set listchars=tab:\x01x", 'E474:')
-  call assert_fails("set listchars=tab:x\x01", 'E474:')
-  call assert_fails("set listchars=tab:xx\x01", 'E474:')
-  call assert_fails("set listchars=multispace:\x01", 'E474:')
-  call assert_fails("set listchars=multispace:xxx\x01", 'E474:')
-  call assert_fails('set listchars=space:\\x01', 'E474:')
-  call assert_fails('set listchars=tab:\\x01x', 'E474:')
-  call assert_fails('set listchars=tab:x\\x01', 'E474:')
-  call assert_fails('set listchars=tab:xx\\x01', 'E474:')
-  call assert_fails('set listchars=multispace:\\x01', 'E474:')
-  call assert_fails('set listchars=multispace:xxx\\x01', 'E474:')
-  call assert_fails("set listchars=leadmultispace:\x01", 'E474:')
-  call assert_fails('set listchars=leadmultispace:\\x01', 'E474:')
-  call assert_fails("set listchars=leadmultispace:xxx\x01", 'E474:')
-  call assert_fails('set listchars=leadmultispace:xxx\\x01', 'E474:')
+  call assert_fails("set listchars=space:\x01", 'E1512:')
+  call assert_fails("set listchars=tab:\x01x", 'E1512:')
+  call assert_fails("set listchars=tab:x\x01", 'E1512:')
+  call assert_fails("set listchars=tab:xx\x01", 'E1512:')
+  call assert_fails("set listchars=multispace:\x01", 'E1512:')
+  call assert_fails("set listchars=multispace:xxx\x01", 'E1512:')
+  call assert_fails('set listchars=space:\\x01', 'E1512:')
+  call assert_fails('set listchars=tab:\\x01x', 'E1512:')
+  call assert_fails('set listchars=tab:x\\x01', 'E1512:')
+  call assert_fails('set listchars=tab:xx\\x01', 'E1512:')
+  call assert_fails('set listchars=multispace:\\x01', 'E1512:')
+  call assert_fails('set listchars=multispace:xxx\\x01', 'E1512:')
+  call assert_fails("set listchars=leadmultispace:\x01", 'E1512:')
+  call assert_fails('set listchars=leadmultispace:\\x01', 'E1512:')
+  call assert_fails("set listchars=leadmultispace:xxx\x01", 'E1512:')
+  call assert_fails('set listchars=leadmultispace:xxx\\x01', 'E1512:')
 
   enew!
   set ambiwidth& listchars& ff&
@@ -515,9 +497,7 @@ func Test_listchars_composing()
   let expected = [
         \ "_ \u3099^I \u309A=" .. nbsp1 .. "\u0302=" .. nbsp2 .. "\u0302$"
         \ ]
-  redraw!
-  call cursor(1, 1)
-  call assert_equal(expected, ScreenLines(1, virtcol('$')))
+  call Check_listchars(expected, 1)
   let &encoding=oldencoding
   enew!
   set listchars& ff&
@@ -689,5 +669,55 @@ func Test_listchars_foldcolumn()
   call StopVimInTerminal(buf)
 endfunc
 
+func Test_listchars_precedes_with_wide_char()
+  new
+  setlocal nowrap list listchars=eol:$,precedes:!
+  call setline(1, '123口456')
+  call assert_equal(['123口456$ '], ScreenLines(1, 10))
+  let attr = screenattr(1, 9)
+
+  normal! zl
+  call assert_equal(['!3口456$  '], ScreenLines(1, 10))
+  call assert_equal(attr, screenattr(1, 1))
+  normal! zl
+  call assert_equal(['!口456$   '], ScreenLines(1, 10))
+  call assert_equal(attr, screenattr(1, 1))
+  normal! zl
+  call assert_equal(['!<456$    '], ScreenLines(1, 10))
+  call assert_equal(attr, screenattr(1, 1))
+  call assert_equal(attr, screenattr(1, 2))
+  normal! zl
+  call assert_equal(['!456$     '], ScreenLines(1, 10))
+  call assert_equal(attr, screenattr(1, 1))
+  normal! zl
+  call assert_equal(['!56$      '], ScreenLines(1, 10))
+  call assert_equal(attr, screenattr(1, 1))
+  normal! zl
+  call assert_equal(['!6$       '], ScreenLines(1, 10))
+  call assert_equal(attr, screenattr(1, 1))
+
+  bw!
+endfunc
+
+func Test_listchars_precedes_with_tab()
+  new
+  setlocal nowrap list listchars=eol:$,precedes:!,tab:<->
+  call setline(1, "1234\t56")
+  let expected_line = '1234<-->56$ '
+  call assert_equal([expected_line], ScreenLines(1, 12))
+  let expected_attrs = mapnew(range(1, 12), 'screenattr(1, v:val)')
+  let attr = expected_attrs[-2]
+
+  for i in range(8)
+    normal! zl
+    let expected_line = '!' .. expected_line[2:] .. ' '
+    let expected_attrs = [attr] + expected_attrs[2:] + expected_attrs[-1:]
+    call assert_equal([expected_line], ScreenLines(1, 12))
+    let attrs = mapnew(range(1, 12), 'screenattr(1, v:val)')
+    call assert_equal(expected_attrs, attrs)
+  endfor
+
+  bw!
+endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -348,7 +348,10 @@ gui_ph_handle_timer_cursor(
 }
 
     static int
-gui_ph_handle_timer_timeout(PtWidget_t *widget, void *data, PtCallbackInfo_t *info)
+gui_ph_handle_timer_timeout(
+    PtWidget_t		*widget,
+    void		*data,
+    PtCallbackInfo_t	*info)
 {
     is_timeout = TRUE;
 
@@ -977,7 +980,7 @@ gui_ph_is_buffer_item(vimmenu_T *menu, vimmenu_T *parent)
 	if (mark != NULL)
 	{
 	    mark++;
-	    while (isdigit(*mark))
+	    while (SAFE_isdigit(*mark))
 		mark++;
 
 	    if (*mark == ')')
@@ -1400,7 +1403,7 @@ gui_mch_browse(
     char_u  *open_text = NULL;
 
     flags = 0;
-    memset(&file, 0, sizeof(file));
+    CLEAR_FIELD(file);
 
     default_path = alloc(MAXPATHL + 1 + NAME_MAX + 1);
     if (default_path != NULL)
@@ -1476,7 +1479,10 @@ gui_ph_dialog_close(int button, void *data)
 }
 
     static int
-gui_ph_dialog_text_enter(PtWidget_t *widget, void *data, PtCallbackInfo_t *info)
+gui_ph_dialog_text_enter(
+    PtWidget_t		*widget,
+    void		*data,
+    PtCallbackInfo_t	*info)
 {
     if (info->reason_subtype == Pt_EDIT_ACTIVATE)
 	gui_ph_dialog_close(1, data);
@@ -1578,8 +1584,8 @@ gui_mch_dialog(
 	    PtModalCtrl_t modal_ctrl;
 	    PtDialogInfo_t di;
 
-	    memset(&di, 0, sizeof(di));
-	    memset(&modal_ctrl, 0, sizeof(modal_ctrl));
+	    CLEAR_FIELD(di);
+	    CLEAR_FIELD(modal_ctrl);
 
 	    n = 0;
 	    PtSetArg(&args[n++], Pt_ARG_GROUP_ROWS_COLS, 0, 0);
@@ -1707,7 +1713,7 @@ gui_mch_iconify(void)
 {
     PhWindowEvent_t event;
 
-    memset(&event, 0, sizeof (event));
+    CLEAR_FIELD(event);
     event.event_f = Ph_WM_HIDE;
     event.event_state = Ph_WM_EVSTATE_HIDE;
     event.rid = PtWidgetRid(gui.vimWindow);
@@ -1723,7 +1729,7 @@ gui_mch_set_foreground(void)
 {
     PhWindowEvent_t event;
 
-    memset(&event, 0, sizeof (event));
+    CLEAR_FIELD(event);
     event.event_f = Ph_WM_TOFRONT;
     event.event_state = Ph_WM_EVSTATE_FFRONT;
     event.rid = PtWidgetRid(gui.vimWindow);
@@ -2545,7 +2551,7 @@ gui_mch_add_menu(vimmenu_T *menu, int index)
 
 	    if (menu->mnemonic != 0)
 	    {
-		PtAddHotkeyHandler(gui.vimWindow, tolower(menu->mnemonic),
+		PtAddHotkeyHandler(gui.vimWindow, SAFE_tolower(menu->mnemonic),
 			Pk_KM_Alt, 0, menu, gui_ph_handle_pulldown_menu);
 	    }
 	}
@@ -2829,7 +2835,7 @@ gui_ph_parse_font_name(
 	{
 	    while (*mark != NUL && *mark++ == ':')
 	    {
-		switch (tolower(*mark++))
+		switch (SAFE_tolower(*mark++))
 		{
 		    case 'a': *font_flags |= PF_STYLE_ANTIALIAS; break;
 		    case 'b': *font_flags |= PF_STYLE_BOLD; break;
@@ -2956,7 +2962,7 @@ gui_mch_get_font(char_u *vim_font_name, int report_error)
     }
 
     if (report_error)
-	semsg(e_unknown_font_str, vim_font_name);
+	semsg(_(e_unknown_font_str), vim_font_name);
 
     return FAIL;
 }

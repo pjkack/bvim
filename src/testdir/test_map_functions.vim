@@ -490,7 +490,71 @@ func Test_map_restore()
   call Check_ctrlb_map(dsimp, 0)
 
   nunmap <C-B>
+endfunc
 
+" Test restoring an <SID> mapping
+func Test_map_restore_sid()
+  func RestoreMap()
+    const d = maparg('<CR>', 'i', v:false, v:true)
+    iunmap <buffer> <CR>
+    call mapset('i', v:false, d)
+  endfunc
+
+  let mapscript =<< trim [CODE]
+    inoremap <silent><buffer> <SID>Return <C-R>=42<CR>
+    inoremap <script><buffer> <CR> <CR><SID>Return
+  [CODE]
+  call writefile(mapscript, 'Xmapscript', 'D')
+
+  new
+  source Xmapscript
+  inoremap <buffer> <C-B> <Cmd>call RestoreMap()<CR>
+  call feedkeys("i\<CR>\<*C-B>\<CR>", 'xt')
+  call assert_equal(['', '42', '42'], getline(1, '$'))
+
+  bwipe!
+  delfunc RestoreMap
+endfunc
+
+" Test restoring a mapping with a negative script ID
+func Test_map_restore_negative_sid()
+  let after =<< trim [CODE]
+    call assert_equal("\tLast set from --cmd argument",
+          \ execute('verbose nmap ,n')->trim()->split("\n")[-1])
+    let d = maparg(',n', 'n', 0, 1)
+    nunmap ,n
+    call assert_equal('No mapping found',
+          \ execute('verbose nmap ,n')->trim()->split("\n")[-1])
+    call mapset('n', 0, d)
+    call assert_equal("\tLast set from --cmd argument",
+          \ execute('verbose nmap ,n')->trim()->split("\n")[-1])
+    call writefile(v:errors, 'Xresult')
+    qall!
+  [CODE]
+
+  if RunVim([], after, '--clean --cmd "nmap ,n <Nop>"')
+    call assert_equal([], readfile('Xresult'))
+  endif
+  call delete('Xresult')
+endfunc
+
+" Check that restoring a mapping doesn't remove a mapping whose {rhs} matches
+" the restored mapping's {lhs}.
+func Test_map_restore_with_rhs_match_lhs()
+  nnoremap <F2> <F3>
+  nnoremap <F3> <F4>
+  call assert_equal('<F3>', maparg('<F2>', 'n'))
+  call assert_equal('<F4>', maparg('<F3>', 'n'))
+  let d = maparg('<F3>', 'n', v:false, v:true)
+  nunmap <F3>
+  call assert_equal('<F3>', maparg('<F2>', 'n'))
+  call assert_equal('', maparg('<F3>', 'n'))
+  call mapset(d)
+  call assert_equal('<F3>', maparg('<F2>', 'n'))
+  call assert_equal('<F4>', maparg('<F3>', 'n'))
+
+  nunmap <F2>
+  nunmap <F3>
 endfunc
 
 def Test_maplist()

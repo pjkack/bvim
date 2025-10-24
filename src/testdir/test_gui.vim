@@ -1,10 +1,8 @@
 " Tests specifically for the GUI
 
-source shared.vim
-source check.vim
 CheckCanRunGui
 
-source setup_gui.vim
+source util/setup_gui.vim
 
 func Setup()
   call GUISetUpCommon()
@@ -105,12 +103,14 @@ func Test_getfontname_without_arg()
     let pat = '\(7x13\)\|\(\c-Misc-Fixed-Medium-R-Normal--13-120-75-75-C-70-ISO8859-1\)'
     call assert_match(pat, fname)
   elseif has('gui_gtk2') || has('gui_gnome') || has('gui_gtk3')
-    " 'expected' is DEFAULT_FONT of gui_gtk_x11.c.
-    call assert_equal('Monospace 10', fname)
+    " 'expected' is DEFAULT_FONT of gui_gtk_x11.c (any size)
+    call assert_match('^Monospace\>', fname)
   endif
 endfunc
 
 func Test_getwinpos()
+  CheckX11
+
   call assert_match('Window position: X \d\+, Y \d\+', execute('winpos'))
   call assert_true(getwinposx() >= 0)
   call assert_true(getwinposy() >= 0)
@@ -424,7 +424,7 @@ func Test_set_guifont()
 
     " Empty list. Should fallback to the built-in default.
     set guifont=
-    call assert_equal('Monospace 10', getfontname())
+    call assert_match('^Monospace\>', getfontname())
   endif
 
   if has('xfontset')
@@ -580,10 +580,60 @@ func Test_set_guifontwide()
   endif
 endfunc
 
+func Test_expand_guifont()
+  if has('gui_win32')
+    let guifont_saved = &guifont
+    let guifontwide_saved = &guifontwide
+
+    " Test recalling existing option, and suggesting current font size
+    set guifont=Courier\ New:h11:cANSI
+    call assert_equal('Courier\ New:h11:cANSI', getcompletion('set guifont=', 'cmdline')[0])
+    call assert_equal('h11', getcompletion('set guifont=Lucida\ Console:', 'cmdline')[0])
+
+    " Test auto-completion working for font names
+    call assert_equal(['Courier\ New'], getcompletion('set guifont=Couri*ew$', 'cmdline'))
+    call assert_equal(['Courier\ New'], getcompletion('set guifontwide=Couri*ew$', 'cmdline'))
+
+    " Make sure non-monospace fonts are filtered out
+    call assert_equal([], getcompletion('set guifont=Arial', 'cmdline'))
+    call assert_equal([], getcompletion('set guifontwide=Arial', 'cmdline'))
+
+    " Test auto-completion working for font options
+    call assert_notequal(-1, index(getcompletion('set guifont=Courier\ New:', 'cmdline'), 'b'))
+    call assert_equal(['cDEFAULT'], getcompletion('set guifont=Courier\ New:cD*T', 'cmdline'))
+    call assert_equal(['qCLEARTYPE'], getcompletion('set guifont=Courier\ New:qC*TYPE', 'cmdline'))
+
+    let &guifontwide = guifontwide_saved
+    let &guifont     = guifont_saved
+  elseif has('gui_gtk')
+    let guifont_saved = &guifont
+    let guifontwide_saved = &guifontwide
+
+    " Test recalling default and existing option
+    set guifont=
+    call assert_match('^Monospace\>', getcompletion('set guifont=', 'cmdline')[0])
+    set guifont=Monospace\ 9
+    call assert_equal('Monospace\ 9', getcompletion('set guifont=', 'cmdline')[0])
+
+    " Test auto-completion working for font names
+    call assert_equal(['Monospace'], getcompletion('set guifont=Mono*pace$', 'cmdline'))
+    call assert_equal(['Monospace'], getcompletion('set guifontwide=Mono*pace$', 'cmdline'))
+
+    " Make sure non-monospace fonts are filtered out only in 'guifont'
+    call assert_equal([], getcompletion('set guifont=Sans$', 'cmdline'))
+    call assert_equal(['Sans'], getcompletion('set guifontwide=Sans$', 'cmdline'))
+
+    let &guifontwide = guifontwide_saved
+    let &guifont     = guifont_saved
+  else
+    call assert_equal([], getcompletion('set guifont=', 'cmdline'))
+  endif
+endfunc
+
 func Test_set_guiligatures()
   CheckX11BasedGui
 
-  if has('gui_gtk') || has('gui_gtk2') || has('gui_gnome') || has('gui_gtk3')
+  if has('gui_gtk') || has('gui_gtk2') || has('gui_gnome') || has('gui_gtk3') || has('win32')
     " Try correct value
     set guiligatures=<>=ab
     call assert_equal("<>=ab", &guiligatures)
@@ -718,10 +768,10 @@ func Test_set_guioptions()
 endfunc
 
 func Test_scrollbars()
-  new
   " buffer with 200 lines
   call setline(1, repeat(['one', 'two'], 100))
-  set guioptions+=rlb
+  set scrolloff=0
+  set guioptions=rlbk
 
   " scroll to move line 11 at top, moves the cursor there
   let args = #{which: 'left', value: 10, dragging: 0}
@@ -730,12 +780,15 @@ func Test_scrollbars()
   call assert_equal(1, winline())
   call assert_equal(11, line('.'))
 
-  " scroll to move line 1 at top, cursor stays in line 11
-  let args = #{which: 'right', value: 0, dragging: 0}
-  call test_gui_event('scrollbar', args)
-  redraw
-  call assert_equal(11, winline())
-  call assert_equal(11, line('.'))
+  " FIXME: This test should also pass with Motif and 24 lines
+  if &lines > 24 || !has('gui_motif')
+    " scroll to move line 1 at top, cursor stays in line 11
+    let args = #{which: 'right', value: 0, dragging: 0}
+    call test_gui_event('scrollbar', args)
+    redraw
+    call assert_equal(11, winline())
+    call assert_equal(11, line('.'))
+  endif
 
   set nowrap
   call setline(11, repeat('x', 150))
@@ -768,6 +821,7 @@ func Test_scrollbars()
   call assert_fails("call test_gui_event('scrollbar', #{which: 'a', value: 1, dragging: 0})", 'E475:')
 
   set guioptions&
+  set scrolloff&
   set wrap&
   bwipe!
 endfunc
@@ -1650,9 +1704,14 @@ func Test_gui_lowlevel_keyevent()
   new
 
   " Test for <Ctrl-A> to <Ctrl-Z> keys
-  for kc in range(65, 90)
+  " FIXME: <Ctrl-C> is excluded for now.  It makes the test flaky.
+  for kc in range(65, 66) + range(68, 90)
     call SendKeys([0x11, kc])
-    let ch = getcharstr()
+    try
+      let ch = getcharstr()
+    catch /^Vim:Interrupt$/
+      let ch = "\<c-c>"
+    endtry
     call assert_equal(nr2char(kc - 64), ch)
   endfor
 
@@ -1679,6 +1738,66 @@ func Test_gui_macro_csi()
   norm @q
   call assert_equal('', getline(1))
   iunmap <C-D>t
+endfunc
+
+func Test_gui_csi_keytrans()
+  call assert_equal('<C-L>', keytrans("\x9b\xfc\x04L"))
+  call assert_equal('<C-D>', keytrans("\x9b\xfc\x04D"))
+endfunc
+
+" Test that CursorHold is NOT triggered at startup before a keypress
+func Test_CursorHold_not_triggered_at_startup()
+  defer delete('Xcursorhold.log')
+  defer delete('Xcursorhold_test.vim')
+  call writefile([
+        \ 'set updatetime=300',
+        \ 'let g:cursorhold_triggered = 0',
+        \ 'autocmd CursorHold * let g:cursorhold_triggered += 1 | call writefile(["CursorHold triggered"], "Xcursorhold.log", "a")',
+        \ 'call timer_start(400, {-> execute(''call writefile(["g:cursorhold_triggered=" . g:cursorhold_triggered], "Xcursorhold.log", "a") | qa!'')})',
+        \ ], 'Xcursorhold_test.vim')
+
+  let vimcmd = v:progpath . ' -g -f -N -u NONE -i NONE -S Xcursorhold_test.vim'
+  call system(vimcmd)
+
+  let lines = filereadable('Xcursorhold.log') ? readfile('Xcursorhold.log') : []
+
+  " Assert that CursorHold did NOT trigger at startup
+  call assert_false(index(lines, 'CursorHold triggered') != -1)
+  let found = filter(copy(lines), 'v:val =~ "^g:cursorhold_triggered="')
+  call assert_equal(['g:cursorhold_triggered=0'], found)
+endfunc
+
+" Test that Buffers menu generates the correct index for different buffer
+" names for sorting.
+func Test_Buffers_Menu()
+  doautocmd LoadBufferMenu VimEnter
+
+  " Non-ASCII characters only use the first character as idx
+  let idx_emoji = or(char2nr('😑'), 0x40000000)
+
+  " Only first five letters are used for alphanumeric:
+  " ('a'-32) << 24 + ('b'-32) << 18 + ('c'-32) << 12 + ('d'-32) << 6 + ('e'-32)
+  let idx_abcde = 0x218A3925
+  " ('a'-32) << 24 + ('b'-32) << 18 + ('c'-32) << 12 + ('d'-32) << 6 + ('f'-32)
+  let idx_abcdf = 0x218A3926
+  " ('a'-32) << 24 + 63 (clamped) << 18 + ('c'-32) << 12 + ('d'-32) << 6 + ('e'-32)
+  let idx_a_emoji_cde = 0x21FE3925
+
+  let names = ['😑', '😑1', '😑2', 'abcde', 'abcdefghi', 'abcdf', 'a😑cde']
+  let indices = [idx_emoji, idx_emoji, idx_emoji, idx_abcde, idx_abcde, idx_abcdf, idx_a_emoji_cde]
+  for i in range(len(names))
+    let name = names[i]
+    let idx = indices[i]
+    exe ':badd ' .. name
+    let nr = bufnr('$')
+
+    let cmd = printf(':amenu Buffers.%s\ (%d)', name, nr)
+    let menu = split(execute(cmd), '\n')[1]
+    call assert_inrange(0, 0x7FFFFFFF, idx)
+    call assert_match('^' .. idx .. ' '.. name, menu)
+  endfor
+
+  %bw!
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

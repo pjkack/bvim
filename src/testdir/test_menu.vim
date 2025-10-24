@@ -1,9 +1,8 @@
 " Test that the system menu can be loaded.
 
-source check.vim
 CheckFeature menu
 
-source screendump.vim
+source util/screendump.vim
 
 func Test_load_menu()
   try
@@ -162,7 +161,7 @@ endfunc
 
 " Test for menu item completion in command line
 func Test_menu_expand()
-  " Create the menu itmes for test
+  " Create the menu items for test
   menu Dummy.Nothing lll
   for i in range(1, 4)
     let m = 'menu Xmenu.A' .. i .. '.A' .. i
@@ -481,13 +480,48 @@ func Test_popup_menu()
   unmenu PopUp
 endfunc
 
+func Test_popup_menu_truncated()
+  CheckNotGui
+
+  set mouse=a mousemodel=popup
+  aunmenu PopUp
+  for i in range(2 * &lines)
+    exe $'menu PopUp.{i} <Cmd>let g:res = {i}<CR>'
+  endfor
+
+  func LeftClickExpr(row, col)
+    call test_setmouse(a:row, a:col)
+    return "\<LeftMouse>"
+  endfunc
+
+  " Clicking at the bottom should place popup menu above click position.
+  " <RightRelease> should not select an item immediately.
+  let g:res = -1
+  call test_setmouse(&lines, 1)
+  nnoremap <expr><F2> LeftClickExpr(4, 1)
+  call feedkeys("\<RightMouse>\<RightRelease>\<F2>", 'tx')
+  call assert_equal(3, g:res)
+
+  " Clicking at the top should place popup menu below click position.
+  let g:res = -1
+  call test_setmouse(1, 1)
+  nnoremap <expr><F2> LeftClickExpr(5, 1)
+  call feedkeys("\<RightMouse>\<RightRelease>\<F2>", 'tx')
+  call assert_equal(3, g:res)
+
+  nunmap <F2>
+  delfunc LeftClickExpr
+  unlet g:res
+  aunmenu PopUp
+  set mouse& mousemodel&
+endfunc
+
 " Test for MenuPopup autocommand
 func Test_autocmd_MenuPopup()
   CheckNotGui
 
-  set mouse=a
-  set mousemodel=popup
-  aunmenu *
+  set mouse=a mousemodel=popup
+  aunmenu PopUp
   autocmd MenuPopup * exe printf(
     \ 'anoremenu PopUp.Foo <Cmd>let g:res = ["%s", "%s"]<CR>',
     \ expand('<afile>'), expand('<amatch>'))
@@ -590,6 +624,28 @@ func Test_unmenu_while_listing_menus()
   call term_sendkeys(buf, "G")
   call TermWait(buf, 50)
   call term_sendkeys(buf, "\<CR>")
+
+  call StopVimInTerminal(buf)
+endfunc
+
+" Test for opening a menu drawn in the cmdline area
+func Test_popupmenu_cmdline()
+  CheckScreendump
+  CheckRunVimInTerminal
+
+  let lines =<< trim END
+    set mousemodel=popup
+    menu PopUp.Test1 :<CR>
+    menu PopUp.Test2 :<CR>
+    menu PopUp.Test3 :<CR>
+    call setline(1, repeat(['abcde'], 5))
+  END
+  call writefile(lines, 'Xpopupcmdline', 'D')
+  let buf = RunVimInTerminal('-S Xpopupcmdline', {'rows': 4})
+
+  " cmdline area should be cleared when popupmenu that covered it is closed
+  call term_sendkeys(buf, "\<RightMouse>\<RightRelease>\<Esc>")
+  call VerifyScreenDump(buf, 'Test_popupmenu_cmdline_1', {})
 
   call StopVimInTerminal(buf)
 endfunc

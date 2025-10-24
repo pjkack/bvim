@@ -2616,8 +2616,8 @@ msgstr " Kompletigo difinita de uzanto (^U^N^P)"
 msgid " Omni completion (^O^N^P)"
 msgstr " Kompletigo Omni (^O^N^P)"
 
-msgid " Spelling suggestion (s^N^P)"
-msgstr " Sugesto de literumo (s^N^P)"
+msgid " Spelling suggestion (^S^N^P)"
+msgstr " Sugesto de literumo (^S^N^P)"
 
 msgid " Keyword Local completion (^N^P)"
 msgstr " Kompletigo loka de ŝlosilvorto (^N/^P)"
@@ -3814,7 +3814,7 @@ msgstr "linio %4ld:"
 msgid "E354: Invalid register name: '%s'"
 msgstr "E354: Nevalida nomo de reĝistro: '%s'"
 
-msgid "Messages maintainer: Bram Moolenaar <Bram@vim.org>"
+msgid "Messages maintainer: The Vim Project"
 msgstr "Flegado de mesaĝoj: Dominique PELLÉ <dominique.pelle@gmail.com>"
 
 msgid "Interrupt: "

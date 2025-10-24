@@ -13,6 +13,7 @@
 # include <wchar.h>	    // for towupper() and towlower()
 #endif
 
+static int parse_isopt(char_u *var, buf_T *buf, int only_check);
 static int win_nolbr_chartabsize(chartabsize_T *cts, int *headp);
 static unsigned nr2hex(unsigned c);
 
@@ -75,11 +76,8 @@ buf_init_chartab(
     int		global)		// FALSE: only set buf->b_chartab[]
 {
     int		c;
-    int		c2;
     char_u	*p;
     int		i;
-    int		tilde;
-    int		do_isalpha;
 
     if (global)
     {
@@ -135,9 +133,7 @@ buf_init_chartab(
     if (buf->b_p_lisp)
 	SET_CHARTAB(buf, '-');
 
-    // Walk through the 'isident', 'iskeyword', 'isfname' and 'isprint'
-    // options Each option is a list of characters, character numbers or
-    // ranges, separated by commas, e.g.: "200-210,x,#-178,-"
+    // Walk through the 'isident', 'iskeyword', 'isfname' and 'isprint' options.
     for (i = global ? 0 : 3; i <= 3; ++i)
     {
 	if (i == 0)
@@ -149,114 +145,152 @@ buf_init_chartab(
 	else	// i == 3
 	    p = buf->b_p_isk;	// fourth round: 'iskeyword'
 
-	while (*p)
-	{
-	    tilde = FALSE;
-	    do_isalpha = FALSE;
-	    if (*p == '^' && p[1] != NUL)
-	    {
-		tilde = TRUE;
-		++p;
-	    }
-	    if (VIM_ISDIGIT(*p))
-		c = getdigits(&p);
-	    else if (has_mbyte)
-		c = mb_ptr2char_adv(&p);
-	    else
-		c = *p++;
-	    c2 = -1;
-	    if (*p == '-' && p[1] != NUL)
-	    {
-		++p;
-		if (VIM_ISDIGIT(*p))
-		    c2 = getdigits(&p);
-		else if (has_mbyte)
-		    c2 = mb_ptr2char_adv(&p);
-		else
-		    c2 = *p++;
-	    }
-	    if (c <= 0 || c >= 256 || (c2 < c && c2 != -1) || c2 >= 256
-						 || !(*p == NUL || *p == ','))
-		return FAIL;
+	if (parse_isopt(p, buf, FALSE) == FAIL)
+	    return FAIL;
+    }
 
-	    if (c2 == -1)	// not a range
+    chartab_initialized = TRUE;
+    return OK;
+}
+
+/**
+ * Checks the format for the option settings 'iskeyword', 'isident', 'isfname'
+ * or 'isprint'.
+ * Returns FAIL if has an error, OK otherwise.
+ */
+	int
+check_isopt(char_u *var)
+{
+    return parse_isopt(var, NULL, TRUE);
+}
+
+    static int
+parse_isopt(
+	char_u	*var,
+	buf_T	*buf,
+	int	only_check)	// FALSE: refill g_chartab[]
+{
+    char_u	*p = var;
+    int		c;
+    int		c2;
+    int		tilde;
+    int		do_isalpha;
+    int		trail_comma;
+
+    // Parses the 'isident', 'iskeyword', 'isfname' and 'isprint' options.
+    // Each option is a list of characters, character numbers or ranges,
+    // separated by commas, e.g.: "200-210,x,#-178,-"
+    while (*p)
+    {
+	tilde = FALSE;
+	do_isalpha = FALSE;
+	if (*p == '^' && p[1] != NUL)
+	{
+	    tilde = TRUE;
+	    ++p;
+	}
+	if (VIM_ISDIGIT(*p))
+	    c = getdigits(&p);
+	else if (has_mbyte)
+	    c = mb_ptr2char_adv(&p);
+	else
+	    c = *p++;
+	c2 = -1;
+	if (*p == '-' && p[1] != NUL)
+	{
+	    ++p;
+	    if (VIM_ISDIGIT(*p))
+		c2 = getdigits(&p);
+	    else if (has_mbyte)
+		c2 = mb_ptr2char_adv(&p);
+	    else
+		c2 = *p++;
+	}
+	if (c <= 0 || c >= 256 || (c2 < c && c2 != -1) || c2 >= 256
+						  || !(*p == NUL || *p == ','))
+	    return FAIL;
+
+	trail_comma = *p == ',';
+	p = skip_to_option_part(p);
+	if (trail_comma && *p == NUL)
+	    // Trailing comma is not allowed.
+	    return FAIL;
+
+	if (only_check)
+	    continue;
+
+	if (c2 == -1)	// not a range
+	{
+	    /*
+	     * A single '@' (not "@-@"):
+	     * Decide on letters being ID/printable/keyword chars with
+	     * standard function isalpha(). This takes care of locale for
+	     * single-byte characters).
+	     */
+	    if (c == '@')
 	    {
-		/*
-		 * A single '@' (not "@-@"):
-		 * Decide on letters being ID/printable/keyword chars with
-		 * standard function isalpha(). This takes care of locale for
-		 * single-byte characters).
-		 */
-		if (c == '@')
-		{
-		    do_isalpha = TRUE;
-		    c = 1;
-		    c2 = 255;
-		}
-		else
-		    c2 = c;
+		do_isalpha = TRUE;
+		c = 1;
+		c2 = 255;
 	    }
-	    while (c <= c2)
+	    else
+		c2 = c;
+	}
+
+	while (c <= c2)
+	{
+	    // Use the MB_ functions here, because isalpha() doesn't
+	    // work properly when 'encoding' is "latin1" and the locale is
+	    // "C".
+	    if (!do_isalpha || MB_ISLOWER(c) || MB_ISUPPER(c))
 	    {
-		// Use the MB_ functions here, because isalpha() doesn't
-		// work properly when 'encoding' is "latin1" and the locale is
-		// "C".
-		if (!do_isalpha || MB_ISLOWER(c) || MB_ISUPPER(c))
+		if (var == p_isi)			// (re)set ID flag
 		{
-		    if (i == 0)			// (re)set ID flag
+		    if (tilde)
+			g_chartab[c] &= ~CT_ID_CHAR;
+		    else
+			g_chartab[c] |= CT_ID_CHAR;
+		}
+		else if (var == p_isp)			// (re)set printable
+		{
+		    if ((c < ' ' || c > '~'
+			    // For double-byte we keep the cell width, so
+			    // that we can detect it from the first byte.
+			) && !(enc_dbcs && MB_BYTE2LEN(c) == 2))
 		    {
 			if (tilde)
-			    g_chartab[c] &= ~CT_ID_CHAR;
-			else
-			    g_chartab[c] |= CT_ID_CHAR;
-		    }
-		    else if (i == 1)		// (re)set printable
-		    {
-			if ((c < ' ' || c > '~'
-				// For double-byte we keep the cell width, so
-				// that we can detect it from the first byte.
-			    ) && !(enc_dbcs && MB_BYTE2LEN(c) == 2))
 			{
-			    if (tilde)
-			    {
-				g_chartab[c] = (g_chartab[c] & ~CT_CELL_MASK)
-					     + ((dy_flags & DY_UHEX) ? 4 : 2);
-				g_chartab[c] &= ~CT_PRINT_CHAR;
-			    }
-			    else
-			    {
-				g_chartab[c] = (g_chartab[c] & ~CT_CELL_MASK)
-									   + 1;
-				g_chartab[c] |= CT_PRINT_CHAR;
-			    }
+			    g_chartab[c] = (g_chartab[c] & ~CT_CELL_MASK)
+					 + ((dy_flags & DY_UHEX) ? 4 : 2);
+			    g_chartab[c] &= ~CT_PRINT_CHAR;
+			}
+			else
+			{
+			    g_chartab[c] = (g_chartab[c] & ~CT_CELL_MASK) + 1;
+			    g_chartab[c] |= CT_PRINT_CHAR;
 			}
 		    }
-		    else if (i == 2)		// (re)set fname flag
-		    {
-			if (tilde)
-			    g_chartab[c] &= ~CT_FNAME_CHAR;
-			else
-			    g_chartab[c] |= CT_FNAME_CHAR;
-		    }
-		    else // i == 3		 (re)set keyword flag
-		    {
-			if (tilde)
-			    RESET_CHARTAB(buf, c);
-			else
-			    SET_CHARTAB(buf, c);
-		    }
 		}
-		++c;
+		else if (var == p_isf)			// (re)set fname flag
+		{
+		    if (tilde)
+			g_chartab[c] &= ~CT_FNAME_CHAR;
+		    else
+			g_chartab[c] |= CT_FNAME_CHAR;
+		}
+		else // var == p_isk || var == buf->b_p_isk
+							// (re)set keyword flag
+		{
+		    if (tilde)
+			RESET_CHARTAB(buf, c);
+		    else
+			SET_CHARTAB(buf, c);
+		}
 	    }
-
-	    c = *p;
-	    p = skip_to_option_part(p);
-	    if (c == ',' && *p == NUL)
-		// Trailing comma is not allowed.
-		return FAIL;
+	    ++c;
 	}
     }
-    chartab_initialized = TRUE;
+
     return OK;
 }
 
@@ -739,8 +773,8 @@ chartabsize(char_u *p, colnr_T col)
     RET_WIN_BUF_CHARTABSIZE(curwin, curbuf, p, col)
 }
 
-#ifdef FEAT_LINEBREAK
-    static int
+#if defined(FEAT_LINEBREAK) || defined(PROTO)
+    int
 win_chartabsize(win_T *wp, char_u *p, colnr_T col)
 {
     RET_WIN_BUF_CHARTABSIZE(wp, wp->w_buffer, p, col)
@@ -765,24 +799,29 @@ linetabsize_str(char_u *s)
 linetabsize_col(int startcol, char_u *s)
 {
     chartabsize_T cts;
+    vimlong_T vcol;
 
     init_chartabsize_arg(&cts, curwin, 0, startcol, s, s);
+    vcol = cts.cts_vcol;
+
     while (*cts.cts_ptr != NUL)
-	cts.cts_vcol += lbr_chartabsize_adv(&cts);
-#ifdef FEAT_PROP_POPUP
-    if (cts.cts_has_prop_with_text && cts.cts_ptr == cts.cts_line)
     {
-	// check for virtual text in an empty line
-	(void)lbr_chartabsize_adv(&cts);
-	cts.cts_vcol += cts.cts_cur_text_width;
+	vcol += lbr_chartabsize_adv(&cts);
+	if (vcol > MAXCOL)
+	{
+	    cts.cts_vcol = MAXCOL;
+	    break;
+	}
+	else
+	    cts.cts_vcol = (int)vcol;
     }
-#endif
     clear_chartabsize_arg(&cts);
     return (int)cts.cts_vcol;
 }
 
 /*
  * Like linetabsize_str(), but for a given window instead of the current one.
+ * Doesn't count the size of 'listchars' "eol".
  */
     int
 win_linetabsize(win_T *wp, linenr_T lnum, char_u *line, colnr_T len)
@@ -798,35 +837,94 @@ win_linetabsize(win_T *wp, linenr_T lnum, char_u *line, colnr_T len)
 /*
  * Return the number of cells line "lnum" of window "wp" will take on the
  * screen, taking into account the size of a tab and text properties.
+ * Doesn't count the size of 'listchars' "eol".
  */
-  int
+    int
 linetabsize(win_T *wp, linenr_T lnum)
 {
     return win_linetabsize(wp, lnum,
 		       ml_get_buf(wp->w_buffer, lnum, FALSE), (colnr_T)MAXCOL);
 }
 
+/*
+ * Like linetabsize(), but counts the size of 'listchars' "eol".
+ */
+    int
+linetabsize_eol(win_T *wp, linenr_T lnum)
+{
+    return linetabsize(wp, lnum)
+	+ ((wp->w_p_list && wp->w_lcs_chars.eol != NUL) ? 1 : 0);
+}
+
+/*
+ * Like linetabsize(), but excludes 'above'/'after'/'right'/'below' aligned
+ * virtual text, while keeping inline virtual text.
+ */
+    int
+linetabsize_no_outer(win_T *wp, linenr_T lnum)
+{
+#ifndef FEAT_PROP_POPUP
+    return linetabsize(wp, lnum);
+#else
+    chartabsize_T cts;
+    char_u *line = ml_get_buf(wp->w_buffer, lnum, FALSE);
+
+    init_chartabsize_arg(&cts, wp, lnum, 0, line, line);
+
+    if (cts.cts_text_prop_count)
+    {
+	int write_idx = 0;
+	for (int read_idx = 0; read_idx < cts.cts_text_prop_count; read_idx++)
+	{
+	    textprop_T *tp = &cts.cts_text_props[read_idx];
+	    if (tp->tp_col != MAXCOL)
+	    {
+		if (read_idx != write_idx)
+		    cts.cts_text_props[write_idx] = *tp;
+		write_idx++;
+	    }
+	}
+	cts.cts_text_prop_count = write_idx;
+	if (cts.cts_text_prop_count == 0)
+	    VIM_CLEAR(cts.cts_text_props);
+    }
+
+    win_linetabsize_cts(&cts, (colnr_T)MAXCOL);
+    clear_chartabsize_arg(&cts);
+    return (int)cts.cts_vcol;
+#endif
+}
+
     void
 win_linetabsize_cts(chartabsize_T *cts, colnr_T len)
 {
+    vimlong_T vcol = cts->cts_vcol;
 #ifdef FEAT_PROP_POPUP
     cts->cts_with_trailing = len == MAXCOL;
 #endif
     for ( ; *cts->cts_ptr != NUL && (len == MAXCOL || cts->cts_ptr < cts->cts_line + len);
 						      MB_PTR_ADV(cts->cts_ptr))
-	cts->cts_vcol += win_lbr_chartabsize(cts, NULL);
+    {
+	vcol += win_lbr_chartabsize(cts, NULL);
+	if (vcol > MAXCOL)
+	{
+	    cts->cts_vcol = MAXCOL;
+	    break;
+	}
+	else
+	    cts->cts_vcol = (int)vcol;
+    }
 #ifdef FEAT_PROP_POPUP
-    // check for a virtual text on an empty line
-    if (cts->cts_has_prop_with_text && *cts->cts_ptr == NUL
-					      && cts->cts_ptr == cts->cts_line)
+    // check for a virtual text at the end of a line or on an empty line
+    if (len == MAXCOL && cts->cts_has_prop_with_text && *cts->cts_ptr == NUL)
     {
 	(void)win_lbr_chartabsize(cts, NULL);
-	cts->cts_vcol += cts->cts_cur_text_width;
-
+	vcol += cts->cts_cur_text_width;
 	// when properties are above or below the empty line must also be
 	// counted
-	if (cts->cts_prop_lines > 0)
-	    ++cts->cts_vcol;
+	if (cts->cts_ptr == cts->cts_line && cts->cts_prop_lines > 0)
+	    ++vcol;
+	cts->cts_vcol = vcol > MAXCOL ? MAXCOL : (int)vcol;
     }
 #endif
 }
@@ -907,6 +1005,7 @@ vim_isfilec(int c)
     return (c >= 0x100 || (c > 0 && (g_chartab[c] & CT_FNAME_CHAR)));
 }
 
+#if defined(FEAT_SPELL) || defined(PROTO)
 /*
  * Return TRUE if 'c' is a valid file-name character, including characters left
  * out of 'isfname' to make "gf" work, such as comma, space, '@', etc.
@@ -916,6 +1015,7 @@ vim_is_fname_char(int c)
 {
     return vim_isfilec(c) || c == ',' || c == ' ' || c == '@';
 }
+#endif
 
 /*
  * return TRUE if 'c' is a valid file-name character or a wildcard character
@@ -979,6 +1079,9 @@ init_chartabsize_arg(
     cts->cts_vcol = col;
     cts->cts_line = line;
     cts->cts_ptr = ptr;
+#ifdef FEAT_LINEBREAK
+    cts->cts_bri_size = -1;
+#endif
 #ifdef FEAT_PROP_POPUP
     if (lnum > 0 && !ignore_text_props)
     {
@@ -1105,9 +1208,14 @@ lbr_chartabsize_adv(chartabsize_T *cts)
  * inserts text.
  * This function is used very often, keep it fast!!!!
  *
- * If "headp" not NULL, set *headp to the size of what we for 'showbreak'
- * string at start of line.  Warning: *headp is only set if it's a non-zero
- * value, init to 0 before calling.
+ * If "headp" not NULL, set "*headp" to the size of 'showbreak'/'breakindent'
+ * included in the return value.
+ * When "cts->cts_max_head_vcol" is positive, only count in "*headp" the size
+ * of 'showbreak'/'breakindent' before "cts->cts_max_head_vcol".
+ * When "cts->cts_max_head_vcol" is negative, only count in "*headp" the size
+ * of 'showbreak'/'breakindent' before where cursor should be placed.
+ *
+ * Warning: "*headp" may not be set if it's 0, init to 0 before calling.
  */
     int
 win_lbr_chartabsize(
@@ -1121,16 +1229,8 @@ win_lbr_chartabsize(
     char_u	*s = cts->cts_ptr;
     colnr_T	vcol = cts->cts_vcol;
 #ifdef FEAT_LINEBREAK
-    int		c;
     int		size;
-    colnr_T	col2;
-    colnr_T	col_adj = 0; // vcol + screen size of tab
-    colnr_T	colmax;
-    int		added;
     int		mb_added = 0;
-    int		numberextra;
-    char_u	*ps;
-    int		tab_corr = (*s == TAB);
     int		n;
     char_u	*sbr;
     int		no_sbr = FALSE;
@@ -1162,12 +1262,21 @@ win_lbr_chartabsize(
     }
 
 #if defined(FEAT_LINEBREAK) || defined(FEAT_PROP_POPUP)
+    int has_lcs_eol = wp->w_p_list && wp->w_lcs_chars.eol != NUL;
+
     /*
      * First get the normal size, without 'linebreak' or text properties
      */
     size = win_chartabsize(wp, s, vcol);
     if (*s == NUL)
-	size = 0;  // NUL is not displayed
+    {
+	// 1 cell for EOL list char (if present), as opposed to the two cell ^@
+	// for a NUL character in the text.
+	size = has_lcs_eol ? 1 : 0;
+    }
+# ifdef FEAT_LINEBREAK
+    int is_doublewidth = has_mbyte && size == 2 && MB_BYTE2LEN(*s) > 1;
+# endif
 
 # ifdef FEAT_PROP_POPUP
     if (cts->cts_has_prop_with_text)
@@ -1180,8 +1289,11 @@ win_lbr_chartabsize(
 
 	// The "$" for 'list' mode will go between the EOL and
 	// the text prop, account for that.
-	if (wp->w_p_list && wp->w_lcs_chars.eol != NUL)
+	if (has_lcs_eol)
+	{
 	    ++vcol;
+	    --size;
+	}
 
 	for (i = 0; i < cts->cts_text_prop_count; ++i)
 	{
@@ -1196,8 +1308,7 @@ win_lbr_chartabsize(
 		       || (tp->tp_col == MAXCOL
 			   && ((tp->tp_flags & TP_FLAG_ALIGN_ABOVE)
 				? col == 0
-				: (s[0] == NUL || s[charlen] == NUL)
-						  && cts->cts_with_trailing)))
+				: s[0] == NUL && cts->cts_with_trailing)))
 		    && -tp->tp_id - 1 < gap->ga_len)
 	    {
 		char_u *p = ((char_u **)gap->ga_data)[-tp->tp_id - 1];
@@ -1213,17 +1324,18 @@ win_lbr_chartabsize(
 			cells = text_prop_position(wp, tp, vcol,
 			     (vcol + size) % (wp->w_width - col_off) + col_off,
 					      &n_extra, &p, NULL, NULL, FALSE);
-#ifdef FEAT_LINEBREAK
+#  ifdef FEAT_LINEBREAK
 			no_sbr = TRUE;  // don't use 'showbreak' now
-#endif
+#  endif
 		    }
 		    else
 			cells = vim_strsize(p);
 		    cts->cts_cur_text_width += cells;
 		    if (tp->tp_flags & TP_FLAG_ALIGN_ABOVE)
 			cts->cts_first_char += cells;
+		    else
+			size += cells;
 		    cts->cts_start_incl = tp->tp_flags & TP_FLAG_START_INCL;
-		    size += cells;
 		    if (*s == TAB)
 		    {
 			// tab size changes because of the inserted text
@@ -1240,33 +1352,140 @@ win_lbr_chartabsize(
 	    if (tp->tp_col != MAXCOL && tp->tp_col - 1 > col)
 		break;
 	}
-	if (wp->w_p_list && wp->w_lcs_chars.eol != NUL)
+	if (has_lcs_eol)
+	{
 	    --vcol;
+	    ++size;
+	}
     }
 # endif
 
 # ifdef FEAT_LINEBREAK
-    c = *s;
-    if (tab_corr)
-	col_adj = size - 1;
+    if (is_doublewidth && wp->w_p_wrap && in_win_border(wp, vcol + size - 2))
+    {
+	++size;		// Count the ">" in the last column.
+	mb_added = 1;
+    }
 
     /*
-     * If 'linebreak' set check at a blank before a non-blank if the line
-     * needs a break here
+     * May have to add something for 'breakindent' and/or 'showbreak'
+     * string at the start of a screen line.
      */
-    if (wp->w_p_lbr
-	    && VIM_ISBREAK(c)
-	    && !VIM_ISBREAK((int)s[1])
-	    && wp->w_p_wrap
-	    && wp->w_width != 0)
+    int head = mb_added;
+    sbr = no_sbr ? empty_option : get_showbreak_value(wp);
+    // When "size" is 0, no new screen line is started.
+    if (size > 0 && wp->w_p_wrap && (*sbr != NUL || wp->w_p_bri))
+    {
+	int	col_off_prev = win_col_off(wp);
+	int	width2 = wp->w_width - col_off_prev + win_col_off2(wp);
+	colnr_T	wcol = vcol + col_off_prev;
+#  ifdef FEAT_PROP_POPUP
+	wcol -= wp->w_virtcol_first_char;
+#  endif
+	colnr_T	max_head_vcol = cts->cts_max_head_vcol;
+	int	added = 0;
+
+	// cells taken by 'showbreak'/'breakindent' before current char
+	int	head_prev = 0;
+	if (wcol >= wp->w_width)
+	{
+	    wcol -= wp->w_width;
+	    col_off_prev = wp->w_width - width2;
+	    if (wcol >= width2 && width2 > 0)
+		wcol %= width2;
+	    if (*sbr != NUL)
+		head_prev += vim_strsize(sbr);
+	    if (wp->w_p_bri)
+	    {
+		if (cts->cts_bri_size < 0)
+		    cts->cts_bri_size = get_breakindent_win(wp, line);
+		head_prev += cts->cts_bri_size;
+	    }
+	    if (wcol < head_prev)
+	    {
+		head_prev -= wcol;
+		wcol += head_prev;
+		added += head_prev;
+		if (max_head_vcol <= 0 || vcol < max_head_vcol)
+		    head += head_prev;
+	    }
+	    else
+		head_prev = 0;
+	    wcol += col_off_prev;
+	}
+
+	if (wcol + size > wp->w_width)
+	{
+	    // cells taken by 'showbreak'/'breakindent' halfway current char
+	    int	head_mid = 0;
+	    if (*sbr != NUL)
+		head_mid += vim_strsize(sbr);
+	    if (wp->w_p_bri)
+	    {
+		if (cts->cts_bri_size < 0)
+		    cts->cts_bri_size = get_breakindent_win(wp, line);
+		head_mid += cts->cts_bri_size;
+	    }
+	    if (head_mid > 0)
+	    {
+		// Calculate effective window width.
+		int prev_rem = wp->w_width - wcol;
+		int width = width2 - head_mid;
+
+		if (width <= 0)
+		    width = 1;
+		// Divide "size - prev_rem" by "width", rounding up.
+		int cnt = (size - prev_rem + width - 1) / width;
+		added += cnt * head_mid;
+
+		if (max_head_vcol == 0 || vcol + size + added < max_head_vcol)
+		    head += cnt * head_mid;
+		else if (max_head_vcol > vcol + head_prev + prev_rem)
+		    head += (max_head_vcol - (vcol + head_prev + prev_rem)
+					     + width2 - 1) / width2 * head_mid;
+		else if (max_head_vcol < 0)
+		{
+		    int off = mb_added;
+#  ifdef FEAT_PROP_POPUP
+		    if (*s != NUL
+			     && ((State & MODE_NORMAL) || cts->cts_start_incl))
+			off += cts->cts_cur_text_width;
+#  endif
+		    if (off >= prev_rem)
+			head += (1 + (off - prev_rem) / width) * head_mid;
+		}
+	    }
+	}
+
+	size += added;
+    }
+
+    if (headp != NULL)
+	*headp = head;
+
+    int need_lbr = FALSE;
+    /*
+     * If 'linebreak' set check at a blank before a non-blank if the line
+     * needs a break here.
+     */
+    if (wp->w_p_lbr && wp->w_p_wrap && wp->w_width != 0
+	    && VIM_ISBREAK((int)s[0]) && !VIM_ISBREAK((int)s[1]))
+    {
+	char_u	*t = cts->cts_line;
+	while (VIM_ISBREAK((int)t[0]))
+	    t++;
+	// 'linebreak' is only needed when not in leading whitespace.
+	need_lbr = s >= t;
+    }
+    if (need_lbr)
     {
 	/*
 	 * Count all characters from first non-blank after a blank up to next
 	 * non-blank after a blank.
 	 */
-	numberextra = win_col_off(wp);
-	col2 = vcol;
-	colmax = (colnr_T)(wp->w_width - numberextra - col_adj);
+	int numberextra = win_col_off(wp);
+	colnr_T col_adj = size - 1;
+	colnr_T colmax = (colnr_T)(wp->w_width - numberextra - col_adj);
 	if (vcol >= colmax)
 	{
 	    colmax += col_adj;
@@ -1275,101 +1494,30 @@ win_lbr_chartabsize(
 		colmax += (((vcol - colmax) / n) + 1) * n - col_adj;
 	}
 
+	colnr_T vcol2 = vcol;
 	for (;;)
 	{
-	    ps = s;
+	    char_u *ps = s;
 	    MB_PTR_ADV(s);
-	    c = *s;
+	    int c = *s;
 	    if (!(c != NUL
 		    && (VIM_ISBREAK(c)
 			|| (!VIM_ISBREAK(c)
-			       && (col2 == vcol || !VIM_ISBREAK((int)*ps))))))
+			       && (vcol2 == vcol || !VIM_ISBREAK((int)*ps))))))
 		break;
 
-	    col2 += win_chartabsize(wp, s, col2);
-	    if (col2 >= colmax)		// doesn't fit
+	    vcol2 += win_chartabsize(wp, s, vcol2);
+	    if (vcol2 >= colmax)		// doesn't fit
 	    {
 		size = colmax - vcol + col_adj;
 		break;
 	    }
 	}
     }
-    else if (has_mbyte && size == 2 && MB_BYTE2LEN(*s) > 1
-				   && wp->w_p_wrap && in_win_border(wp, vcol))
-    {
-	++size;		// Count the ">" in the last column.
-	mb_added = 1;
-    }
 
-    /*
-     * May have to add something for 'breakindent' and/or 'showbreak'
-     * string at start of line.
-     * Set *headp to the size of what we add.
-     * Do not use 'showbreak' at the NUL after the text.
-     */
-    added = 0;
-    sbr = (c == NUL || no_sbr) ? empty_option : get_showbreak_value(wp);
-    if ((*sbr != NUL || wp->w_p_bri) && wp->w_p_wrap && vcol != 0)
-    {
-	colnr_T sbrlen = 0;
-	int	numberwidth = win_col_off(wp);
-
-	numberextra = numberwidth;
-	vcol += numberextra + mb_added;
-#ifdef FEAT_PROP_POPUP
-	vcol -= wp->w_virtcol_first_char;
-#endif
-	if (vcol >= (colnr_T)wp->w_width)
-	{
-	    vcol -= wp->w_width;
-	    numberextra = wp->w_width - (numberextra - win_col_off2(wp));
-	    if (vcol >= numberextra && numberextra > 0)
-		vcol %= numberextra;
-	    if (*sbr != NUL)
-	    {
-		sbrlen = (colnr_T)MB_CHARLEN(sbr);
-		if (vcol >= sbrlen)
-		    vcol -= sbrlen;
-	    }
-	    if (vcol >= numberextra && numberextra > 0)
-		vcol = vcol % numberextra;
-	    else if (vcol > 0 && numberextra > 0)
-		vcol += numberwidth - win_col_off2(wp);
-
-	    numberwidth -= win_col_off2(wp);
-	}
-	if (vcol == 0 || vcol + size + sbrlen > (colnr_T)wp->w_width)
-	{
-	    added = 0;
-	    if (*sbr != NUL)
-	    {
-		if (size + sbrlen + numberwidth > (colnr_T)wp->w_width)
-		{
-		    // calculate effective window width
-		    int width = (colnr_T)wp->w_width - sbrlen - numberwidth;
-		    int prev_width = vcol
-			       ? ((colnr_T)wp->w_width - (sbrlen + vcol)) : 0;
-
-		    if (width <= 0)
-			width = (colnr_T)1;
-		    added += ((size - prev_width) / width) * vim_strsize(sbr);
-		    if ((size - prev_width) % width)
-			// wrapped, add another length of 'sbr'
-			added += vim_strsize(sbr);
-		}
-		else
-		    added += vim_strsize(sbr);
-	    }
-	    if (wp->w_p_bri)
-		added += get_breakindent_win(wp, line);
-
-	    size += added;
-	    if (vcol != 0)
-		added = 0;
-	}
-    }
-    if (headp != NULL)
-	*headp = added + mb_added;
+#  ifdef FEAT_PROP_POPUP
+    size += cts->cts_first_char;
+#  endif
     return size;
 # endif
 #endif
@@ -1455,7 +1603,6 @@ getvcol(
 {
     colnr_T	vcol;
     char_u	*ptr;		// points to current char
-    char_u	*posptr;	// points to char at pos->col
     char_u	*line;		// start of the line
     int		incr;
     int		head;
@@ -1471,26 +1618,9 @@ getvcol(
 
     vcol = 0;
     line = ptr = ml_get_buf(wp->w_buffer, pos->lnum, FALSE);
-    if (pos->col == MAXCOL)
-	posptr = NULL;  // continue until the NUL
-    else
-    {
-	colnr_T i;
-
-	// In a few cases the position can be beyond the end of the line.
-	for (i = 0; i < pos->col; ++i)
-	    if (ptr[i] == NUL)
-	    {
-		pos->col = i;
-		break;
-	    }
-	posptr = ptr + pos->col;
-	if (has_mbyte)
-	    // always start on the first byte
-	    posptr -= (*mb_head_off)(line, posptr);
-    }
 
     init_chartabsize_arg(&cts, wp, pos->lnum, 0, line, line);
+    cts.cts_max_head_vcol = -1;
 
     /*
      * This function is used very often, do some speed optimizations.
@@ -1549,11 +1679,12 @@ getvcol(
 		    incr = g_chartab[c] & CT_CELL_MASK;
 	    }
 
-	    if (posptr != NULL && ptr >= posptr) // character at pos->col
+	    char_u *next_ptr = ptr + (*mb_ptr2len)(ptr);
+	    if (next_ptr - line > pos->col) // character at pos->col
 		break;
 
 	    vcol += incr;
-	    MB_PTR_ADV(ptr);
+	    ptr = next_ptr;
 	}
     }
     else
@@ -1581,17 +1712,20 @@ getvcol(
 		wp->w_virtcol_first_char = cts.cts_first_char;
 #endif
 
-	    if (posptr != NULL && cts.cts_ptr >= posptr)
-		// character at pos->col
+	    char_u *next_ptr = cts.cts_ptr + (*mb_ptr2len)(cts.cts_ptr);
+	    if (next_ptr - line > pos->col) // character at pos->col
 		break;
 
 	    cts.cts_vcol += incr;
-	    MB_PTR_ADV(cts.cts_ptr);
+	    cts.cts_ptr = next_ptr;
 	}
 	vcol = cts.cts_vcol;
 	ptr = cts.cts_ptr;
     }
     clear_chartabsize_arg(&cts);
+
+    if (*ptr == NUL && pos->col < MAXCOL && pos->col > ptr - line)
+	pos->col = ptr - line;
 
     if (start != NULL)
 	*start = vcol + head;
@@ -1667,7 +1801,7 @@ getvvcol(
 	endadd = 0;
 	// Cannot put the cursor on part of a wide character.
 	ptr = ml_get_buf(wp->w_buffer, pos->lnum, FALSE);
-	if (pos->col < (colnr_T)STRLEN(ptr))
+	if (pos->col < ml_get_buf_len(wp->w_buffer, pos->lnum))
 	{
 	    int c = (*mb_ptr2char)(ptr + pos->col);
 
@@ -1930,7 +2064,7 @@ vim_islower(int c)
 	if (enc_latin1like)
 	    return (latin1flags[c] & LATIN1LOWER) == LATIN1LOWER;
     }
-    return islower(c);
+    return SAFE_islower(c);
 }
 
     int
@@ -1954,7 +2088,7 @@ vim_isupper(int c)
 	if (enc_latin1like)
 	    return (latin1flags[c] & LATIN1UPPER) == LATIN1UPPER;
     }
-    return isupper(c);
+    return SAFE_isupper(c);
 }
 
     int
@@ -2138,7 +2272,8 @@ vim_str2nr(
     varnumber_T		*nptr,	    // return: signed result
     uvarnumber_T	*unptr,	    // return: unsigned result
     int			maxlen,     // max length of string to check
-    int			strict)     // check strictly
+    int			strict,     // check strictly
+    int			*overflow)  // when not NULL set to TRUE for overflow
 {
     char_u	    *ptr = start;
     int		    pre = 0;		// default is decimal
@@ -2209,7 +2344,11 @@ vim_str2nr(
 	    if (un <= UVARNUM_MAX / 2)
 		un = 2 * un + (uvarnumber_T)(*ptr - '0');
 	    else
+	    {
 		un = UVARNUM_MAX;
+		if (overflow != NULL)
+		    *overflow = TRUE;
+	    }
 	    ++ptr;
 	    if (n++ == maxlen)
 		break;
@@ -2234,7 +2373,11 @@ vim_str2nr(
 	    if (un <= UVARNUM_MAX / 8)
 		un = 8 * un + (uvarnumber_T)(*ptr - '0');
 	    else
+	    {
 		un = UVARNUM_MAX;
+		if (overflow != NULL)
+		    *overflow = TRUE;
+	    }
 	    ++ptr;
 	    if (n++ == maxlen)
 		break;
@@ -2258,7 +2401,11 @@ vim_str2nr(
 	    if (un <= UVARNUM_MAX / 16)
 		un = 16 * un + (uvarnumber_T)hex2nr(*ptr);
 	    else
+	    {
 		un = UVARNUM_MAX;
+		if (overflow != NULL)
+		    *overflow = TRUE;
+	    }
 	    ++ptr;
 	    if (n++ == maxlen)
 		break;
@@ -2282,7 +2429,11 @@ vim_str2nr(
 		    || (un == UVARNUM_MAX / 10 && digit <= UVARNUM_MAX % 10))
 		un = 10 * un + digit;
 	    else
+	    {
 		un = UVARNUM_MAX;
+		if (overflow != NULL)
+		    *overflow = TRUE;
+	    }
 	    ++ptr;
 	    if (n++ == maxlen)
 		break;
@@ -2310,7 +2461,11 @@ vim_str2nr(
 	{
 	    // avoid ubsan error for overflow
 	    if (un > VARNUM_MAX)
+	    {
 		*nptr = VARNUM_MIN;
+		if (overflow != NULL)
+		    *overflow = TRUE;
+	    }
 	    else
 		*nptr = -(varnumber_T)un;
 	}
@@ -2318,7 +2473,11 @@ vim_str2nr(
 	{
 	    // prevent a large unsigned number to become negative
 	    if (un > VARNUM_MAX)
+	    {
 		un = VARNUM_MAX;
+		if (overflow != NULL)
+		    *overflow = TRUE;
+	    }
 	    *nptr = (varnumber_T)un;
 	}
     }

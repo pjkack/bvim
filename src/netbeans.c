@@ -477,7 +477,7 @@ nb_parse_cmd(char_u *cmd)
     if (*verb != ':')
     {
 	nbdebug(("    missing colon: %s\n", cmd));
-	semsg(e_missing_colon_str, cmd);
+	semsg(_(e_missing_colon_str), cmd);
 	return;
     }
     ++verb; // skip colon
@@ -501,7 +501,7 @@ nb_parse_cmd(char_u *cmd)
     if (isfunc < 0)
     {
 	nbdebug(("    missing ! or / in: %s\n", cmd));
-	semsg(e_missing_bang_or_slash_in_str, cmd);
+	semsg(_(e_missing_bang_or_slash_in_str), cmd);
 	return;
     }
 
@@ -932,7 +932,7 @@ nb_partialremove(linenr_T lnum, colnr_T first, colnr_T last)
     int lastbyte = last;
 
     oldtext = ml_get(lnum);
-    oldlen = (int)STRLEN(oldtext);
+    oldlen = ml_get_len(lnum);
     if (first >= (colnr_T)oldlen || oldlen == 0)  // just in case
 	return;
     if (lastbyte >= oldlen)
@@ -957,8 +957,8 @@ nb_joinlines(linenr_T first, linenr_T other)
     int len_first, len_other;
     char_u *p;
 
-    len_first = (int)STRLEN(ml_get(first));
-    len_other = (int)STRLEN(ml_get(other));
+    len_first = ml_get_len(first);
+    len_other = ml_get_len(other);
     p = alloc(len_first + len_other + 1);
     if (p == NULL)
 	return;
@@ -1040,7 +1040,7 @@ nb_do_cmd(
 	    if (buf == NULL || buf->bufp == NULL)
 	    {
 		nbdebug(("    Invalid buffer identifier in getAnno\n"));
-		emsg(e_invalid_buffer_identifier_in_getanno);
+		emsg(_(e_invalid_buffer_identifier_in_getanno));
 		retval = FAIL;
 	    }
 	    else
@@ -1063,7 +1063,7 @@ nb_do_cmd(
 	    if (buf == NULL || buf->bufp == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in getLength\n"));
-		emsg(e_invalid_buffer_identifier_in_getlength);
+		emsg(_(e_invalid_buffer_identifier_in_getlength));
 		retval = FAIL;
 	    }
 	    else
@@ -1085,7 +1085,7 @@ nb_do_cmd(
 	    if (buf == NULL || buf->bufp == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in getText\n"));
-		emsg(e_invalid_buffer_identifier_in_gettext);
+		emsg(_(e_invalid_buffer_identifier_in_gettext));
 		retval = FAIL;
 	    }
 	    else
@@ -1148,7 +1148,7 @@ nb_do_cmd(
 	    if (buf == NULL || buf->bufp == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in remove\n"));
-		emsg(e_invalid_buffer_identifier_in_remove);
+		emsg(_(e_invalid_buffer_identifier_in_remove));
 		retval = FAIL;
 	    }
 	    else
@@ -1285,8 +1285,7 @@ nb_do_cmd(
 		netbeansFireChanges = oldFire;
 		netbeansSuppressNoLines = oldSuppress;
 
-		u_blockfree(buf->bufp);
-		u_clearall(buf->bufp);
+		u_clearallandblockfree(buf->bufp);
 	    }
 	    nb_reply_nil(cmdno);
 // =====================================================================
@@ -1318,7 +1317,7 @@ nb_do_cmd(
 	    if (buf == NULL || buf->bufp == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in insert\n"));
-		emsg(e_invalid_buffer_identifier_in_insert);
+		emsg(_(e_invalid_buffer_identifier_in_insert));
 		retval = FAIL;
 	    }
 	    else if (args != NULL)
@@ -1403,7 +1402,7 @@ nb_do_cmd(
 			int	col = pos == NULL ? 0 : pos->col;
 
 			// Insert halfway a line.
-			newline = alloc(STRLEN(oldline) + len + 1);
+			newline = alloc(ml_get_len(lnum) + len + 1);
 			if (newline != NULL)
 			{
 			    mch_memmove(newline, oldline, (size_t)col);
@@ -1456,8 +1455,7 @@ nb_do_cmd(
 		netbeansFireChanges = oldFire;
 
 		// Undo info is invalid now...
-		u_blockfree(curbuf);
-		u_clearall(curbuf);
+		u_clearallandblockfree(curbuf);
 	    }
 	    vim_free(to_free);
 	    nb_reply_nil(cmdno); // or !error
@@ -1478,7 +1476,7 @@ nb_do_cmd(
 	    if (buf == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in create\n"));
-		emsg(e_invalid_buffer_identifier_in_create);
+		emsg(_(e_invalid_buffer_identifier_in_create));
 		return FAIL;
 	    }
 	    VIM_CLEAR(buf->displayname);
@@ -1526,7 +1524,7 @@ nb_do_cmd(
 	    if (buf == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in startDocumentListen\n"));
-		emsg(e_invalid_buffer_identifier_in_startdocumentlisten);
+		emsg(_(e_invalid_buffer_identifier_in_startdocumentlisten));
 		return FAIL;
 	    }
 	    buf->fireChanges = 1;
@@ -1537,7 +1535,7 @@ nb_do_cmd(
 	    if (buf == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in stopDocumentListen\n"));
-		emsg(e_invalid_buffer_identifier_in_stopdocumentlisten);
+		emsg(_(e_invalid_buffer_identifier_in_stopdocumentlisten));
 		return FAIL;
 	    }
 	    buf->fireChanges = 0;
@@ -1567,7 +1565,7 @@ nb_do_cmd(
 	    if (buf == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in setTitle\n"));
-		emsg(e_invalid_buffer_identifier_in_settitle);
+		emsg(_(e_invalid_buffer_identifier_in_settitle));
 		return FAIL;
 	    }
 	    vim_free(buf->displayname);
@@ -1579,7 +1577,7 @@ nb_do_cmd(
 	    if (buf == NULL || buf->bufp == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in initDone\n"));
-		emsg(e_invalid_buffer_identifier_in_initdone);
+		emsg(_(e_invalid_buffer_identifier_in_initdone));
 		return FAIL;
 	    }
 	    do_update = 1;
@@ -1600,7 +1598,7 @@ nb_do_cmd(
 	    if (buf == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in setBufferNumber\n"));
-		emsg(e_invalid_buffer_identifier_in_setbuffernumber);
+		emsg(_(e_invalid_buffer_identifier_in_setbuffernumber));
 		return FAIL;
 	    }
 	    path = (char_u *)nb_unquote(args, NULL);
@@ -1611,7 +1609,7 @@ nb_do_cmd(
 	    if (bufp == NULL)
 	    {
 		nbdebug(("    File %s not found in setBufferNumber\n", args));
-		semsg(e_file_str_not_found_in_setbuffernumber, args);
+		semsg(_(e_file_str_not_found_in_setbuffernumber), args);
 		return FAIL;
 	    }
 	    buf->bufp = bufp;
@@ -1636,7 +1634,7 @@ nb_do_cmd(
 	    if (buf == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in setFullName\n"));
-		emsg(e_invalid_buffer_identifier_in_setfullname);
+		emsg(_(e_invalid_buffer_identifier_in_setfullname));
 		return FAIL;
 	    }
 	    vim_free(buf->displayname);
@@ -1659,7 +1657,7 @@ nb_do_cmd(
 	    if (buf == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in editFile\n"));
-		emsg(e_invalid_buffer_identifier_in_editfile);
+		emsg(_(e_invalid_buffer_identifier_in_editfile));
 		return FAIL;
 	    }
 	    // Edit a file: like create + setFullName + read the file.
@@ -1685,14 +1683,16 @@ nb_do_cmd(
 		// This message was commented out, probably because it can
 		// happen when shutting down.
 		if (p_verbose > 0)
-		    emsg(e_invalid_buffer_identifier_in_setvisible);
+		    emsg(_(e_invalid_buffer_identifier_in_setvisible));
 		return FAIL;
 	    }
 	    if (streq((char *)args, "T") && buf->bufp != curbuf)
 	    {
 		exarg_T exarg;
+		CLEAR_FIELD(exarg);
 		exarg.cmd = (char_u *)"goto";
 		exarg.forceit = FALSE;
+		exarg.cmdidx = CMD_USER;
 		dosetvisible = TRUE;
 		goto_buffer(&exarg, DOBUF_FIRST, FORWARD, buf->bufp->b_fnum);
 		do_update = 1;
@@ -1725,7 +1725,7 @@ nb_do_cmd(
 		// This message was commented out, probably because it can
 		// happen when shutting down.
 		if (p_verbose > 0)
-		    emsg(e_invalid_buffer_identifier_in_setmodified);
+		    emsg(_(e_invalid_buffer_identifier_in_setmodified));
 		return FAIL;
 	    }
 	    prev_b_changed = buf->bufp->b_changed;
@@ -1747,6 +1747,9 @@ nb_do_cmd(
 	    {
 		check_status(buf->bufp);
 		redraw_tabline = TRUE;
+#if defined(FEAT_TABPANEL)
+		redraw_tabpanel = TRUE;
+#endif
 		maketitle();
 		update_screen(0);
 	    }
@@ -1808,7 +1811,7 @@ nb_do_cmd(
 	    if (buf == NULL || buf->bufp == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in setDot\n"));
-		emsg(e_invalid_buffer_identifier_in_setdot);
+		emsg(_(e_invalid_buffer_identifier_in_setdot));
 		return FAIL;
 	    }
 
@@ -1861,7 +1864,7 @@ nb_do_cmd(
 	    if (buf == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in close\n"));
-		emsg(e_invalid_buffer_identifier_in_close);
+		emsg(_(e_invalid_buffer_identifier_in_close));
 		return FAIL;
 	    }
 
@@ -1875,7 +1878,7 @@ nb_do_cmd(
 		// This message was commented out, probably because it can
 		// happen when shutting down.
 		if (p_verbose > 0)
-		    emsg(e_invalid_buffer_identifier_in_close_2);
+		    emsg(_(e_invalid_buffer_identifier_in_close));
 	    }
 	    nbdebug(("    CLOSE %d: %s\n", bufno, name));
 #ifdef FEAT_GUI
@@ -1914,7 +1917,7 @@ nb_do_cmd(
 	    if (buf == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in defineAnnoType\n"));
-		emsg(e_invalid_buffer_identifier_in_defineannotype);
+		emsg(_(e_invalid_buffer_identifier_in_defineannotype));
 		return FAIL;
 	    }
 
@@ -1942,7 +1945,7 @@ nb_do_cmd(
 	    bg = vim_strsave(p);
 	    if (STRLEN(fg) > MAX_COLOR_LENGTH || STRLEN(bg) > MAX_COLOR_LENGTH)
 	    {
-		emsg(e_highlighting_color_name_too_long_in_defineAnnoType);
+		emsg(_(e_highlighting_color_name_too_long_in_defineAnnoType));
 		VIM_CLEAR(typeName);
 		parse_error = TRUE;
 	    }
@@ -1971,7 +1974,7 @@ nb_do_cmd(
 	    if (buf == NULL || buf->bufp == NULL)
 	    {
 		nbdebug(("    invalid buffer identifier in addAnno\n"));
-		emsg(e_invalid_buffer_identifier_in_addanno);
+		emsg(_(e_invalid_buffer_identifier_in_addanno));
 		return FAIL;
 	    }
 
@@ -2561,7 +2564,7 @@ set_ref_in_nb_channel(int copyID)
 
     tv.v_type = VAR_CHANNEL;
     tv.vval.v_channel = nb_channel;
-    abort = set_ref_in_item(&tv, copyID, NULL, NULL);
+    abort = set_ref_in_item(&tv, copyID, NULL, NULL, NULL);
     return abort;
 }
 #endif
@@ -3316,8 +3319,7 @@ get_buf_size(buf_T *bufp)
 	eol_size = 1;
     for (lnum = 1; lnum <= bufp->b_ml.ml_line_count; ++lnum)
     {
-	char_count += (long)STRLEN(ml_get_buf(bufp, lnum, FALSE))
-	    + eol_size;
+	char_count += ml_get_buf_len(bufp, lnum) + eol_size;
 	// Check for a CTRL-C every 100000 characters
 	if (char_count > last_check)
 	{

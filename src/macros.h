@@ -14,11 +14,6 @@
  */
 
 /*
- * PBYTE(lp, c) - put byte 'c' at position 'lp'
- */
-#define PBYTE(lp, c) (*(ml_get_buf(curbuf, (lp).lnum, TRUE) + (lp).col) = (c))
-
-/*
  * Position comparisons
  */
 #define LT_POS(a, b) (((a).lnum != (b).lnum) \
@@ -43,6 +38,7 @@
  */
 #define VIM_ISWHITE(x)		((x) == ' ' || (x) == '\t')
 #define IS_WHITE_OR_NUL(x)	((x) == ' ' || (x) == '\t' || (x) == NUL)
+#define IS_WHITE_NL_OR_NUL(x)	((x) == ' ' || (x) == '\t' || (x) == '\n' || (x) == NUL)
 
 /*
  * LINEEMPTY() - return TRUE if the line is empty
@@ -53,6 +49,28 @@
  * BUFEMPTY() - return TRUE if the current buffer is empty
  */
 #define BUFEMPTY() (curbuf->b_ml.ml_line_count == 1 && *ml_get((linenr_T)1) == NUL)
+
+// The is*() and to*() functions declared in <ctype.h> have
+// undefined behavior for values other than EOF outside the range of
+// unsigned char.  If plain char is signed, a call with a negative
+// value has undefined behavior.  These macros cast the argument to
+// unsigned char.  (Most implementations behave more or less sanely
+// with negative values, and most character values in practice are
+// positive, but we want to avoid undefined behavior anyway.)
+#define SAFE_isalnum(c)  (isalnum ((unsigned char)(c)))
+#define SAFE_isalpha(c)  (isalpha ((unsigned char)(c)))
+#define SAFE_isblank(c)  (isblank ((unsigned char)(c)))
+#define SAFE_iscntrl(c)  (iscntrl ((unsigned char)(c)))
+#define SAFE_isdigit(c)  (isdigit ((unsigned char)(c)))
+#define SAFE_isgraph(c)  (isgraph ((unsigned char)(c)))
+#define SAFE_islower(c)  (islower ((unsigned char)(c)))
+#define SAFE_isprint(c)  (isprint ((unsigned char)(c)))
+#define SAFE_ispunct(c)  (ispunct ((unsigned char)(c)))
+#define SAFE_isspace(c)  (isspace ((unsigned char)(c)))
+#define SAFE_isupper(c)  (isupper ((unsigned char)(c)))
+#define SAFE_isxdigit(c) (isxdigit((unsigned char)(c)))
+#define SAFE_tolower(c)  (tolower ((unsigned char)(c)))
+#define SAFE_toupper(c)  (toupper ((unsigned char)(c)))
 
 /*
  * toupper() and tolower() that use the current locale.
@@ -68,11 +86,11 @@
 #  define TOLOWER_LOC(c)	tolower_tab[(c) & 255]
 #else
 # ifdef BROKEN_TOUPPER
-#  define TOUPPER_LOC(c)	(islower(c) ? toupper(c) : (c))
-#  define TOLOWER_LOC(c)	(isupper(c) ? tolower(c) : (c))
+#  define TOUPPER_LOC(c)	(SAFE_islower(c) ? SAFE_toupper(c) : (c))
+#  define TOLOWER_LOC(c)	(SAFE_isupper(c) ? SAFE_tolower(c) : (c))
 # else
-#  define TOUPPER_LOC		toupper
-#  define TOLOWER_LOC		tolower
+#  define TOUPPER_LOC		SAFE_toupper
+#  define TOLOWER_LOC		SAFE_tolower
 # endif
 #endif
 
@@ -150,7 +168,7 @@
 # undef HAVE_LSTAT		// VMS does not have lstat()
 # define mch_stat(n, p)		stat(vms_fixfilename(n), (p))
 #else
-# ifndef MSWIN
+# if !defined(MSWIN) && !defined(PROTO)
 #   define mch_access(n, p)	access((n), (p))
 # endif
 
@@ -176,7 +194,11 @@
 #ifdef HAVE_LSTAT
 # define mch_lstat(n, p)	lstat((n), (p))
 #else
-# define mch_lstat(n, p)	mch_stat((n), (p))
+# ifdef MSWIN
+#  define mch_lstat(n, p)	vim_lstat((n), (p))
+# else
+#  define mch_lstat(n, p)	mch_stat((n), (p))
+# endif
 #endif
 
 #ifdef VMS
@@ -240,7 +262,7 @@
 #define MB_CHARLEN(p)	    (has_mbyte ? mb_charlen(p) : (int)STRLEN(p))
 #define MB_CHAR2LEN(c)	    (has_mbyte ? mb_char2len(c) : 1)
 #define PTR2CHAR(p)	    (has_mbyte ? mb_ptr2char(p) : (int)*(p))
-#define MB_CHAR2BYTES(c, b) do { if (has_mbyte) (b) += (*mb_char2bytes)((c), (b)); else *(b)++ = (c); } while(0)
+#define MB_CHAR2BYTES(c, b) do { if (has_mbyte) (b) += (*mb_char2bytes)((c), (b)); else *(b)++ = (c); } while (0)
 
 #ifdef FEAT_AUTOCHDIR
 # define DO_AUTOCHDIR do { if (p_acd) do_autochdir(); } while (0)
@@ -338,11 +360,17 @@
  */
 #define VIM_CLEAR(p) \
     do { \
-	if ((p) != NULL) \
-	{ \
-	    vim_free(p); \
-	    (p) = NULL; \
-	} \
+	vim_free(p); \
+	(p) = NULL; \
+    } while (0)
+
+/*
+ * Free a string and set it's pointer to NULL and length to 0
+ */
+#define VIM_CLEAR_STRING(s) \
+    do { \
+	VIM_CLEAR(s.string); \
+	s.length = 0; \
     } while (0)
 
 // Whether a command index indicates a user command.
@@ -366,21 +394,31 @@
 
 
 #ifdef ABORT_ON_INTERNAL_ERROR
-# define ESTACK_CHECK_DECLARATION int estack_len_before;
-# define ESTACK_CHECK_SETUP estack_len_before = exestack.ga_len;
-# define ESTACK_CHECK_NOW if (estack_len_before != exestack.ga_len) \
-	siemsg("Exestack length expected: %d, actual: %d", estack_len_before, exestack.ga_len);
-# define CHECK_CURBUF if (curwin != NULL && curwin->w_buffer != curbuf) \
-		iemsg("curbuf != curwin->w_buffer")
+# define ESTACK_CHECK_DECLARATION int estack_len_before
+# define ESTACK_CHECK_SETUP do { estack_len_before = exestack.ga_len; } while (0)
+# define ESTACK_CHECK_NOW \
+    do { \
+	if (estack_len_before != exestack.ga_len) \
+	    siemsg("Exestack length expected: %d, actual: %d", estack_len_before, exestack.ga_len); \
+    } while (0)
+# define CHECK_CURBUF \
+    do { \
+	if (curwin != NULL && curwin->w_buffer != curbuf) \
+	    iemsg("curbuf != curwin->w_buffer"); \
+    } while (0)
 #else
-# define ESTACK_CHECK_DECLARATION
-# define ESTACK_CHECK_SETUP
-# define ESTACK_CHECK_NOW
-# define CHECK_CURBUF
+# define ESTACK_CHECK_DECLARATION do { /**/ } while (0)
+# define ESTACK_CHECK_SETUP do { /**/ } while (0)
+# define ESTACK_CHECK_NOW do { /**/ } while (0)
+# define CHECK_CURBUF do { /**/ } while (0)
 #endif
 
 // Inline the condition for performance.
-#define CHECK_LIST_MATERIALIZE(l) if ((l)->lv_first == &range_list_item) range_list_materialize(l)
+#define CHECK_LIST_MATERIALIZE(l) \
+    do { \
+	if ((l)->lv_first == &range_list_item) \
+	    range_list_materialize(l); \
+    } while (0)
 
 // Inlined version of ga_grow() with optimized condition that it fails.
 #define GA_GROW_FAILS(gap, n) unlikely((((gap)->ga_maxlen - (gap)->ga_len < (n)) ? ga_grow_inner((gap), (n)) : OK) == FAIL)
@@ -396,3 +434,60 @@
 
 // Length of the array.
 #define ARRAY_LENGTH(a) (sizeof(a) / sizeof((a)[0]))
+
+#ifdef FEAT_MENU
+#define FOR_ALL_MENUS(m) \
+    for ((m) = root_menu; (m) != NULL; (m) = (m)->next)
+#define FOR_ALL_CHILD_MENUS(p, c) \
+    for ((c) = (p)->children; (c) != NULL; (c) = (c)->next)
+#endif
+
+#define FOR_ALL_WINDOWS(wp) \
+    for ((wp) = firstwin; (wp) != NULL; (wp) = (wp)->w_next)
+#define FOR_ALL_FRAMES(frp, first_frame) \
+    for ((frp) = first_frame; (frp) != NULL; (frp) = (frp)->fr_next)
+#define FOR_ALL_TABPAGES(tp) \
+    for ((tp) = first_tabpage; (tp) != NULL; (tp) = (tp)->tp_next)
+#define FOR_ALL_WINDOWS_IN_TAB(tp, wp) \
+    for ((wp) = ((tp) == NULL || (tp) == curtab) \
+	    ? firstwin : (tp)->tp_firstwin; (wp); (wp) = (wp)->w_next)
+/*
+ * When using this macro "break" only breaks out of the inner loop. Use "goto"
+ * to break out of the tabpage loop.
+ */
+#define FOR_ALL_TAB_WINDOWS(tp, wp) \
+    for ((tp) = first_tabpage; (tp) != NULL; (tp) = (tp)->tp_next) \
+	for ((wp) = ((tp) == curtab) \
+		? firstwin : (tp)->tp_firstwin; (wp); (wp) = (wp)->w_next)
+
+#define FOR_ALL_POPUPWINS(wp) \
+    for ((wp) = first_popupwin; (wp) != NULL; (wp) = (wp)->w_next)
+#define FOR_ALL_POPUPWINS_IN_TAB(tp, wp) \
+    for ((wp) = (tp)->tp_first_popupwin; (wp) != NULL; (wp) = (wp)->w_next)
+
+#define FOR_ALL_BUFFERS(buf) \
+    for ((buf) = firstbuf; (buf) != NULL; (buf) = (buf)->b_next)
+
+#define FOR_ALL_BUF_WININFO(buf, wip) \
+    for ((wip) = (buf)->b_wininfo; (wip) != NULL; (wip) = (wip)->wi_next)
+
+// Iterate through all the signs placed in a buffer
+#define FOR_ALL_SIGNS_IN_BUF(buf, sign) \
+    for ((sign) = (buf)->b_signlist; (sign) != NULL; (sign) = (sign)->se_next)
+
+#ifdef FEAT_SPELL
+#define FOR_ALL_SPELL_LANGS(slang) \
+    for ((slang) = first_lang; (slang) != NULL; (slang) = (slang)->sl_next)
+#endif
+
+// Iterate over all the items in a List
+#define FOR_ALL_LIST_ITEMS(l, li) \
+    for ((li) = (l) == NULL ? NULL : (l)->lv_first; (li) != NULL; (li) = (li)->li_next)
+
+// Iterate over all the items in a hash table
+#define FOR_ALL_HASHTAB_ITEMS(ht, hi, todo) \
+    for ((hi) = (ht)->ht_array; (todo) > 0; ++(hi))
+
+#define TUPLE_LEN(t)	    (t->tv_items.ga_len)
+#define TUPLE_ITEM(t, i) \
+	    (((typval_T *)t->tv_items.ga_data) + i)

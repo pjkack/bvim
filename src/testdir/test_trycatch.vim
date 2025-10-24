@@ -1,9 +1,7 @@
 " Test try-catch-finally exception handling
 " Most of this was formerly in test49.
 
-source check.vim
-source shared.vim
-import './vim9.vim' as v9
+import './util/vim9.vim' as v9
 
 "-------------------------------------------------------------------------------
 " Test environment							    {{{1
@@ -1850,7 +1848,7 @@ func T75_R()
       Xpath 'f'
     finally
       Xpath 'g'
-      if caught || $VIMNOERRTHROW && v:errmsg =~ 'E21'
+      if caught || $VIMNOERRTHROW && v:errmsg =~ 'E21:'
         Xpath 'h'
       endif
       break		" discard error for $VIMNOERRTHROW
@@ -1877,7 +1875,7 @@ func Test_builtin_func_error()
         Xpath 'k'
       finally
         Xpath 'l'
-        if caught || $VIMNOERRTHROW && v:errmsg =~ 'E21'
+        if caught || $VIMNOERRTHROW && v:errmsg =~ 'E21:'
           Xpath 'm'
         endif
         break		" discard error for $VIMNOERRTHROW
@@ -1896,7 +1894,7 @@ func Test_builtin_func_error()
         Xpath 'o'
       finally
         Xpath 'p'
-        if caught || $VIMNOERRTHROW && v:errmsg =~ 'E21'
+        if caught || $VIMNOERRTHROW && v:errmsg =~ 'E21:'
           Xpath 'q'
         endif
         break		" discard error for $VIMNOERRTHROW
@@ -1915,7 +1913,7 @@ func Test_builtin_func_error()
         Xpath 's'
       finally
         Xpath 't'
-        if caught || $VIMNOERRTHROW && v:errmsg =~ 'E21'
+        if caught || $VIMNOERRTHROW && v:errmsg =~ 'E21:'
           Xpath 'u'
         endif
         break		" discard error for $VIMNOERRTHROW
@@ -1938,7 +1936,7 @@ func Test_builtin_func_error()
         Xpath 'x'
       finally
         Xpath 'y'
-        if caught || $VIMNOERRTHROW && v:errmsg =~ 'E21'
+        if caught || $VIMNOERRTHROW && v:errmsg =~ 'E21:'
           Xpath 'z'
         endif
         break		" discard error for $VIMNOERRTHROW
@@ -1958,7 +1956,7 @@ func Test_builtin_func_error()
         Xpath 'B'
       finally
         Xpath 'C'
-        if caught || $VIMNOERRTHROW && v:errmsg =~ 'E21'
+        if caught || $VIMNOERRTHROW && v:errmsg =~ 'E21:'
           Xpath 'D'
         endif
         call assert_equal('a', x)
@@ -2218,6 +2216,36 @@ func Test_BufEnter_exception()
   augroup END
   augroup! bufenter_exception
   %bwipe!
+endfunc
+
+" Test for using try/catch when lines are joined by "|" or "\n"           {{{1
+func Test_try_catch_nextcmd()
+  func Throw()
+    throw "Failure"
+  endfunc
+
+  let lines =<< trim END
+    try
+      let s:x = Throw()
+    catch
+      let g:caught = 1
+    endtry
+  END
+
+  let g:caught = 0
+  call execute(lines)
+  call assert_equal(1, g:caught)
+
+  let g:caught = 0
+  call execute(join(lines, '|'))
+  call assert_equal(1, g:caught)
+
+  let g:caught = 0
+  call execute(join(lines, "\n"))
+  call assert_equal(1, g:caught)
+
+  unlet g:caught
+  delfunc Throw
 endfunc
 
 " Test for using try/catch in a user command with a failing expression    {{{1

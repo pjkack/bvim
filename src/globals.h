@@ -32,7 +32,7 @@ EXTERN long	Columns INIT(= 80);	// nr of columns in the screen
  * The characters that are currently on the screen are kept in ScreenLines[].
  * It is a single block of characters, the size of the screen plus one line.
  * The attributes for those characters are kept in ScreenAttrs[].
- * The byte offset in the line is kept in ScreenCols[].
+ * The virtual column in the line is kept in ScreenCols[].
  *
  * "LineOffset[n]" is the offset from ScreenLines[] for the start of line 'n'.
  * The same value is used for ScreenLinesUC[], ScreenAttrs[] and ScreenCols[].
@@ -131,8 +131,8 @@ EXTERN int	screen_Columns INIT(= 0);   // actual size of ScreenLines[]
  */
 EXTERN int	mod_mask INIT(= 0);		// current key modifiers
 
-// The value of "mod_mask" and the unomdified character before calling
-// merge_modifyOtherKeys().
+// The value of "mod_mask" and the unmodified character in vgetc() after it has
+// called vgetorpeek() enough times.
 EXTERN int	vgetc_mod_mask INIT(= 0);
 EXTERN int	vgetc_char INIT(= 0);
 
@@ -519,22 +519,44 @@ EXTERN int	garbage_collect_at_exit INIT(= FALSE);
 #define t_list_list_any		(static_types[70])
 #define t_const_list_list_any	(static_types[71])
 
-#define t_list_list_string	(static_types[72])
-#define t_const_list_list_string (static_types[73])
+#define t_list_list_number	(static_types[72])
+#define t_const_list_list_number (static_types[73])
 
-#define t_dict_bool		(static_types[74])
-#define t_const_dict_bool	(static_types[75])
+#define t_list_list_string	(static_types[74])
+#define t_const_list_list_string (static_types[75])
 
-#define t_dict_number		(static_types[76])
-#define t_const_dict_number	(static_types[77])
+#define t_list_list_list_number	(static_types[76])
+#define t_const_list_list_list_number (static_types[77])
 
-#define t_dict_string		(static_types[78])
-#define t_const_dict_string	(static_types[79])
+#define t_dict_bool		(static_types[78])
+#define t_const_dict_bool	(static_types[79])
 
-#define t_super			(static_types[80])
-#define t_const_super		(static_types[81])
+#define t_dict_number		(static_types[80])
+#define t_const_dict_number	(static_types[81])
 
-EXTERN type_T static_types[82]
+#define t_dict_string		(static_types[82])
+#define t_const_dict_string	(static_types[83])
+
+#define t_super			(static_types[84])
+#define t_const_super		(static_types[85])
+
+#define t_object_any		(static_types[86])
+#define t_const_object_any	(static_types[87])
+
+#define t_class			(static_types[88])
+#define t_const_class		(static_types[89])
+
+#define t_typealias		(static_types[90])
+#define t_const_typealias	(static_types[91])
+
+#define t_tuple_any		(static_types[92])
+#define t_const_tuple_any	(static_types[93])
+
+#define t_tuple_empty		(static_types[94])
+#define t_const_tuple_empty	(static_types[95])
+
+
+EXTERN type_T static_types[96]
 #ifdef DO_INIT
 = {
     // 0: t_unknown
@@ -681,25 +703,53 @@ EXTERN type_T static_types[82]
     {VAR_LIST, 0, 0, TTFLAG_STATIC, &t_list_any, NULL, NULL},
     {VAR_LIST, 0, 0, TTFLAG_STATIC|TTFLAG_CONST, &t_list_any, NULL, NULL},
 
-    // 72: t_list_list_string
+    // 74: t_list_list_number
+    {VAR_LIST, 0, 0, TTFLAG_STATIC, &t_list_number, NULL, NULL},
+    {VAR_LIST, 0, 0, TTFLAG_STATIC|TTFLAG_CONST, &t_list_number, NULL, NULL},
+
+    // 74: t_list_list_string
     {VAR_LIST, 0, 0, TTFLAG_STATIC, &t_list_string, NULL, NULL},
     {VAR_LIST, 0, 0, TTFLAG_STATIC|TTFLAG_CONST, &t_list_string, NULL, NULL},
 
-    // 74: t_dict_bool
+    // 76: t_list_list_list_number
+    {VAR_LIST, 0, 0, TTFLAG_STATIC, &t_list_list_number, NULL, NULL},
+    {VAR_LIST, 0, 0, TTFLAG_STATIC|TTFLAG_CONST, &t_list_list_number, NULL, NULL},
+
+    // 78: t_dict_bool
     {VAR_DICT, 0, 0, TTFLAG_STATIC, &t_bool, NULL, NULL},
     {VAR_DICT, 0, 0, TTFLAG_STATIC|TTFLAG_CONST, &t_bool, NULL, NULL},
 
-    // 76: t_dict_number
+    // 80: t_dict_number
     {VAR_DICT, 0, 0, TTFLAG_STATIC, &t_number, NULL, NULL},
     {VAR_DICT, 0, 0, TTFLAG_STATIC|TTFLAG_CONST, &t_number, NULL, NULL},
 
-    // 78: t_dict_string
+    // 82: t_dict_string
     {VAR_DICT, 0, 0, TTFLAG_STATIC, &t_string, NULL, NULL},
     {VAR_DICT, 0, 0, TTFLAG_STATIC|TTFLAG_CONST, &t_string, NULL, NULL},
 
-    // 80: t_super (VAR_CLASS with tt_member set to &t_bool
+    // 84: t_super (VAR_CLASS with tt_member set to &t_bool
     {VAR_CLASS, 0, 0, TTFLAG_STATIC, &t_bool, NULL, NULL},
     {VAR_CLASS, 0, 0, TTFLAG_STATIC|TTFLAG_CONST, &t_bool, NULL, NULL},
+
+    // 86: t_object_any
+    {VAR_OBJECT, 0, 0, TTFLAG_STATIC, NULL, NULL, NULL},
+    {VAR_OBJECT, 0, 0, TTFLAG_STATIC|TTFLAG_CONST, NULL, NULL, NULL},
+
+    // 88: t_class
+    {VAR_CLASS, 0, 0, TTFLAG_STATIC, NULL, NULL, NULL},
+    {VAR_CLASS, 0, 0, TTFLAG_STATIC|TTFLAG_CONST, NULL, NULL, NULL},
+
+    // 90: t_typealias
+    {VAR_TYPEALIAS, 0, 0, TTFLAG_STATIC, NULL, NULL, NULL},
+    {VAR_TYPEALIAS, 0, 0, TTFLAG_STATIC|TTFLAG_CONST, NULL, NULL, NULL},
+
+    // 92: t_tuple_any
+    {VAR_TUPLE, -1, 0, TTFLAG_STATIC, NULL, NULL, NULL},
+    {VAR_TUPLE, -1, 0, TTFLAG_STATIC|TTFLAG_CONST, NULL, NULL, NULL},
+
+    // 94: t_tuple_empty
+    {VAR_TUPLE, 0, 0, TTFLAG_STATIC, NULL, NULL, NULL},
+    {VAR_TUPLE, 0, 0, TTFLAG_STATIC|TTFLAG_CONST, NULL, NULL, NULL},
 }
 #endif
 ;
@@ -778,22 +828,9 @@ EXTERN int	is_mac_terminal INIT(= FALSE);  // recognized Terminal.app
 #endif
 
 EXTERN int	autocmd_busy INIT(= FALSE);	// Is apply_autocmds() busy?
-EXTERN int	autocmd_no_enter INIT(= FALSE); // *Enter autocmds disabled
-EXTERN int	autocmd_no_leave INIT(= FALSE); // *Leave autocmds disabled
-
-EXTERN int	modified_was_set;		// did ":set modified"
-EXTERN int	did_filetype INIT(= FALSE);	// FileType event found
-EXTERN int	keep_filetype INIT(= FALSE);	// value for did_filetype when
-						// starting to execute
-						// autocommands
-
-// Set by the apply_autocmds_group function if the given event is equal to
-// EVENT_FILETYPE. Used by the readfile function in order to determine if
-// EVENT_BUFREADPOST triggered the EVENT_FILETYPE.
-//
-// Relying on this value requires one to reset it prior calling
-// apply_autocmds_group.
-EXTERN int	au_did_filetype INIT(= FALSE);
+EXTERN int	autocmd_no_enter INIT(= FALSE); // Buf/WinEnter autocmds disabled
+EXTERN int	autocmd_no_leave INIT(= FALSE); // Buf/WinLeave autocmds disabled
+EXTERN int	tabpage_move_disallowed INIT(= FALSE);  // moving tabpages around disallowed
 
 // When deleting the current buffer, another one must be loaded.  If we know
 // which one is preferred, au_new_curbuf is set to it
@@ -847,6 +884,7 @@ EXTERN int	drag_sep_line INIT(= FALSE);	// dragging vert separator
 #ifdef FEAT_DIFF
 // Value set from 'diffopt'.
 EXTERN int	diff_context INIT(= 6);		// context for folds
+EXTERN int      linematch_lines INIT(= 0);      // number of lines for diff line match
 EXTERN int	diff_foldcolumn INIT(= 2);	// 'foldcolumn' for diff mode
 EXTERN int	diff_need_scrollbind INIT(= FALSE);
 #endif
@@ -873,10 +911,6 @@ EXTERN vimmenu_T	*root_menu INIT(= NULL);
  * overruling of menus that the user already defined.
  */
 EXTERN int	sys_menu INIT(= FALSE);
-
-#define FOR_ALL_MENUS(m) for ((m) = root_menu; (m) != NULL; (m) = (m)->next)
-#define FOR_ALL_CHILD_MENUS(p, c) \
-    for ((c) = (p)->children; (c) != NULL; (c) = (c)->next)
 #endif
 
 #ifdef FEAT_GUI
@@ -937,9 +971,9 @@ EXTERN int	gui_win_y INIT(= -1);
 #endif
 
 #ifdef FEAT_CLIPBOARD
-EXTERN Clipboard_T clip_star;	// PRIMARY selection in X11
-# ifdef FEAT_X11
-EXTERN Clipboard_T clip_plus;	// CLIPBOARD selection in X11
+EXTERN Clipboard_T clip_star;	// PRIMARY selection in X11/Wayland
+# if defined(FEAT_X11) || defined(FEAT_WAYLAND_CLIPBOARD)
+EXTERN Clipboard_T clip_plus;	// CLIPBOARD selection in X11/Wayland
 # else
 #  define clip_plus clip_star	// there is only one clipboard
 #  define ONE_CLIPBOARD
@@ -965,30 +999,9 @@ EXTERN int	clip_unnamed_saved INIT(= 0);
  */
 EXTERN win_T	*firstwin;		// first window
 EXTERN win_T	*lastwin;		// last window
-EXTERN win_T	*prevwin INIT(= NULL);	// previous window
+EXTERN win_T	*prevwin INIT(= NULL);	// previous window (may equal curwin)
 #define ONE_WINDOW (firstwin == lastwin)
 #define W_NEXT(wp) ((wp)->w_next)
-#define FOR_ALL_WINDOWS(wp) for ((wp) = firstwin; (wp) != NULL; (wp) = (wp)->w_next)
-#define FOR_ALL_FRAMES(frp, first_frame) \
-    for ((frp) = first_frame; (frp) != NULL; (frp) = (frp)->fr_next)
-#define FOR_ALL_TABPAGES(tp) for ((tp) = first_tabpage; (tp) != NULL; (tp) = (tp)->tp_next)
-#define FOR_ALL_WINDOWS_IN_TAB(tp, wp) \
-    for ((wp) = ((tp) == NULL || (tp) == curtab) \
-	    ? firstwin : (tp)->tp_firstwin; (wp); (wp) = (wp)->w_next)
-/*
- * When using this macro "break" only breaks out of the inner loop. Use "goto"
- * to break out of the tabpage loop.
- */
-#define FOR_ALL_TAB_WINDOWS(tp, wp) \
-    for ((tp) = first_tabpage; (tp) != NULL; (tp) = (tp)->tp_next) \
-	for ((wp) = ((tp) == curtab) \
-		? firstwin : (tp)->tp_firstwin; (wp); (wp) = (wp)->w_next)
-
-#define FOR_ALL_POPUPWINS(wp) \
-    for ((wp) = first_popupwin; (wp) != NULL; (wp) = (wp)->w_next)
-#define FOR_ALL_POPUPWINS_IN_TAB(tp, wp) \
-    for ((wp) = (tp)->tp_first_popupwin; (wp) != NULL; (wp) = (wp)->w_next)
-
 
 EXTERN win_T	*curwin;	// currently active window
 
@@ -999,9 +1012,10 @@ EXTERN win_T	*curwin;	// currently active window
 #define AUCMD_WIN_COUNT 5
 
 typedef struct {
-  win_T	*auc_win;	// Window used in aucmd_prepbuf().  When not NULL the
-			// window has been allocated.
-  int	auc_win_used;	// This auc_win is being used.
+    // Window used in aucmd_prepbuf().  When not NULL the window has been
+    // allocated.
+    win_T	*auc_win;
+    int		auc_win_used;	// This auc_win is being used.
 } aucmdwin_T;
 
 EXTERN aucmdwin_T aucmd_win[AUCMD_WIN_COUNT];
@@ -1042,6 +1056,10 @@ EXTERN tabpage_T    *curtab;
 EXTERN tabpage_T    *lastused_tabpage;
 EXTERN int	    redraw_tabline INIT(= FALSE);  // need to redraw tabline
 
+#if defined(FEAT_TABPANEL)
+EXTERN int	    redraw_tabpanel INIT(= FALSE);  // need to redraw tabpanel
+#endif
+
 /*
  * All buffers are linked in a list. 'firstbuf' points to the first entry,
  * 'lastbuf' to the last entry and 'curbuf' to the currently active buffer.
@@ -1049,16 +1067,6 @@ EXTERN int	    redraw_tabline INIT(= FALSE);  // need to redraw tabline
 EXTERN buf_T	*firstbuf INIT(= NULL);	// first buffer
 EXTERN buf_T	*lastbuf INIT(= NULL);	// last buffer
 EXTERN buf_T	*curbuf INIT(= NULL);	// currently active buffer
-
-#define FOR_ALL_BUFFERS(buf) \
-    for ((buf) = firstbuf; (buf) != NULL; (buf) = (buf)->b_next)
-
-#define FOR_ALL_BUF_WININFO(buf, wip) \
-    for ((wip) = (buf)->b_wininfo; (wip) != NULL; (wip) = (wip)->wi_next)
-
-// Iterate through all the signs placed in a buffer
-#define FOR_ALL_SIGNS_IN_BUF(buf, sign) \
-	for ((sign) = (buf)->b_signlist; (sign) != NULL; (sign) = (sign)->se_next)
 
 // Flag that is set when switching off 'swapfile'.  It means that all blocks
 // are to be loaded into memory.  Shouldn't be global...
@@ -1156,6 +1164,8 @@ EXTERN int	VIsual_select INIT(= FALSE);
 				// whether Select mode is active
 EXTERN int	VIsual_select_reg INIT(= 0);
 				// register name for Select mode
+EXTERN int  VIsual_select_exclu_adj INIT(= FALSE);
+				// whether incremented cursor during exclusive selection
 EXTERN int	restart_VIsual_select INIT(= 0);
 				// restart Select mode when next cmd finished
 EXTERN int	VIsual_reselect;
@@ -1397,7 +1407,7 @@ EXTERN int ex_no_reprint INIT(= FALSE); // no need to print after z or p
 EXTERN int reg_recording INIT(= 0);	// register for recording  or zero
 EXTERN int reg_executing INIT(= 0);	// register being executed or zero
 // Flag set when peeking a character and found the end of executed register
-EXTERN int pending_end_reg_executing INIT(= 0);
+EXTERN int pending_end_reg_executing INIT(= FALSE);
 
 // Set when a modifyOtherKeys sequence was seen, then simplified mappings will
 // no longer be used.  To be combined with modify_otherkeys_state.
@@ -1604,7 +1614,7 @@ EXTERN int	autocmd_bufnr INIT(= 0);     // fnum for <abuf> on cmdline
 EXTERN char_u	*autocmd_match INIT(= NULL); // name for <amatch> on cmdline
 EXTERN int	aucmd_cmdline_changed_count INIT(= 0);
 
-EXTERN int	did_cursorhold INIT(= FALSE); // set when CursorHold t'gerd
+EXTERN int	did_cursorhold INIT(= TRUE);  // set when CursorHold t'gerd
 EXTERN pos_T	last_cursormoved	      // for CursorMoved event
 # ifdef DO_INIT
 		    = {0, 0, 0}
@@ -1684,6 +1694,7 @@ extern char_u *all_lflags;
 # ifdef VMS
 extern char_u *compiler_version;
 extern char_u *compiled_arch;
+extern char_u *compiled_vers;
 # endif
 extern char_u *compiled_user;
 extern char_u *compiled_sys;
@@ -1706,8 +1717,23 @@ EXTERN int	km_startsel INIT(= FALSE);
 
 EXTERN int	cmdwin_type INIT(= 0);	// type of cmdline window or 0
 EXTERN int	cmdwin_result INIT(= 0); // result of cmdline window or 0
+EXTERN buf_T	*cmdwin_buf INIT(= NULL); // buffer of cmdline window or NULL
+EXTERN win_T	*cmdwin_win INIT(= NULL); // window of cmdline window or NULL
 
 EXTERN char_u no_lines_msg[]	INIT(= N_("--No lines in buffer--"));
+
+EXTERN char typename_unknown[]	INIT(= N_("unknown"));
+EXTERN char typename_int[]	INIT(= N_("int"));
+EXTERN char typename_longint[]	INIT(= N_("long int"));
+EXTERN char typename_longlongint[]	INIT(= N_("long long int"));
+EXTERN char typename_unsignedint[]	INIT(= N_("unsigned int"));
+EXTERN char typename_unsignedlongint[]	INIT(= N_("unsigned long int"));
+EXTERN char typename_unsignedlonglongint[]	INIT(= N_("unsigned long long int"));
+EXTERN char typename_pointer[]	INIT(= N_("pointer"));
+EXTERN char typename_percent[]	INIT(= N_("percent"));
+EXTERN char typename_char[] INIT(= N_("char"));
+EXTERN char typename_string[]	INIT(= N_("string"));
+EXTERN char typename_float[]	INIT(= N_("float"));
 
 /*
  * When ":global" is used to number of substitutions and changed lines is
@@ -1842,7 +1868,7 @@ EXTERN Window	commWindow INIT(= None);
 EXTERN Window	clientWindow INIT(= None);
 EXTERN Atom	commProperty INIT(= None);
 EXTERN char_u	*serverDelayedStartName INIT(= NULL);
-# else
+# elif defined(MSWIN)
 #  ifdef PROTO
 typedef int HWND;
 #  endif
@@ -1874,9 +1900,6 @@ EXTERN disptick_T	display_tick INIT(= 0);
 // Line in which spell checking wasn't highlighted because it touched the
 // cursor position in Insert mode.
 EXTERN linenr_T		spell_redraw_lnum INIT(= 0);
-
-#define FOR_ALL_SPELL_LANGS(slang) \
-    for ((slang) = first_lang; (slang) != NULL; (slang) = (slang)->sl_next)
 #endif
 
 #ifdef FEAT_CONCEAL
@@ -1951,7 +1974,9 @@ EXTERN int  reset_term_props_on_termresponse INIT(= FALSE);
 EXTERN int  disable_vterm_title_for_testing INIT(= FALSE);
 EXTERN long override_sysinfo_uptime INIT(= -1);
 EXTERN int  override_autoload INIT(= FALSE);
+EXTERN int  override_defcompile INIT(= FALSE);
 EXTERN int  ml_get_alloc_lines INIT(= FALSE);
+EXTERN int  ignore_unreachable_code_for_testing INIT(= FALSE);
 
 EXTERN int  in_free_unref_items INIT(= FALSE);
 #endif
@@ -1963,7 +1988,7 @@ EXTERN int  timer_busy INIT(= 0);   // when timer is inside vgetc() then > 0
 #ifdef FEAT_EVAL
 EXTERN int  input_busy INIT(= 0);   // when inside get_user_input() then > 0
 
-EXTERN typval_T	*lval_root INIT(= NULL);
+EXTERN lval_root_T	*lval_root INIT(= NULL);
 #endif
 
 #ifdef FEAT_BEVAL_TERM
@@ -2016,11 +2041,6 @@ EXTERN char *ch_part_names[]
 
 // Whether a redraw is needed for appending a line to a buffer.
 EXTERN int channel_need_redraw INIT(= FALSE);
-
-# define FOR_ALL_CHANNELS(ch) \
-    for ((ch) = first_channel; (ch) != NULL; (ch) = (ch)->ch_next)
-# define FOR_ALL_JOBS(job) \
-    for ((job) = first_job; (job) != NULL; (job) = (job)->jv_next)
 #endif
 
 #ifdef FEAT_EVAL
@@ -2032,14 +2052,6 @@ EXTERN int did_repeated_msg INIT(= 0);
 # define REPEATED_MSG_LOOKING	    1
 # define REPEATED_MSG_SAFESTATE	    2
 #endif
-
-#if defined(FEAT_DIFF)
-#define FOR_ALL_DIFFBLOCKS_IN_TAB(tp, dp) \
-    for ((dp) = (tp)->tp_first_diff; (dp) != NULL; (dp) = (dp)->df_next)
-#endif
-
-#define FOR_ALL_LIST_ITEMS(l, li) \
-    for ((li) = (l) == NULL ? NULL : (l)->lv_first; (li) != NULL; (li) = (li)->li_next)
 
 // While executing a regexp and set to OPTION_MAGIC_ON or OPTION_MAGIC_OFF this
 // overrules p_magic.  Otherwise set to OPTION_MAGIC_NOT_SET.
@@ -2055,3 +2067,59 @@ EXTERN int skip_update_topline INIT(= FALSE);
 // 'showcmd' buffer shared between normal.c and statusline code
 #define SHOWCMD_BUFLEN (SHOWCMD_COLS + 1 + 30)
 EXTERN char_u showcmd_buf[SHOWCMD_BUFLEN];
+
+#ifdef FEAT_TERMGUICOLORS
+EXTERN int	p_tgc_set INIT(= FALSE);
+#endif
+
+// If we've already warned about missing/unavailable clipboard
+EXTERN int did_warn_clipboard INIT(= FALSE);
+
+#ifdef FEAT_CLIPBOARD
+EXTERN clipmethod_T clipmethod INIT(= CLIPMETHOD_NONE);
+#endif
+
+#ifdef FEAT_WAYLAND
+
+// Don't connect to Wayland compositor if TRUE
+EXTERN int wayland_no_connect INIT(= FALSE);
+
+// Wayland display name (ex. wayland-0). Can be NULL
+EXTERN char *wayland_display_name INIT(= NULL);
+
+// Wayland display file descriptor; set by wayland_init_client()
+EXTERN int wayland_display_fd;
+
+#endif
+
+#if defined(FEAT_CLIENTSERVER) && !defined(MSWIN)
+
+// Backend for clientserver functionality
+typedef enum {
+    CLIENTSERVER_METHOD_NONE,
+    CLIENTSERVER_METHOD_X11,
+    CLIENTSERVER_METHOD_SOCKET
+} clientserver_method_T;
+
+// Default to X11 if compiled with support for it, else use socket server.
+# if defined(FEAT_X11) && defined(FEAT_SOCKETSERVER)
+EXTERN clientserver_method_T clientserver_method
+# else
+// Since we aren't going to be changing clientserver_method, make it constant to
+// allow compiler optimizations.
+EXTERN const clientserver_method_T clientserver_method
+# endif
+# ifdef FEAT_X11
+INIT(= CLIENTSERVER_METHOD_X11);
+# elif defined(FEAT_SOCKETSERVER)
+INIT(= CLIENTSERVER_METHOD_SOCKET);
+# else
+INIT(= CLIENTSERVER_METHOD_NONE);
+# endif
+
+#endif
+
+#ifdef FEAT_SOCKETSERVER
+// Path to socket of last client that communicated with us
+EXTERN char_u *client_socket INIT(= NULL);
+#endif

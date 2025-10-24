@@ -85,6 +85,8 @@ map_free(mapblock_T **mpp)
 
     mp = *mpp;
     vim_free(mp->m_keys);
+    if (mp->m_alt != NULL)
+	mp->m_alt->m_alt = NULL;
     vim_free(mp->m_str);
     vim_free(mp->m_orig_str);
     *mpp = mp->m_next;
@@ -213,7 +215,7 @@ theend:
     --map_locked;
 }
 
-    static int
+    static mapblock_T *
 map_add(
 	mapblock_T  **map_table,
 	mapblock_T  **abbr_table,
@@ -227,7 +229,7 @@ map_add(
 	int	    is_abbr,
 #ifdef FEAT_EVAL
 	int	    expr,
-	scid_T	    sid,	    // -1 to use current_sctx
+	scid_T	    sid,	    // 0 to use current_sctx
 	int	    scriptversion,
 	linenr_T    lnum,
 #endif
@@ -236,7 +238,7 @@ map_add(
     mapblock_T	*mp = ALLOC_CLEAR_ONE(mapblock_T);
 
     if (mp == NULL)
-	return FAIL;
+	return NULL;
 
     // If CTRL-C has been mapped, don't always use it for Interrupting.
     if (*keys == Ctrl_C)
@@ -256,7 +258,7 @@ map_add(
 	vim_free(mp->m_str);
 	vim_free(mp->m_orig_str);
 	vim_free(mp);
-	return FAIL;
+	return NULL;
     }
     mp->m_keylen = (int)STRLEN(mp->m_keys);
     mp->m_noremap = noremap;
@@ -266,7 +268,7 @@ map_add(
     mp->m_simplified = simplified;
 #ifdef FEAT_EVAL
     mp->m_expr = expr;
-    if (sid > 0)
+    if (sid != 0)
     {
 	mp->m_script_ctx.sc_sid = sid;
 	mp->m_script_ctx.sc_lnum = lnum;
@@ -292,7 +294,7 @@ map_add(
 	mp->m_next = map_table[n];
 	map_table[n] = mp;
     }
-    return OK;
+    return mp;
 }
 
 /*
@@ -406,9 +408,11 @@ list_mappings(
  * noreabbr {lhs} {rhs}	    : same, but no remapping for {rhs}
  * unabbr {lhs}		    : remove abbreviation for {lhs}
  *
- * maptype: MAPTYPE_MAP for :map
- *	    MAPTYPE_UNMAP for :unmap
- *	    MAPTYPE_NOREMAP for noremap
+ * maptype: MAPTYPE_MAP for :map or :abbr
+ *	    MAPTYPE_UNMAP for :unmap or :unabbr
+ *	    MAPTYPE_NOREMAP for :noremap or :noreabbr
+ *	    MAPTYPE_UNMAP_LHS is like MAPTYPE_UNMAP, but doesn't try to match
+ *	    with {rhs} if there is no match with {lhs}.
  *
  * arg is pointer to any arguments. Note: arg cannot be a read-only string,
  * it will be modified.
@@ -444,6 +448,7 @@ do_map(
 {
     char_u	*keys;
     mapblock_T	*mp, **mpp;
+    mapblock_T	*mp_result[2] = {NULL, NULL};
     char_u	*rhs;
     char_u	*p;
     int		n;
@@ -467,12 +472,19 @@ do_map(
     int		expr = FALSE;
 #endif
     int		did_simplify = FALSE;
+    int		unmap_lhs_only = FALSE;
     int		noremap;
     char_u      *orig_rhs;
 
     keys = arg;
     map_table = maphash;
     abbr_table = &first_abbr;
+
+    if (maptype == MAPTYPE_UNMAP_LHS)
+    {
+	unmap_lhs_only = TRUE;
+	maptype = MAPTYPE_UNMAP;
+    }
 
     // For ":noremap" don't remap, otherwise do remap.
     if (maptype == MAPTYPE_NOREMAP)
@@ -590,9 +602,9 @@ do_map(
 
 	if (special)
 	    flags |= REPTERM_SPECIAL;
-	new_keys = replace_termcodes(keys, &keys_buf, flags, &did_simplify);
+	new_keys = replace_termcodes(keys, &keys_buf, 0, flags, &did_simplify);
 	if (did_simplify)
-	    (void)replace_termcodes(keys, &alt_keys_buf,
+	    (void)replace_termcodes(keys, &alt_keys_buf, 0,
 					    flags | REPTERM_NO_SIMPLIFY, NULL);
 	keys = new_keys;
     }
@@ -602,7 +614,7 @@ do_map(
 	if (STRICMP(rhs, "<nop>") == 0)	    // "<Nop>" means nothing
 	    rhs = (char_u *)"";
 	else
-	    rhs = replace_termcodes(rhs, &arg_buf,
+	    rhs = replace_termcodes(rhs, &arg_buf, 0,
 			REPTERM_DO_LT | (special ? REPTERM_SPECIAL : 0), NULL);
     }
 
@@ -616,6 +628,7 @@ do_map(
 	int	did_local = FALSE;
 	int	keyround1_simplified = keyround == 1 && did_simplify;
 	int	round;
+	int	num_rounds;
 
 	if (keyround == 2)
 	{
@@ -739,8 +752,8 @@ do_map(
 	// an entry with a matching 'to' part. This was done to allow
 	// ":ab foo bar" to be unmapped by typing ":unab foo", where "foo" will
 	// be replaced by "bar" because of the abbreviation.
-	for (round = 0; (round == 0 || maptype == MAPTYPE_UNMAP) && round <= 1
-					       && !did_it && !got_int; ++round)
+	num_rounds = maptype == MAPTYPE_UNMAP && !unmap_lhs_only ? 2 : 1;
+	for (round = 0; round < num_rounds && !did_it && !got_int; ++round)
 	{
 	    // need to loop over all hash lists
 	    for (int hash = 0; hash < 256 && !got_int; ++hash)
@@ -844,6 +857,8 @@ do_map(
 					retval = 4;		// no mem
 					goto theend;
 				    }
+				    if (mp->m_alt != NULL)
+					mp->m_alt = mp->m_alt->m_alt = NULL;
 				    vim_free(mp->m_str);
 				    mp->m_str = newstr;
 				    vim_free(mp->m_orig_str);
@@ -858,6 +873,7 @@ do_map(
 				    mp->m_script_ctx = current_sctx;
 				    mp->m_script_ctx.sc_lnum += SOURCING_LNUM;
 #endif
+				    mp_result[keyround - 1] = mp;
 				    did_it = TRUE;
 				}
 			    }
@@ -921,16 +937,23 @@ do_map(
 	    continue;	// have added the new entry already
 
 	// Get here when adding a new entry to the maphash[] list or abbrlist.
-	if (map_add(map_table, abbr_table, keys, rhs, orig_rhs,
-		    noremap, nowait, silent, mode, abbrev,
+	mp_result[keyround - 1] = map_add(map_table, abbr_table, keys,
+		    rhs, orig_rhs, noremap, nowait, silent, mode, abbrev,
 #ifdef FEAT_EVAL
-		    expr, /* sid */ -1, /* scriptversion */ 0, /* lnum */ 0,
+		    expr, /* sid */ 0, /* scriptversion */ 0, /* lnum */ 0,
 #endif
-		    keyround1_simplified) == FAIL)
+		    keyround1_simplified);
+	if (mp_result[keyround - 1] == NULL)
 	{
 	    retval = 4;	    // no mem
 	    goto theend;
 	}
+    }
+
+    if (mp_result[0] != NULL && mp_result[1] != NULL)
+    {
+	mp_result[0]->m_alt = mp_result[1];
+	mp_result[1]->m_alt = mp_result[0];
     }
 
 theend:
@@ -1133,7 +1156,7 @@ map_to_exists(char_u *str, char_u *modechars, int abbr)
     char_u	*buf;
     int		retval;
 
-    rhs = replace_termcodes(str, &buf, REPTERM_DO_LT, NULL);
+    rhs = replace_termcodes(str, &buf, 0, REPTERM_DO_LT, NULL);
 
     retval = map_to_exists_mode(rhs, mode_str2flags(modechars), abbr);
     vim_free(buf);
@@ -1410,7 +1433,7 @@ ExpandMappings(
 	else
 	{
 	    score = fuzzy_match_str(p, pat);
-	    match = (score != 0);
+	    match = (score != FUZZY_SCORE_NONE);
 	}
 
 	if (!match)
@@ -1457,7 +1480,7 @@ ExpandMappings(
 	    else
 	    {
 		score = fuzzy_match_str(p, pat);
-		match = (score != 0);
+		match = (score != FUZZY_SCORE_NONE);
 	    }
 
 	    if (!match)
@@ -2043,7 +2066,7 @@ makemap(
 			c1 = 't';
 			break;
 		    default:
-			iemsg(_(e_makemap_illegal_mode));
+			iemsg(e_makemap_illegal_mode);
 			return FAIL;
 		}
 		do	// do this twice if c2 is set, 3 times with c3
@@ -2157,7 +2180,18 @@ put_escstr(FILE *fd, char_u *strstart, int what)
 	    {
 		modifiers = str[2];
 		str += 3;
-		c = *str;
+
+		// Modifiers can be applied too to multi-byte characters.
+		p = mb_unescape(&str);
+
+		if (p == NULL)
+		    c = *str;
+		else
+		{
+		    // retrieve codepoint (character number) from unescaped string
+		    c = (*mb_ptr2char)(p);
+		    --str;
+		}
 	    }
 	    if (c == K_SPECIAL)
 	    {
@@ -2231,12 +2265,12 @@ check_map_keycodes(void)
     int		abbr;
     int		hash;
     buf_T	*bp;
-    ESTACK_CHECK_DECLARATION
+    ESTACK_CHECK_DECLARATION;
 
     validate_maphash();
     // avoids giving error messages
     estack_push(ETYPE_INTERNAL, (char_u *)"mappings", 0);
-    ESTACK_CHECK_SETUP
+    ESTACK_CHECK_SETUP;
 
     // Do this once for each buffer, and then once for global
     // mappings/abbreviations with bp == NULL
@@ -2293,7 +2327,7 @@ check_map_keycodes(void)
 	if (bp == NULL)
 	    break;
     }
-    ESTACK_CHECK_NOW
+    ESTACK_CHECK_NOW;
     estack_pop();
 }
 
@@ -2488,14 +2522,15 @@ get_maparg(typval_T *argvars, typval_T *rettv, int exact)
 
     mode = get_map_mode(&which, 0);
 
-    keys_simplified = replace_termcodes(keys, &keys_buf, flags, &did_simplify);
+    keys_simplified = replace_termcodes(keys, &keys_buf, 0, flags,
+								&did_simplify);
     rhs = check_map(keys_simplified, mode, exact, FALSE, abbr,
 							   &mp, &buffer_local);
     if (did_simplify)
     {
 	// When the lhs is being simplified the not-simplified keys are
 	// preferred for printing, like in do_map().
-	(void)replace_termcodes(keys, &alt_keys_buf,
+	(void)replace_termcodes(keys, &alt_keys_buf, 0,
 					flags | REPTERM_NO_SIMPLIFY, NULL);
 	rhs = check_map(alt_keys_buf, mode, exact, FALSE, abbr, &mp,
 								&buffer_local);
@@ -2573,13 +2608,17 @@ f_maplist(typval_T *argvars UNUSED, typval_T *rettv)
 		if ((d = dict_alloc()) == NULL)
 		    return;
 		if (list_append_dict(rettv->vval.v_list, d) == FAIL)
+		{
+		    dict_unref(d);
 		    return;
+		}
 
 		keys_buf = NULL;
 		did_simplify = FALSE;
 
 		lhs = str2special_save(mp->m_keys, TRUE, FALSE);
-		(void)replace_termcodes(lhs, &keys_buf, flags, &did_simplify);
+		(void)replace_termcodes(lhs, &keys_buf, 0, flags,
+								&did_simplify);
 		vim_free(lhs);
 
 		mapblock2dict(mp, d,
@@ -2705,6 +2744,7 @@ f_mapset(typval_T *argvars, typval_T *rettv UNUSED)
     int		nowait;
     char_u	*arg;
     int		dict_only;
+    mapblock_T	*mp_result[2] = {NULL, NULL};
 
     // If first arg is a dict, then that's the only arg permitted.
     dict_only = argvars[0].v_type == VAR_DICT;
@@ -2758,11 +2798,6 @@ f_mapset(typval_T *argvars, typval_T *rettv UNUSED)
 	return;
     }
     orig_rhs = rhs;
-    if (STRICMP(rhs, "<nop>") == 0)	// "<Nop>" means nothing
-	rhs = (char_u *)"";
-    else
-	rhs = replace_termcodes(rhs, &arg_buf,
-					REPTERM_DO_LT | REPTERM_SPECIAL, NULL);
 
     noremap = dict_get_number(d, "noremap") ? REMAP_NONE: 0;
     if (dict_get_number(d, "script") != 0)
@@ -2775,6 +2810,12 @@ f_mapset(typval_T *argvars, typval_T *rettv UNUSED)
     buffer = dict_get_number(d, "buffer");
     nowait = dict_get_number(d, "nowait") != 0;
     // mode from the dict is not used
+
+    if (STRICMP(rhs, "<nop>") == 0)	// "<Nop>" means nothing
+	rhs = (char_u *)"";
+    else
+	rhs = replace_termcodes(rhs, &arg_buf, sid,
+					REPTERM_DO_LT | REPTERM_SPECIAL, NULL);
 
     if (buffer)
     {
@@ -2797,15 +2838,23 @@ f_mapset(typval_T *argvars, typval_T *rettv UNUSED)
 	if (arg == NULL)
 	    return;
     }
-    do_map(MAPTYPE_UNMAP, arg, mode, is_abbr);
+    do_map(MAPTYPE_UNMAP_LHS, arg, mode, is_abbr);
     vim_free(arg);
 
-    (void)map_add(map_table, abbr_table, lhsraw, rhs, orig_rhs, noremap,
-	    nowait, silent, mode, is_abbr, expr, sid, scriptversion, lnum, 0);
+    mp_result[0] = map_add(map_table, abbr_table, lhsraw, rhs, orig_rhs,
+			    noremap, nowait, silent, mode, is_abbr, expr, sid,
+			    scriptversion, lnum, 0);
     if (lhsrawalt != NULL)
-	(void)map_add(map_table, abbr_table, lhsrawalt, rhs, orig_rhs, noremap,
-		nowait, silent, mode, is_abbr, expr, sid, scriptversion,
-								      lnum, 1);
+	mp_result[1] = map_add(map_table, abbr_table, lhsrawalt, rhs, orig_rhs,
+			    noremap, nowait, silent, mode, is_abbr, expr, sid,
+			    scriptversion, lnum, 1);
+
+    if (mp_result[0] != NULL && mp_result[1] != NULL)
+    {
+	mp_result[0]->m_alt = mp_result[1];
+	mp_result[1]->m_alt = mp_result[0];
+    }
+
     vim_free(arg_buf);
 }
 #endif
@@ -3111,7 +3160,7 @@ did_set_langmap(optset_T *args UNUSED)
 		    {
 			if (p[0] != ',')
 			{
-			    sprintf(args->os_errbuf,
+			    vim_snprintf(args->os_errbuf, args->os_errbuflen,
 				    _(e_langmap_extra_characters_after_semicolon_str),
 				    p);
 			    return args->os_errbuf;

@@ -408,6 +408,21 @@
     <ClCompile Include="vim9class.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="fuzzy.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="tuple.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gc.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="linematch.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vim9generics.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="bvim.rc">
@@ -923,6 +938,18 @@
       <Filter>Proto Files</Filter>
     </None>
     <None Include="proto\vim9class.pro">
+      <Filter>Proto Files</Filter>
+    </None>
+    <None Include="proto\fuzzy.pro">
+      <Filter>Proto Files</Filter>
+    </None>
+    <None Include="proto\tuple.pro">
+      <Filter>Proto Files</Filter>
+    </None>
+    <None Include="proto\gc.pro">
+      <Filter>Proto Files</Filter>
+    </None>
+    <None Include="proto\vim9generics.pro">
       <Filter>Proto Files</Filter>
     </None>
   </ItemGroup>

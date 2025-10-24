@@ -87,7 +87,7 @@ match_add(
     m = ALLOC_CLEAR_ONE(matchitem_T);
     if (m == NULL)
 	return -1;
-    if (pos_list != NULL)
+    if (pos_list != NULL && pos_list->lv_len > 0)
     {
 	m->mit_pos_array = ALLOC_CLEAR_MULT(llpos_T, pos_list->lv_len);
 	if (m->mit_pos_array == NULL)
@@ -187,20 +187,7 @@ match_add(
 	// Calculate top and bottom lines for redrawing area
 	if (toplnum != 0)
 	{
-	    if (wp->w_buffer->b_mod_set)
-	    {
-		if (wp->w_buffer->b_mod_top > toplnum)
-		    wp->w_buffer->b_mod_top = toplnum;
-		if (wp->w_buffer->b_mod_bot < botlnum)
-		    wp->w_buffer->b_mod_bot = botlnum;
-	    }
-	    else
-	    {
-		wp->w_buffer->b_mod_set = TRUE;
-		wp->w_buffer->b_mod_top = toplnum;
-		wp->w_buffer->b_mod_bot = botlnum;
-		wp->w_buffer->b_mod_xlines = 0;
-	    }
+	    redraw_win_range_later(wp, toplnum, botlnum);
 	    m->mit_toplnum = toplnum;
 	    m->mit_botlnum = botlnum;
 	    rtype = UPD_VALID;
@@ -269,20 +256,7 @@ match_delete(win_T *wp, int id, int perr)
     vim_free(cur->mit_pattern);
     if (cur->mit_toplnum != 0)
     {
-	if (wp->w_buffer->b_mod_set)
-	{
-	    if (wp->w_buffer->b_mod_top > cur->mit_toplnum)
-		wp->w_buffer->b_mod_top = cur->mit_toplnum;
-	    if (wp->w_buffer->b_mod_bot < cur->mit_botlnum)
-		wp->w_buffer->b_mod_bot = cur->mit_botlnum;
-	}
-	else
-	{
-	    wp->w_buffer->b_mod_set = TRUE;
-	    wp->w_buffer->b_mod_top = cur->mit_toplnum;
-	    wp->w_buffer->b_mod_bot = cur->mit_botlnum;
-	    wp->w_buffer->b_mod_xlines = 0;
-	}
+	redraw_win_range_later(wp, cur->mit_toplnum, cur->mit_botlnum);
 	rtype = UPD_VALID;
     }
     vim_free(cur->mit_pos_array);
@@ -1294,7 +1268,7 @@ f_matchaddpos(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
 	return;
     }
     l = argvars[1].vval.v_list;
-    if (l == NULL)
+    if (l == NULL || l->lv_len == 0)
 	return;
 
     if (argvars[2].v_type != VAR_UNKNOWN)
