@@ -7,7 +7,9 @@
 #define BORE_SEARCH_JOBS 8
 #define BORE_SEARCH_RESULTS 8
 #define BORE_CACHELINE 64 
-#define BORE_MAXMATCHPERFILE 100
+#define BORE_MAX_MATCH_PER_FILE 1000
+#define BORE_MAX_MATCH_TOTAL 100000
+#define BORE_MAX_QUICKFIX_ITEMS 1000
 #define BORE_MAX_SEARCH_EXTENSIONS 9
 #define BORE_HUGEFILE_SIZE 16 * 1024 * 1024
 
@@ -79,7 +81,7 @@ typedef struct __declspec(align(BORE_CACHELINE)) bore_search_job_t
 typedef struct __declspec(align(BORE_CACHELINE)) bore_search_result_t
 { 
     int hits;
-    bore_match_t result[BORE_MAXMATCHPERFILE];  
+    bore_match_t result[BORE_MAX_MATCH_PER_FILE];  
 } bore_search_result_t;
 
 typedef struct bore_file_t

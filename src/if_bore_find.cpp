@@ -255,14 +255,14 @@ static void search_one_file(struct search_context_t* search_context, const char*
         BORE_CVBEGINSPAN("srch");
 
         // Search for the text
-        int match_offset[BORE_MAXMATCHPERFILE];
+        int match_offset[BORE_MAX_MATCH_PER_FILE];
         int match_in_file = search_context->string_search->search(
                 start, 
                 size,
                 search_context->search->what, 
                 search_context->search->what_len, 
                 &match_offset[0], 
-                &match_offset[BORE_MAXMATCHPERFILE]);
+                &match_offset[BORE_MAX_MATCH_PER_FILE]);
 
         // Fill the result with the line's text, etc.
         bore_resolve_match_location(
@@ -270,11 +270,11 @@ static void search_one_file(struct search_context_t* search_context, const char*
                 (char*)search_context->filedata.base, 
                 search_context->filedata.cursor - search_context->filedata.base, 
                 &search_result.result[0], 
-                &search_result.result[BORE_MAXMATCHPERFILE], 
+                &search_result.result[BORE_MAX_MATCH_PER_FILE], 
                 match_offset, 
                 match_in_file);
 
-        if (match_in_file == BORE_MAXMATCHPERFILE)
+        if (match_in_file == BORE_MAX_MATCH_PER_FILE)
             search_context->was_truncated = 1;
 
         search_result.hits = match_in_file;
@@ -310,6 +310,13 @@ skip:
 
 static DWORD WINAPI search_worker(struct search_context_t* search_context)
 {
+    bore_file_t* const files = (bore_file_t*)search_context->b->file_alloc.base;
+    u32 proj_index =
+        search_context->search->options & BS_PROJECT &&
+        ~0u != search_context->search->file_index ?
+        files[search_context->search->file_index].proj_index :
+        ~0u;
+
     for (;;)
     {
         LONG file_index = InterlockedDecrement(search_context->remaining_file_count);
@@ -331,14 +338,9 @@ static DWORD WINAPI search_worker(struct search_context_t* search_context)
                 continue;
         }
 
-        bore_file_t* const files = (bore_file_t*)search_context->b->file_alloc.base;
-
         // skip files based on project filter
-        if (search_context->search->options & BS_PROJECT)
-        {
-            if (files[file_index].proj_index != files[search_context->search->file_index].proj_index)
-                continue;
-        }
+        if (proj_index != ~0u && proj_index != files[file_index].proj_index)
+            continue;
 
         search_one_file(search_context, bore_str(search_context->b, files[file_index].file), file_index);
 

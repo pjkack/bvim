@@ -1310,6 +1310,7 @@ static void bore_save_match_to_file(bore_t* b, FILE* cf, const bore_match_t* mat
 static int bore_find(bore_t* b, const char* arg, bore_search_t* search)
 {
     int found = 0;
+    int display_count = 0;
     char_u *tmp = vim_tempname('f', TRUE);
     FILE* cf = 0;
     bore_match_t* match = 0;
@@ -1330,6 +1331,16 @@ static int bore_find(bore_t* b, const char* arg, bore_search_t* search)
     found = bore_dofind(b, threadCount, &truncated, match, search->match_count, search);
     if (0 == found)
         goto fail;
+
+    if (found <= BORE_MAX_QUICKFIX_ITEMS)
+    {
+        display_count = found;
+    }
+    else
+    {
+        display_count = BORE_MAX_QUICKFIX_ITEMS;
+        truncated = 1;
+    }
 
     BORE_VIMPROFILE_STOP("bore_dofind");
 
@@ -1352,7 +1363,7 @@ static int bore_find(bore_t* b, const char* arg, bore_search_t* search)
         semsg(_(e_cant_open_file_str), tmp);
         goto fail;
     }
-    bore_save_match_to_file(b, cf, match, found);
+    bore_save_match_to_file(b, cf, match, display_count);
 
     fclose(cf);
 
@@ -1848,6 +1859,7 @@ void borefind_parse_options(bore_t* b, char* arg, bore_search_t* search)
     //   -p project only (based on current buffer)
     //   -e ext1,ext2,...,ext10
     //      filters the search based on a list of file extensions
+    //   -h exludes huge files 
     //   - 
     //   -u
     //      an empty (or any unknown) option will force the remainder to be treated as the search string
@@ -1858,7 +1870,6 @@ void borefind_parse_options(bore_t* b, char* arg, bore_search_t* search)
     char* what_ext = NULL;
     int options = BS_NONE;
     u32 file_index = ~0u;
-    enum { MaxMatch = 1000 };
 
     for (; *arg; ++arg)
     {
@@ -1940,7 +1951,7 @@ void borefind_parse_options(bore_t* b, char* arg, bore_search_t* search)
     search->what_len = (int) strlen(what);
     search->options = options;
     search->file_index = file_index;
-    search->match_count = MaxMatch;
+    search->match_count = BORE_MAX_MATCH_TOTAL;
     search->ext_count = 0;
 
     // parse comma separated list of file extensions into list of hashes
