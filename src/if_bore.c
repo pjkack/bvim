@@ -1857,7 +1857,7 @@ void borefind_parse_options(bore_t* b, char* arg, bore_search_t* search)
     // Usage: [option(s)] what
     //   -i ignore case
     //   -p project only (based on current buffer)
-    //   -e ext1,ext2,...,ext10
+    //   -e ext1,ext2,...,ext9
     //      filters the search based on a list of file extensions
     //   -h exludes huge files 
     //   - 

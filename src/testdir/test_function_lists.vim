@@ -1,11 +1,11 @@
-" Test to verify that the three function lists,
+" Test to verify that the three function lists:
 "
-"   global_functions[] in src/evalfunc.c
-"   *functions* in runtime/doc/builtin.txt
-"   *function-list* in runtime/doc/usr_41.txt
+"  - global_functions[] in src/evalfunc.c
+"  - *functions* in runtime/doc/builtin.txt
+"  - *function-list* in runtime/doc/usr_41.txt
 "
-" contain the same functions and that the global_functions and ":help
-" functions" lists are in ASCII order.
+" contain the same functions and that the global_functions and
+" ":help functions" lists are in ASCII order.
 
 func Test_function_lists()
 
@@ -17,7 +17,7 @@ func Test_function_lists()
   " Create a file of the functions in evalfunc.c:global_functions[].
   enew!
   read ../evalfunc.c
-  1,/^static funcentry_T global_functions\[\] =$/d
+  1,/^static const funcentry_T global_functions\[\] =$/d
   call search('^};$')
   .,$d
   v/^    {/d
@@ -38,7 +38,7 @@ func Test_function_lists()
   " not obsolete, sorted in ASCII order.
   enew!
   read ../evalfunc.c
-  1,/^static funcentry_T global_functions\[\] =$/d
+  1,/^static const funcentry_T global_functions\[\] =$/d
   call search('^};$')
   .,$d
   v/^    {/d

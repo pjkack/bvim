@@ -1,6 +1,8 @@
 " Tests for user defined commands
 
-import './vim9.vim' as v9
+import './util/vim9.vim' as v9
+
+source util/screendump.vim
 
 " Test for <mods> in user defined commands
 function Test_cmdmods()
@@ -129,6 +131,10 @@ function Test_cmdmods()
       \ 'keepmarks keeppatterns lockmarks noswapfile unsilent noautocmd ' .
       \ 'silent verbose aboveleft belowright botright tab topleft vertical',
       \ g:mods)
+
+  kee keep keepm keepma keepmar keepmarks keepa keepalt keepj keepjumps
+      \ keepp keeppatterns MyCmd
+  call assert_equal('keepalt keepjumps keepmarks keeppatterns', g:mods)
 
   let g:mods = ''
   command! -nargs=* MyQCmd let g:mods .= '<q-mods> '
@@ -319,13 +325,13 @@ func Test_CmdErrors()
       vim9script
       com! -complete=file DoCmd :
   END
-  call v9.CheckScriptFailure(lines, 'E1208', 2)
+  call v9.CheckScriptFailure(lines, 'E1208:', 2)
 
   let lines =<< trim END
       vim9script
       com! -nargs=0 -complete=file DoCmd :
   END
-  call v9.CheckScriptFailure(lines, 'E1208', 2)
+  call v9.CheckScriptFailure(lines, 'E1208:', 2)
 
   com! -nargs=0 DoCmd :
   call assert_fails('DoCmd x', 'E488:')
@@ -339,6 +345,11 @@ func Test_CmdErrors()
   call assert_fails('com DoCmd :', 'E174:')
   comclear
   call assert_fails('delcom DoCmd', 'E184:')
+
+  " These used to leak memory
+  call assert_fails('com! -complete=custom,CustomComplete _ :', 'E182:')
+  call assert_fails('com! -complete=custom,CustomComplete docmd :', 'E183:')
+  call assert_fails('com! -complete=custom,CustomComplete -xxx DoCmd :', 'E181:')
 endfunc
 
 func CustomComplete(A, L, P)
@@ -373,6 +384,14 @@ func Test_CmdCompletion()
   call feedkeys(":com MyCmd chist\<Tab>\<C-B>\"\<CR>", 'tx')
   call assert_equal("\"com MyCmd chistory", @:)
 
+  " delete the Check commands to avoid them showing up
+  call feedkeys(":com Check\<C-A>\<C-B>\"\<CR>", 'tx')
+  let cmds = substitute(@:, '"com ', '', '')->split()
+  for cmd in cmds
+    exe 'delcommand ' .. cmd
+  endfor
+  delcommand MissingFeature
+
   command! DoCmd1 :
   command! DoCmd2 :
   call feedkeys(":com \<C-A>\<C-B>\"\<CR>", 'tx')
@@ -405,6 +424,10 @@ func Test_CmdCompletion()
   com! -nargs=1 -complete=behave DoCmd :
   call feedkeys(":DoCmd \<C-A>\<C-B>\"\<CR>", 'tx')
   call assert_equal('"DoCmd mswin xterm', @:)
+
+  com! -nargs=1 -complete=retab DoCmd :
+  call feedkeys(":DoCmd \<C-A>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"DoCmd -indentonly', @:)
 
   " Test for file name completion
   com! -nargs=1 -complete=file DoCmd :
@@ -716,6 +739,7 @@ func Test_usercmd_with_block()
          echo 'hello'
   END
   call v9.CheckScriptFailure(lines, 'E1026:')
+  delcommand DoesNotEnd
 
   let lines =<< trim END
       command HelloThere {
@@ -754,6 +778,34 @@ func Test_usercmd_with_block()
       BadCommand
   END
   call v9.CheckScriptFailure(lines, 'E1128:')
+  delcommand BadCommand
+
+  let lines =<< trim END
+	  vim9script
+    command Cmd {
+        g:result = [1,
+        2]
+    }
+    Cmd
+  END
+  call v9.CheckScriptSuccess(lines)
+  call assert_equal([1, 2], g:result)
+  delcommand Cmd
+	unlet! g:result
+
+  let lines =<< trim END
+		vim9script
+		command Cmd {
+			g:result = and(0x80,
+			0x80)
+    }
+    Cmd
+  END
+  call v9.CheckScriptSuccess(lines)
+  call assert_equal(128, g:result)
+  delcommand Cmd
+	unlet! g:result
+
 endfunc
 
 func Test_delcommand_buffer()
@@ -817,7 +869,7 @@ func Test_recursive_define()
   call DefCmd('Command')
 
   let name = 'Command'
-  while len(name) < 30
+  while len(name) <= 30
     exe 'delcommand ' .. name
     let name ..= 'x'
   endwhile
@@ -835,6 +887,15 @@ func Test_buflocal_ambiguous_usercmd()
 
   delcommand TestCmd1
   delcommand TestCmd2
+  bw!
+endfunc
+
+" Test for using buffer-local user command from cmdwin.
+func Test_buflocal_usercmd_cmdwin()
+  new
+  command -buffer TestCmd edit Test
+  " This used to crash Vim
+  call assert_fails("norm q::TestCmd\<CR>", 'E11:')
   bw!
 endfunc
 
@@ -882,5 +943,49 @@ func Test_block_declaration_legacy_script()
   delcommand Rename
 endfunc
 
+func Test_comclear_while_listing()
+  call CheckRunVimInTerminal()
+
+  let lines =<< trim END
+      set nocompatible
+      comclear
+      for i in range(1, 999)
+        exe 'command ' .. 'Foo' .. i .. ' bar'
+      endfor
+      au CmdlineLeave : call timer_start(0, {-> execute('comclear')})
+  END
+  call writefile(lines, 'Xcommandclear', 'D')
+  let buf = RunVimInTerminal('-S Xcommandclear', {'rows': 10})
+
+  " this was using freed memory
+  call term_sendkeys(buf, ":command\<CR>")
+  call TermWait(buf, 50)
+  call term_sendkeys(buf, "j")
+  call TermWait(buf, 50)
+  call term_sendkeys(buf, "G")
+  call term_sendkeys(buf, "\<CR>")
+
+  call StopVimInTerminal(buf)
+endfunc
+
+" Test for listing user commands.
+func Test_command_list_0()
+  " Check space padding of attribute and name in command list
+  set vbs&
+  command! ShortCommand echo "ShortCommand"
+  command! VeryMuchLongerCommand echo "VeryMuchLongerCommand"
+
+  redi @"> | com | redi END
+  pu
+
+  let bl = matchbufline(bufnr('%'), "^    ShortCommand      0", 1, '$')
+  call assert_false(bl == [])
+  let bl = matchbufline(bufnr('%'), "^    VeryMuchLongerCommand 0", 1, '$')
+  call assert_false(bl == [])
+
+  bwipe!
+  delcommand ShortCommand
+  delcommand VeryMuchLongerCommand
+endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -4,9 +4,7 @@ if !has('gui_running') && has('unix')
   set term=ansi
 endif
 
-source view_util.vim
-source check.vim
-source screendump.vim
+source util/screendump.vim
 
 func Test_display_foldcolumn()
   CheckFeature folding
@@ -186,9 +184,12 @@ func Test_edit_long_file_name()
 
   let longName = 'x'->repeat(min([&columns, 255]))
   call writefile([], longName, 'D')
-  let buf = RunVimInTerminal('-N -u NONE ' .. longName, #{rows: 8})
+  let buf = RunVimInTerminal('-N -u NONE --cmd ":set noshowcmd" ' .. longName, #{rows: 8})
 
   call VerifyScreenDump(buf, 'Test_long_file_name_1', {})
+
+  call term_sendkeys(buf, ":set showcmd\<cr>:e!\<cr>")
+  call VerifyScreenDump(buf, 'Test_long_file_name_2', {})
 
   " clean up
   call StopVimInTerminal(buf)
@@ -212,28 +213,6 @@ func Test_unprintable_fileformats()
   call VerifyScreenDump(buf, 'Test_display_unprintable_02', {})
 
   " clean up
-  call StopVimInTerminal(buf)
-endfunc
-
-" Test for scrolling that modifies buffer during visual block
-func Test_visual_block_scroll()
-  CheckScreendump
-
-  let lines =<< trim END
-    source $VIMRUNTIME/plugin/matchparen.vim
-    set scrolloff=1
-    call setline(1, ['a', 'b', 'c', 'd', 'e', '', '{', '}', '{', 'f', 'g', '}'])
-    call cursor(5, 1)
-  END
-
-  let filename = 'Xvisualblockmodifiedscroll'
-  call writefile(lines, filename, 'D')
-
-  let buf = RunVimInTerminal('-S '.filename, #{rows: 7})
-  call term_sendkeys(buf, "V\<C-D>\<C-D>")
-
-  call VerifyScreenDump(buf, 'Test_display_visual_block_scroll', {})
-
   call StopVimInTerminal(buf)
 endfunc
 
@@ -274,12 +253,12 @@ func Test_eob_fillchars()
   " default value
   call assert_match('eob:\~', &fillchars)
   " invalid values
-  call assert_fails(':set fillchars=eob:', 'E474:')
-  call assert_fails(':set fillchars=eob:xy', 'E474:')
-  call assert_fails(':set fillchars=eob:\255', 'E474:')
-  call assert_fails(':set fillchars=eob:<ff>', 'E474:')
-  call assert_fails(":set fillchars=eob:\x01", 'E474:')
-  call assert_fails(':set fillchars=eob:\\x01', 'E474:')
+  call assert_fails(':set fillchars=eob:', 'E1511:')
+  call assert_fails(':set fillchars=eob:xy', 'E1511:')
+  call assert_fails(':set fillchars=eob:\255', 'E1511:')
+  call assert_fails(':set fillchars=eob:<ff>', 'E1511:')
+  call assert_fails(":set fillchars=eob:\x01", 'E1512:')
+  call assert_fails(':set fillchars=eob:\\x01', 'E1512:')
   " default is ~
   new
   redraw
@@ -379,12 +358,19 @@ func Test_display_linebreak_breakat()
   new
   vert resize 25
   let _breakat = &breakat
-  setl signcolumn=yes linebreak breakat=) showbreak=+\ 
+  setl signcolumn=yes linebreak breakat=) showbreak=++
   call setline(1, repeat('x', winwidth(0) - 2) .. ')abc')
   let lines = ScreenLines([1, 2], 25)
   let expected = [
           \ '  xxxxxxxxxxxxxxxxxxxxxxx',
-          \ '  + )abc                 '
+          \ '  ++)abc                 ',
+          \ ]
+  call assert_equal(expected, lines)
+  setl breakindent breakindentopt=shift:2
+  let lines = ScreenLines([1, 2], 25)
+  let expected = [
+          \ '  xxxxxxxxxxxxxxxxxxxxxxx',
+          \ '    ++)abc               ',
           \ ]
   call assert_equal(expected, lines)
   %bw!
@@ -392,6 +378,8 @@ func Test_display_linebreak_breakat()
 endfunc
 
 func Run_Test_display_lastline(euro)
+  CheckScreendump
+
   let lines =<< trim END
       call setline(1, ['aaa', 'b'->repeat(200)])
       set display=truncate
@@ -426,15 +414,83 @@ func Run_Test_display_lastline(euro)
   call StopVimInTerminal(buf)
 endfunc
 
-func Test_display_lastline()
+func Test_display_lastline_dump()
   CheckScreendump
 
   call Run_Test_display_lastline('')
   call Run_Test_display_lastline('euro_')
-
-  call assert_fails(':set fillchars=lastline:', 'E474:')
-  call assert_fails(':set fillchars=lastline:〇', 'E474:')
 endfunc
 
+func Test_display_lastline_fails()
+  call assert_fails(':set fillchars=lastline:', 'E1511:')
+  call assert_fails(':set fillchars=lastline:〇', 'E1512:')
+endfunc
+
+func Test_display_long_lastline()
+  CheckScreendump
+
+  let lines =<< trim END
+    set display=lastline smoothscroll scrolloff=0
+    call setline(1, [
+      \'aaaaa'->repeat(150),
+      \'bbbbb '->repeat(7) .. 'ccccc '->repeat(7) .. 'ddddd '->repeat(7)
+    \])
+  END
+
+  call writefile(lines, 'XdispLongline', 'D')
+  let buf = RunVimInTerminal('-S XdispLongline', #{rows: 14, cols: 35})
+
+  call term_sendkeys(buf, "736|")
+  call VerifyScreenDump(buf, 'Test_display_long_line_1', {})
+
+  " The correct part of the last line is moved into view.
+  call term_sendkeys(buf, "D")
+  call VerifyScreenDump(buf, 'Test_display_long_line_2', {})
+
+  " "w_skipcol" does not change because the topline is still long enough
+  " to maintain the current skipcol.
+  call term_sendkeys(buf, "g04l11gkD")
+  call VerifyScreenDump(buf, 'Test_display_long_line_3', {})
+
+  " "w_skipcol" is reset to bring the entire topline into view because
+  " the line length is now smaller than the current skipcol + marker.
+  call term_sendkeys(buf, "x")
+  call VerifyScreenDump(buf, 'Test_display_long_line_4', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+" Moving the cursor to a line that doesn't fit in the window should show
+" correctly.
+func Test_display_cursor_long_line()
+  CheckScreendump
+
+  let lines =<< trim END
+    call setline(1, ['a', 'b ' .. 'bbbbb'->repeat(150), 'c'])
+    norm $j
+  END
+
+  call writefile(lines, 'XdispCursorLongline', 'D')
+  let buf = RunVimInTerminal('-S XdispCursorLongline', #{rows: 8})
+
+  call VerifyScreenDump(buf, 'Test_display_cursor_long_line_1', {})
+
+  " FIXME: moving the cursor above the topline does not set w_skipcol
+  " correctly with cpo+=n and zero scrolloff (curs_columns() extra == 1).
+  call term_sendkeys(buf, ":set number cpo+=n scrolloff=0\<CR>")
+  call term_sendkeys(buf, '$0')
+  call VerifyScreenDump(buf, 'Test_display_cursor_long_line_2', {})
+
+  " Going to the start of the line with "b" did not set w_skipcol correctly
+  " with 'smoothscroll'.
+   call term_sendkeys(buf, ":set smoothscroll\<CR>")
+   call term_sendkeys(buf, '$b')
+   call VerifyScreenDump(buf, 'Test_display_cursor_long_line_3', {})
+  " Same for "ge".
+   call term_sendkeys(buf, '$ge')
+   call VerifyScreenDump(buf, 'Test_display_cursor_long_line_4', {})
+
+  call StopVimInTerminal(buf)
+endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

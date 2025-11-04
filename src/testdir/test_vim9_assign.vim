@@ -1,8 +1,6 @@
 " Test Vim9 assignments
 
-source check.vim
-import './vim9.vim' as v9
-source term_util.vim
+import './util/vim9.vim' as v9
 
 let s:appendToMe = 'xxx'
 let s:addToMe = 111
@@ -145,6 +143,12 @@ def Test_assignment()
   &ts %= 4
   assert_equal(2, &ts)
 
+  assert_fails('&ts /= 0', ['E1154:', 'E1154:'])
+  assert_fails('&ts %= 0', ['E1154:', 'E1154:'])
+  assert_fails('&ts /= []', ['E745:', 'E745:'])
+  assert_fails('&ts %= []', ['E745:', 'E745:'])
+  assert_equal(2, &ts)
+
   var f100: float = 100.0
   f100 /= 5
   assert_equal(20.0, f100)
@@ -183,6 +187,7 @@ def Test_assignment()
 
   v9.CheckDefFailure(['&notex += 3'], 'E113:')
   v9.CheckDefFailure(['&ts ..= "xxx"'], 'E1019:')
+  v9.CheckDefFailure(['var d = {k: [0]}', 'd.k ..= "x"'], 'E1012: Type mismatch; expected list<number> but got string')
   v9.CheckDefFailure(['&ts = [7]'], 'E1012:')
   v9.CheckDefExecFailure(['&ts = g:alist'], 'E1012: Type mismatch; expected number but got list<number>')
   v9.CheckDefFailure(['&ts = "xx"'], 'E1012:')
@@ -311,6 +316,8 @@ def Test_reserved_name()
 
   for name in ['true',
                'false',
+               'this',
+               'super',
                'null',
                'null_blob',
                'null_dict',
@@ -318,10 +325,21 @@ def Test_reserved_name()
                'null_list',
                'null_partial',
                'null_string',
+               'null_object',
+               'null_class',
                ] + more_names
     v9.CheckDefExecAndScriptFailure(['var ' .. name .. ' =  0'], 'E1034:')
     v9.CheckDefExecAndScriptFailure(['var ' .. name .. ': bool'], 'E1034:')
   endfor
+
+  var lines =<< trim END
+      vim9script
+      def Foo(super: bool)
+	echo 'something'
+      enddef
+      defcompile
+  END
+  v9.CheckScriptFailure(lines, 'E1034:')
 enddef
 
 def Test_null_values()
@@ -358,6 +376,13 @@ def Test_null_values()
       endif
   END
   v9.CheckDefAndScriptSuccess(lines)
+enddef
+
+def Test_type_with_extra_white()
+  var lines =<< trim END
+      const x : number = 3
+  END
+  v9.CheckDefExecAndScriptFailure(lines, 'E1059:')
 enddef
 
 def Test_keep_type_after_assigning_null()
@@ -506,15 +531,15 @@ def Test_assign_unpack()
   lines =<< trim END
       [v1, v2] = [1, 2]
   END
-  v9.CheckDefFailure(lines, 'E1089', 1)
-  v9.CheckScriptFailure(['vim9script'] + lines, 'E1089', 2)
+  v9.CheckDefFailure(lines, 'E1089:', 1)
+  v9.CheckScriptFailure(['vim9script'] + lines, 'E1089:', 2)
 
   lines =<< trim END
       var v1: number
       var v2: number
       [v1, v2] = ''
   END
-  v9.CheckDefFailure(lines, 'E1012: Type mismatch; expected list<any> but got string', 3)
+  v9.CheckDefFailure(lines, 'E1535: List or Tuple required', 3)
 
   lines =<< trim END
     g:values = [false, 0]
@@ -596,7 +621,7 @@ def Test_assign_index()
       l3[0] = []
       l3[0][0] = []
   END
-  v9.CheckDefFailure(lines, 'E1012: Type mismatch; expected number but got list<unknown>', 3)
+  v9.CheckDefFailure(lines, 'E1012: Type mismatch; expected number but got list<any>', 3)
 
   # dict of dict
   var d1: dict<number>
@@ -626,7 +651,7 @@ def Test_assign_index()
       var bl = 0z11
       bl[1] = g:val
   END
-  v9.CheckDefExecAndScriptFailure(lines, 'E1030: Using a String as a Number: "22"')
+  v9.CheckDefExecAndScriptFailure(lines, ['E1030: Using a String as a Number: "22"', 'E1012: Type mismatch; expected number but got string'])
 
   # should not read the next line when generating "a.b"
   var a = {}
@@ -639,7 +664,7 @@ def Test_assign_index()
       d3.one = {}
       d3.one.two = {}
   END
-  v9.CheckDefFailure(lines, 'E1012: Type mismatch; expected number but got dict<unknown>', 3)
+  v9.CheckDefFailure(lines, 'E1012: Type mismatch; expected number but got dict<any>', 3)
 
   lines =<< trim END
     var lines: list<string>
@@ -663,7 +688,7 @@ def Test_assign_index()
       var ld: list<dict<number>>
       ld[0] = []
   END
-  v9.CheckDefFailure(lines, 'E1012: Type mismatch; expected dict<number> but got list<unknown>', 2)
+  v9.CheckDefFailure(lines, 'E1012: Type mismatch; expected dict<number> but got list<any>', 2)
 
   # dict of list
   var dl: dict<list<number>>
@@ -675,7 +700,7 @@ def Test_assign_index()
       var dl: dict<list<number>>
       dl.one = {}
   END
-  v9.CheckDefFailure(lines, 'E1012: Type mismatch; expected list<number> but got dict<unknown>', 2)
+  v9.CheckDefFailure(lines, 'E1012: Type mismatch; expected list<number> but got dict<any>', 2)
 
   lines =<< trim END
       g:l = [1, 2]
@@ -1080,6 +1105,27 @@ def Test_assignment_partial()
       Ref(0)
   END
   v9.CheckScriptFailure(lines, 'E1013: Argument 2: type mismatch, expected string but got number')
+
+  lines =<< trim END
+    var Fn1 = () => {
+        return 10
+      }
+    assert_equal('func(): number', typename(Fn1))
+    var Fn2 = () => {
+        return "a"
+      }
+    assert_equal('func(): string', typename(Fn2))
+    var Fn3 = () => {
+        return {a: [1]}
+      }
+    assert_equal('func(): dict<list<number>>', typename(Fn3))
+    var Fn4 = (...l: list<string>) => {
+        return []
+      }
+    assert_equal('func(...list<string>): list<any>', typename(Fn4))
+  END
+  v9.CheckSourceSuccess(['vim9script'] + lines)
+  v9.CheckSourceSuccess(['def Xfunc()'] + lines + ['enddef', 'defcompile'])
 enddef
 
 def Test_assignment_list_any_index()
@@ -1254,7 +1300,7 @@ def Test_assignment_dict()
     var n: any
     n.key = 5
   END
-  v9.CheckDefExecAndScriptFailure(lines, ['E1148:', 'E1203: Dot can only be used on a dictionary: n.key = 5'], 2)
+  v9.CheckDefExecAndScriptFailure(lines, ['E1148:', 'E1203: Dot not allowed after a number: n.key = 5'], 2)
 enddef
 
 def Test_assignment_local()
@@ -1519,6 +1565,7 @@ def Test_assignment_failure()
   v9.CheckDefFailure(['var false = 1'], 'E1034:')
   v9.CheckDefFailure(['var null = 1'], 'E1034:')
   v9.CheckDefFailure(['var this = 1'], 'E1034:')
+  v9.CheckDefFailure(['var super = 1'], 'E1034:')
 
   v9.CheckDefFailure(['[a; b; c] = g:list'], 'E1001:')
   v9.CheckDefFailure(['var [a; b; c] = g:list'], 'E1080:')
@@ -1833,37 +1880,169 @@ def Test_assign_lambda()
   v9.CheckDefAndScriptFailure(lines, 'E1012: Type mismatch; expected func(number) but got func(any): bool')
 
   lines =<< trim END
-      echo filter([1, 2, 3], (_, v: string) => v + 1) 
+      echo filter([1, 2, 3], (_, v: string) => v + 1)
   END
   v9.CheckDefAndScriptFailure(lines, 'E1051:')
+enddef
+
+def Test_assign_funcref_args()
+  # unspecified arguments match everything, including varargs
+  var lines =<< trim END
+    vim9script
+
+    var FuncUnknown: func: number
+
+    FuncUnknown = (v): number => v
+    assert_equal(5, FuncUnknown(5))
+
+    FuncUnknown = (v1, v2): number => v1 + v2
+    assert_equal(7, FuncUnknown(3, 4))
+
+    FuncUnknown = (...v1): number => v1[0] + v1[1] + len(v1) * 1000
+    assert_equal(4007, FuncUnknown(3, 4, 5, 6))
+
+    FuncUnknown = (v: list<any>): number => v[0] + v[1] + len(v) * 1000
+    assert_equal(5009, FuncUnknown([4, 5, 6, 7, 8]))
+  END
+  v9.CheckScriptSuccess(lines)
+
+  # varargs must match
+  lines =<< trim END
+    vim9script
+    var FuncAnyVA: func(...any): number
+    FuncAnyVA = (v): number => v
+  END
+  v9.CheckScriptFailure(lines, 'E1180: Variable arguments type must be a list: any')
+
+  # varargs must match
+  lines =<< trim END
+    vim9script
+    var FuncAnyVA: func(...any): number
+    FuncAnyVA = (v1, v2): number => v1 + v2
+  END
+  v9.CheckScriptFailure(lines, 'E1180: Variable arguments type must be a list: any')
+
+  # varargs must match
+  lines =<< trim END
+    vim9script
+    var FuncAnyVA: func(...any): number
+    FuncAnyVA = (v1: list<any>): number => 3
+  END
+  v9.CheckScriptFailure(lines, 'E1180: Variable arguments type must be a list: any')
+enddef
+
+def Test_assign_funcref_arg_any()
+  var lines =<< trim END
+    vim9script
+    var FuncAnyVA: func(any): number
+    FuncAnyVA = (v): number => v
+  END
+  # TODO: Verify this should succeed.
+  v9.CheckScriptSuccess(lines)
 enddef
 
 def Test_heredoc()
   # simple heredoc
   var lines =<< trim END
-    var text =<< trim TEXT # comment
-      abc
-    TEXT
-    assert_equal(['abc'], text)
+      var text =<< trim TEXT # comment
+        abc
+      TEXT
+      assert_equal(['abc'], text)
   END
   v9.CheckDefAndScriptSuccess(lines)
 
   # empty heredoc
   lines =<< trim END
-     var text =<< trim TEXT
-     TEXT
-     assert_equal([], text)
+       var text =<< trim TEXT
+       TEXT
+       assert_equal([], text)
   END
   v9.CheckDefAndScriptSuccess(lines)
 
   # heredoc with a single empty line
   lines =<< trim END
-     var text =<< trim TEXT
+      var text =<< trim TEXT
 
-     TEXT
-     assert_equal([''], text)
+      TEXT
+      assert_equal([''], text)
   END
   v9.CheckDefAndScriptSuccess(lines)
+
+  # assign heredoc to variable with type
+  lines =<< trim END
+      var text: list<string> =<< trim TEXT
+        var foo =<< trim FOO
+      TEXT
+      assert_equal(['var foo =<< trim FOO'], text)
+  END
+  v9.CheckDefAndScriptSuccess(lines)
+
+  # extra whitespace before type is allowed
+  lines =<< trim END
+      var text:   list<string> =<< trim TEXT
+        var foo =<< trim FOO
+      TEXT
+      assert_equal(['var foo =<< trim FOO'], text)
+  END
+  v9.CheckDefAndScriptSuccess(lines)
+
+  # missing whitespace before type is an error
+  lines =<< trim END
+      var text:list<string> =<< trim TEXT
+        var foo =<< trim FOO
+      TEXT
+      assert_equal(['var foo =<< trim FOO'], text)
+  END
+  v9.CheckDefAndScriptFailure(lines, 'E1069:')
+
+  # assign heredoc to list slice
+  lines =<< trim END
+      var text = ['']
+      text[ : ] =<< trim TEXT
+        var foo =<< trim FOO
+      TEXT
+      assert_equal(['var foo =<< trim FOO'], text)
+  END
+  v9.CheckDefAndScriptSuccess(lines)
+
+  # assign heredoc to curly braces name in legacy function in Vim9 script
+  lines =<< trim END
+      vim9script
+      func Func()
+        let foo_3_bar = ['']
+        let foo_{1 + 2}_bar[ : ] =<< trim TEXT
+          var foo =<< trim FOO
+        TEXT
+        call assert_equal(['var foo =<< trim FOO'], foo_3_bar)
+      endfunc
+      Func()
+  END
+  v9.CheckScriptSuccess(lines)
+
+  # commented out heredoc assignment without space after '#'
+  lines =<< trim END
+      vim9script
+      def Func()
+        #x =<< trim [CODE]
+        #[CODE]
+      enddef
+      Func()
+  END
+  v9.CheckScriptSuccess(lines)
+
+  # heredoc start should not be recognized in string
+  lines =<< trim END
+      vim9script
+      def Func()
+        new
+        @" = 'bar'
+        ['foo', @"]->setline("]=<<"->count('='))
+        assert_equal(['foo', 'bar'], getline(1, '$'))
+        bwipe!
+      enddef
+      Func()
+  END
+  v9.CheckScriptSuccess(lines)
 
   v9.CheckDefFailure(['var lines =<< trim END X', 'END'], 'E488:')
   v9.CheckDefFailure(['var lines =<< trim END " comment', 'END'], 'E488:')
@@ -1935,7 +2114,7 @@ def Test_var_func_call()
       endif
       return 'this'
     endfunc
-    var val: string = GetValue() 
+    var val: string = GetValue()
     # env var is always a string
     var env = $TERM
   END
@@ -2319,12 +2498,11 @@ def Test_unlet()
   assert_false(exists('g:somevar'))
   unlet! g:somevar
 
-  # also works for script-local variable in legacy Vim script
-  s:somevar = 'legacy'
+  # script-local variable cannot be removed in Vim9 script
+  s:somevar = 'local'
   assert_true(exists('s:somevar'))
-  unlet s:somevar
-  assert_false(exists('s:somevar'))
-  unlet! s:somevar
+  v9.CheckDefExecFailure(['unlet s:somevar'], 'E1081:', 1)
+  v9.CheckDefExecFailure(['unlet! s:somevar'], 'E1081:', 1)
 
   if 0
     unlet g:does_not_exist
@@ -2497,13 +2675,21 @@ def Test_unlet()
    'enddef',
    'defcompile',
    ], 'E1081:')
-  v9.CheckScriptFailure([
+  v9.CheckScriptSuccess([
    'vim9script',
    'var svar = 123',
    'func Func()',
    '  unlet s:svar',
    'endfunc',
    'Func()',
+   ])
+  v9.CheckScriptFailure([
+   'vim9script',
+   'var svar = 123',
+   'def Func()',
+   '  vim9cmd unlet s:svar',
+   'enddef',
+   'defcompile',
    ], 'E1081:')
   v9.CheckScriptFailure([
    'vim9script',
@@ -2746,6 +2932,45 @@ def Test_using_s_var_in_function()
   v9.CheckScriptSuccess(lines)
 enddef
 
+" Test for specifying a type in assignment
+def Test_type_specification_in_assignment()
+  # specify type for an existing script local variable without "var"
+  var lines =<< trim END
+    vim9script
+    var n: number = 10
+    n: number = 20
+  END
+  v9.CheckSourceFailure(lines, 'E488: Trailing characters: : number = 20', 3)
+
+  # specify type for a non-existing script local variable without "var"
+  lines =<< trim END
+    vim9script
+    MyVar: string = 'abc'
+  END
+  v9.CheckSourceFailure(lines, "E492: Not an editor command: MyVar: string = 'abc'", 2)
+
+  # specify type for an existing def local variable without "var"
+  lines =<< trim END
+    vim9script
+    def Foo()
+      var n: number = 10
+      n: number = 20
+    enddef
+    Foo()
+  END
+  v9.CheckSourceFailure(lines, 'E488: Trailing characters: : number = 20', 2)
+
+  # specify type for a non-existing def local variable without "var"
+  lines =<< trim END
+    vim9script
+    def Foo()
+      MyVar: string = 'abc'
+    enddef
+    Foo()
+  END
+  v9.CheckSourceFailure(lines, "E476: Invalid command: MyVar: string = 'abc'", 1)
+enddef
+
 let g:someVar = 'X'
 
 " Test for heredoc with Vim expressions.
@@ -2764,6 +2989,66 @@ def Test_heredoc_expr()
       var d = x{a1}x{a2}x{a3}x{a4}
     END
     assert_equal(['var a = 15', 'var b = 6 + 6', 'var c = "local"', 'var d = x1x2x3x'], code)
+  CODE
+  v9.CheckDefAndScriptSuccess(lines)
+
+  # Evaluate a dictionary
+  lines =<< trim CODE
+    var d1 = {'a': 10, 'b': [1, 2]}
+    var code =<< trim eval END
+      var d2 = {d1}
+    END
+    assert_equal(["var d2 = {'a': 10, 'b': [1, 2]}"], code)
+  CODE
+  v9.CheckDefAndScriptSuccess(lines)
+
+  # Evaluate an empty dictionary
+  lines =<< trim CODE
+    var d1 = {}
+    var code =<< trim eval END
+      var d2 = {d1}
+    END
+    assert_equal(["var d2 = {}"], code)
+  CODE
+  v9.CheckDefAndScriptSuccess(lines)
+
+  # Evaluate a null dictionary
+  lines =<< trim CODE
+    var d1 = test_null_dict()
+    var code =<< trim eval END
+      var d2 = {d1}
+    END
+    assert_equal(["var d2 = {}"], code)
+  CODE
+  v9.CheckDefAndScriptSuccess(lines)
+
+  # Evaluate a List
+  lines =<< trim CODE
+    var l1 = ['a', 'b', 'c']
+    var code =<< trim eval END
+      var l2 = {l1}
+    END
+    assert_equal(["var l2 = ['a', 'b', 'c']"], code)
+  CODE
+  v9.CheckDefAndScriptSuccess(lines)
+
+  # Evaluate an empty List
+  lines =<< trim CODE
+    var l1 = []
+    var code =<< trim eval END
+      var l2 = {l1}
+    END
+    assert_equal(["var l2 = []"], code)
+  CODE
+  v9.CheckDefAndScriptSuccess(lines)
+
+  # Evaluate a null List
+  lines =<< trim CODE
+    var l1 = test_null_list()
+    var code =<< trim eval END
+      var l2 = {l1}
+    END
+    assert_equal(["var l2 = []"], code)
   CODE
   v9.CheckDefAndScriptSuccess(lines)
 
@@ -2813,6 +3098,663 @@ def Test_heredoc_expr()
       END
   LINES
   v9.CheckDefAndScriptFailure(lines, 'E15: Invalid expression: "}"')
+
+  # dangling "}"
+  lines =<< trim LINES
+    var text =<< trim eval END
+      aa}a
+    END
+  LINES
+  v9.CheckDefAndScriptFailure(lines, "E1278: Stray '}' without a matching '{': aa}a")
+enddef
+
+" Test for assigning to a multi-dimensional list item.
+def Test_list_item_assign()
+  var lines =<< trim END
+    vim9script
+
+    def Foo()
+      var l: list<list<string>> = [['x', 'x', 'x'], ['y', 'y', 'y']]
+      var z: number = 1
+
+      [l[1][2], z] = ['a', 20]
+      assert_equal([['x', 'x', 'x'], ['y', 'y', 'a']], l)
+    enddef
+    Foo()
+  END
+  v9.CheckSourceSuccess(lines)
+
+  lines =<< trim END
+    vim9script
+
+    var l: list<list<string>> = [['x', 'x', 'x'], ['y', 'y', 'y']]
+    var z: number = 1
+
+    [l[1][2], z] = ['a', 20]
+    assert_equal([['x', 'x', 'x'], ['y', 'y', 'a']], l)
+  END
+  v9.CheckSourceSuccess(lines)
+enddef
+
+" Test for assigning to a multi-dimensional dict item.
+def Test_dict_item_assign()
+  # This used to fail with the error "E1105: Cannot convert list to string"
+  # (Github issue #13485)
+  var lines =<< trim END
+    vim9script
+    def F()
+      var d: dict<dict<number>> = {a: {b: 0}}
+
+      for group in keys(d)
+        d['a']['b'] += 1
+      endfor
+      assert_equal({a: {b: 1}}, d)
+    enddef
+    F()
+  END
+  v9.CheckSourceSuccess(lines)
+
+  # This used to crash Vim
+  lines =<< trim END
+    vim9script
+    def F()
+      var d: dict<dict<number>> = {a: {b: 0}}
+      d['a']['b'] += 1
+      assert_equal({a: {b: 1}}, d)
+    enddef
+    F()
+  END
+  v9.CheckSourceSuccess(lines)
+
+  # Assignment at script level
+  lines =<< trim END
+    vim9script
+    var d: dict<dict<number>> = {a: {b: 0}}
+
+    for group in keys(d)
+      d['a']['b'] += 1
+    endfor
+    assert_equal({a: {b: 1}}, d)
+  END
+  v9.CheckSourceSuccess(lines)
+enddef
+
+def Test_class_assign()
+  var lines =<< trim END
+    vim9script
+    class C
+    endclass
+    class D
+    endclass
+    assert_fails('C = D', 'E1405: Class "D" cannot be used as a value')
+  END
+  v9.CheckSourceSuccess(lines)
+enddef
+
+" Test for using various types (dict, list, blob, funcref, class) as variable
+" in assignments with a different type
+def Test_type_check()
+  var lines =<< trim END
+    vim9script
+    class A
+    endclass
+    type T = number
+    var N: number = 1
+    var S: string = 'abc'
+    var d: dict<number> = {}
+    var l: list<number> = []
+    var b: blob = 0z10
+    var Fn: func = function('min')
+    var o: A = A.new()
+
+    # Assign a number
+    assert_fails('d = N', 'E1012: Type mismatch; expected dict<number> but got number')
+    assert_fails('l = N', 'E1012: Type mismatch; expected list<number> but got number')
+    assert_fails('b = N', 'E1012: Type mismatch; expected blob but got number')
+    assert_fails('Fn = N', 'E1012: Type mismatch; expected func(...): unknown but got number')
+    assert_fails('A = N', 'E1405: Class "A" cannot be used as a value')
+    assert_fails('o = N', 'E1012: Type mismatch; expected object<A> but got number')
+    assert_fails('T = N', 'E1403: Type alias "T" cannot be used as a value')
+
+    # Use a compound operator with different LHS types
+    assert_fails('d += N', 'E734: Wrong variable type for +=')
+    assert_fails('l += N', 'E734: Wrong variable type for +=')
+    assert_fails('b += N', 'E734: Wrong variable type for +=')
+    assert_fails('Fn += N', 'E734: Wrong variable type for +=')
+    assert_fails('A += N', 'E1405: Class "A" cannot be used as a value')
+    assert_fails('o += N', 'E734: Wrong variable type for +=')
+    assert_fails('T += N', 'E1403: Type alias "T" cannot be used as a value')
+
+    # Assign to a number variable
+    assert_fails('N = d', 'E1012: Type mismatch; expected number but got dict<number>')
+    assert_fails('N = l', 'E1012: Type mismatch; expected number but got list<number>')
+    assert_fails('N = b', 'E1012: Type mismatch; expected number but got blob')
+    assert_fails('N = Fn', 'E1012: Type mismatch; expected number but got func([unknown]): any')
+    assert_fails('N = A', 'E1405: Class "A" cannot be used as a value')
+    assert_fails('N = o', 'E1012: Type mismatch; expected number but got object<A>')
+    assert_fails('N = T', 'E1403: Type alias "T" cannot be used as a value')
+
+    # Use a compound operator with different RHS types
+    assert_fails('N += d', 'E734: Wrong variable type for +=')
+    assert_fails('N += l', 'E734: Wrong variable type for +=')
+    assert_fails('N += b', 'E974: Using a Blob as a Number')
+    assert_fails('N += Fn', 'E734: Wrong variable type for +=')
+    assert_fails('N += A', 'E1405: Class "A" cannot be used as a value')
+    assert_fails('N += o', 'E1320: Using an Object as a Number')
+    assert_fails('N += T', 'E1403: Type alias "T" cannot be used as a value')
+
+    # Initialize multiple variables using []
+    assert_fails('var [X1: number, Y: number] = [1, d]', 'E1012: Type mismatch; expected number but got dict<number>')
+    assert_fails('var [X2: number, Y: number] = [1, l]', 'E1012: Type mismatch; expected number but got list<number>')
+    assert_fails('var [X3: number, Y: number] = [1, b]', 'E1012: Type mismatch; expected number but got blob')
+    assert_fails('var [X4: number, Y: number] = [1, Fn]', 'E1012: Type mismatch; expected number but got func([unknown]): any')
+    assert_fails('var [X7: number, Y: number] = [1, A]', 'E1405: Class "A" cannot be used as a value')
+    assert_fails('var [X8: number, Y: number] = [1, o]', 'E1012: Type mismatch; expected number but got object<A>')
+    assert_fails('var [X8: number, Y: number] = [1, T]', 'E1403: Type alias "T" cannot be used as a value')
+
+    # String concatenation with various LHS types
+    assert_fails('S ..= d', 'E734: Wrong variable type for .=')
+    assert_fails('S ..= l', 'E734: Wrong variable type for .=')
+    assert_fails('S ..= b', 'E976: Using a Blob as a String')
+    assert_fails('S ..= Fn', 'E734: Wrong variable type for .=')
+    assert_fails('S ..= A', 'E1405: Class "A" cannot be used as a value')
+    assert_fails('S ..= o', 'E1324: Using an Object as a String')
+    assert_fails('S ..= T', 'E1403: Type alias "T" cannot be used as a value')
+
+    # String concatenation with various RHS types
+    assert_fails('d ..= S', 'E734: Wrong variable type for .=')
+    assert_fails('l ..= S', 'E734: Wrong variable type for .=')
+    assert_fails('b ..= S', 'E734: Wrong variable type for .=')
+    assert_fails('Fn ..= S', 'E734: Wrong variable type for .=')
+    assert_fails('A ..= S', 'E1405: Class "A" cannot be used as a value')
+    assert_fails('o ..= S', 'E734: Wrong variable type for .=')
+    assert_fails('T ..= S', 'E1403: Type alias "T" cannot be used as a value')
+  END
+  v9.CheckSourceSuccess(lines)
+
+  if has('channel')
+    lines =<< trim END
+      vim9script
+      var N: number = 1
+      var S: string = 'abc'
+      var j: job = test_null_job()
+      var ch: channel = test_null_channel()
+      assert_fails('j = N', 'E1012: Type mismatch; expected job but got number')
+      assert_fails('ch = N', 'E1012: Type mismatch; expected channel but got number')
+      assert_fails('j += N', 'E734: Wrong variable type for +=')
+      assert_fails('ch += N', 'E734: Wrong variable type for +=')
+      assert_fails('N = j', 'E1012: Type mismatch; expected number but got job')
+      assert_fails('N = ch', 'E1012: Type mismatch; expected number but got channel')
+      assert_fails('N += j', 'E910: Using a Job as a Number')
+      assert_fails('N += ch', 'E913: Using a Channel as a Number')
+      assert_fails('var [X5: number, Y: number] = [1, j]', 'E1012: Type mismatch; expected number but got job')
+      assert_fails('var [X6: number, Y: number] = [1, ch]', 'E1012: Type mismatch; expected number but got channel')
+      assert_fails('S ..= j', 'E908: Using an invalid value as a String: job')
+      assert_fails('S ..= ch', 'E908: Using an invalid value as a String: channel')
+      assert_fails('j ..= S', 'E734: Wrong variable type for .=')
+      assert_fails('ch ..= S', 'E734: Wrong variable type for .=')
+    END
+    v9.CheckSourceSuccess(lines)
+  endif
+
+  lines =<< trim END
+    vim9script
+    class A
+    endclass
+
+    def F()
+      A += 3
+    enddef
+    F()
+  END
+  v9.CheckScriptFailure(lines, 'E1405: Class "A" cannot be used as a value')
+
+  lines =<< trim END
+    vim9script
+    class A
+    endclass
+
+    var o = A.new()
+    def F()
+      o += 4
+    enddef
+    F()
+  END
+  v9.CheckScriptFailure(lines, 'E1411: Missing dot after object "o"')
+enddef
+
+" Test for checking the argument type of a def function
+def Test_func_argtype_check()
+  var lines =<< trim END
+    vim9script
+
+    # Passing different types as argument to a function expecting a number
+    def IntArg(n: number)
+    enddef
+
+    class A
+    endclass
+    var N: number = 1
+    var S: string = 'abc'
+    var d: dict<number> = {}
+    var l: list<number> = []
+    var b: blob = 0z10
+    var Fn: func = function('min')
+    var o: A = A.new()
+
+    assert_fails('IntArg(d)', 'E1013: Argument 1: type mismatch, expected number but got dict<number>')
+    assert_fails('IntArg(l)', 'E1013: Argument 1: type mismatch, expected number but got list<number>')
+    assert_fails('IntArg(b)', 'E1013: Argument 1: type mismatch, expected number but got blob')
+    assert_fails('IntArg(Fn)', 'E1013: Argument 1: type mismatch, expected number but got func([unknown]): any')
+    if has('channel')
+      var j: job = test_null_job()
+      var ch: channel = test_null_channel()
+      assert_fails('IntArg(j)', 'E1013: Argument 1: type mismatch, expected number but got job')
+      assert_fails('IntArg(ch)', 'E1013: Argument 1: type mismatch, expected number but got channel')
+    endif
+    assert_fails('IntArg(A)', 'E1405: Class "A" cannot be used as a value')
+    assert_fails('IntArg(o)', 'E1013: Argument 1: type mismatch, expected number but got object<A>')
+
+    # Passing a number to functions accepting different argument types
+    def DictArg(_: dict<number>)
+    enddef
+    assert_fails('DictArg(N)', 'E1013: Argument 1: type mismatch, expected dict<number> but got number')
+
+    def ListArg(_: list<number>)
+    enddef
+    assert_fails('ListArg(N)', 'E1013: Argument 1: type mismatch, expected list<number> but got number')
+
+    def BlobArg(_: blob)
+    enddef
+    assert_fails('BlobArg(N)', 'E1013: Argument 1: type mismatch, expected blob but got number')
+
+    def FuncArg(Fn_arg: func)
+    enddef
+    assert_fails('FuncArg(N)', 'E1013: Argument 1: type mismatch, expected func(...): unknown but got number')
+
+    if has('channel')
+      def JobArg(_: job)
+      enddef
+      assert_fails('JobArg(N)', 'E1013: Argument 1: type mismatch, expected job but got number')
+
+      def ChannelArg(_: channel)
+      enddef
+      assert_fails('ChannelArg(N)', 'E1013: Argument 1: type mismatch, expected channel but got number')
+    endif
+
+    def ObjectArg(_: A)
+    enddef
+    assert_fails('ObjectArg(N)', 'E1013: Argument 1: type mismatch, expected object<A> but got number')
+  END
+  v9.CheckSourceSuccess(lines)
+
+  # Calling a function expecting a number type with different argument types
+  # from another function
+  var pre_lines =<< trim END
+    vim9script
+    class A
+    endclass
+    def IntArg(n: number)
+    enddef
+    def Foo()
+  END
+  var post_lines =<< trim END
+    enddef
+    defcompile
+  END
+  lines = pre_lines + ['var d: dict<number> = {}', 'IntArg(d)'] + post_lines
+  v9.CheckSourceFailure(lines, 'E1013: Argument 1: type mismatch, expected number but got dict<number>', 2)
+  lines = pre_lines + ['var l: list<number> = []', 'IntArg(l)'] + post_lines
+  v9.CheckSourceFailure(lines, 'E1013: Argument 1: type mismatch, expected number but got list<number>', 2)
+  lines = pre_lines + ['var b: blob = 0z12', 'IntArg(b)'] + post_lines
+  v9.CheckSourceFailure(lines, 'E1013: Argument 1: type mismatch, expected number but got blob', 2)
+  lines = pre_lines + ['var Fn: func = function("min")', 'IntArg(Fn)'] + post_lines
+  v9.CheckSourceFailure(lines, 'E1013: Argument 1: type mismatch, expected number but got func(...): unknown', 2)
+  if has('channel')
+    lines = pre_lines + ['var j: job = test_null_job()', 'IntArg(j)'] + post_lines
+    v9.CheckSourceFailure(lines, 'E1013: Argument 1: type mismatch, expected number but got job', 2)
+    lines = pre_lines + ['var ch: channel = test_null_channel()', 'IntArg(ch)'] + post_lines
+    v9.CheckSourceFailure(lines, 'E1013: Argument 1: type mismatch, expected number but got channel', 2)
+  endif
+  lines = pre_lines + ['IntArg(A)'] + post_lines
+  v9.CheckSourceFailure(lines, 'E1405: Class "A" cannot be used as a value', 1)
+  lines = pre_lines + ['var o: A = A.new()', 'IntArg(o)'] + post_lines
+  v9.CheckSourceFailure(lines, 'E1013: Argument 1: type mismatch, expected number but got object<A>', 2)
+enddef
+
+" Test for checking the return type of a def function
+def Test_func_rettype_check()
+  var lines =<< trim END
+    vim9script
+    def Fn(): dict<number>
+      return 10
+    enddef
+    defcompile
+  END
+  v9.CheckSourceFailure(lines, 'E1012: Type mismatch; expected dict<number> but got number', 1)
+
+  lines =<< trim END
+    vim9script
+    def Fn(): list<number>
+      return 10
+    enddef
+    defcompile
+  END
+  v9.CheckSourceFailure(lines, 'E1012: Type mismatch; expected list<number> but got number', 1)
+
+  lines =<< trim END
+    vim9script
+    def Fn(): blob
+      return 10
+    enddef
+    defcompile
+  END
+  v9.CheckSourceFailure(lines, 'E1012: Type mismatch; expected blob but got number', 1)
+
+  lines =<< trim END
+    vim9script
+    def Fn(): func
+      return 10
+    enddef
+    defcompile
+  END
+  v9.CheckSourceFailure(lines, 'E1012: Type mismatch; expected func(...): unknown but got number', 1)
+
+  lines =<< trim END
+    vim9script
+    def Fn(): job
+      return 10
+    enddef
+    defcompile
+  END
+  v9.CheckSourceFailure(lines, 'E1012: Type mismatch; expected job but got number', 1)
+
+  lines =<< trim END
+    vim9script
+    def Fn(): channel
+      return 10
+    enddef
+    defcompile
+  END
+  v9.CheckSourceFailure(lines, 'E1012: Type mismatch; expected channel but got number', 1)
+
+  lines =<< trim END
+    vim9script
+    class A
+    endclass
+    def Fn(): A
+      return 10
+    enddef
+    defcompile
+  END
+  v9.CheckSourceFailure(lines, 'E1012: Type mismatch; expected object<A> but got number', 1)
+enddef
+
+" Test for assigning different types of value to a variable of type "any"
+def Test_assign_to_any()
+  for [typestr, val] in [
+                          ["'bool'", 'true'],
+                          ["'number'", '100'],
+                          ["'float'", '1.1'],
+                          ["'string'", '"abc"'],
+                          ["'blob'", '0z10'],
+                          ["'list<number>'", '[1, 2, 3]'],
+                          ["'dict<number>'", '{a: 1}'],
+                        ]
+    var lines =<< trim eval END
+      vim9script
+      var x: any = {val}
+      assert_equal({typestr}, typename(x))
+      x = [{{a: 1}}, {{b: 2}}]
+      assert_equal('list<dict<number>>', typename(x))
+      def Foo(xarg: any, s: string)
+        assert_equal(s, typename(xarg))
+      enddef
+      Foo({val}, {typestr})
+    END
+    v9.CheckSourceSuccess(lines)
+  endfor
+enddef
+
+def Test_assign_type_to_list_dict()
+  var lines =<< trim END
+    vim9script
+    class C
+    endclass
+
+    var x = [C]
+  END
+  v9.CheckScriptFailure(lines, 'E1405: Class "C" cannot be used as a value')
+
+  lines =<< trim END
+    vim9script
+    class C
+    endclass
+    type T = C
+
+    def F()
+      var x = [3, T, C]
+    enddef
+    F()
+  END
+  v9.CheckScriptFailure(lines, 'E1405: Class "C" cannot be used as a value')
+
+  lines =<< trim END
+    vim9script
+    type T = number
+
+    def F()
+      var x = [3, T]
+    enddef
+    F()
+  END
+  v9.CheckScriptFailure(lines, 'E1407: Cannot use a Typealias as a variable or value')
+
+  lines =<< trim END
+    vim9script
+    class C
+    endclass
+
+    var x = {e: C}
+  END
+  v9.CheckScriptFailure(lines, 'E1405: Class "C" cannot be used as a value')
+
+  lines =<< trim END
+    vim9script
+    class C
+    endclass
+
+    def F()
+      var x = {e: C}
+    enddef
+    F()
+  END
+  v9.CheckScriptFailure(lines, 'E1405: Class "C" cannot be used as a value')
+
+  lines =<< trim END
+    vim9script
+    type T = number
+
+    def F()
+      var x = {e: T}
+    enddef
+    F()
+  END
+  v9.CheckScriptFailure(lines, 'E1407: Cannot use a Typealias as a variable or value')
+
+  lines =<< trim END
+    vim9script
+    class C
+    endclass
+
+    def F()
+      var x = {e: [C]}
+    enddef
+    F()
+  END
+  v9.CheckScriptFailure(lines, 'E1405: Class "C" cannot be used as a value')
+
+  lines =<< trim END
+    vim9script
+    type T = number
+
+    def F()
+      var x = {e: [T]}
+    enddef
+    F()
+  END
+  v9.CheckScriptFailure(lines, 'E1407: Cannot use a Typealias as a variable or value')
+enddef
+
+" Test for modifying a final variable using a compound operator
+def Test_final_var_modification_with_compound_op()
+  var lines =<< trim END
+    vim9script
+
+    final i: number = 1000
+    assert_fails('i += 2', 'E46: Cannot change read-only variable "i"')
+    assert_fails('i -= 2', 'E46: Cannot change read-only variable "i"')
+    assert_fails('i *= 2', 'E46: Cannot change read-only variable "i"')
+    assert_fails('i /= 2', 'E46: Cannot change read-only variable "i"')
+    assert_fails('i %= 2', 'E46: Cannot change read-only variable "i"')
+    assert_equal(1000, i)
+
+    final f: float = 1000.0
+    assert_fails('f += 2', 'E46: Cannot change read-only variable "f"')
+    assert_fails('f -= 2', 'E46: Cannot change read-only variable "f"')
+    assert_fails('f *= 2', 'E46: Cannot change read-only variable "f"')
+    assert_fails('f /= 2', 'E46: Cannot change read-only variable "f"')
+    assert_equal(1000.0, f)
+
+    final s: string = 'abc'
+    assert_fails('s ..= "y"', 'E46: Cannot change read-only variable "s"')
+    assert_equal('abc', s)
+  END
+  v9.CheckScriptSuccess(lines)
+enddef
+
+" Test for modifying a final variable with a List value
+def Test_final_var_with_list_value()
+  var lines =<< trim END
+    vim9script
+
+    final listA: list<string> = []
+    var listB = listA
+
+    listB->add('a')
+    assert_true(listA is listB)
+    assert_equal(['a'], listA)
+    assert_equal(['a'], listB)
+
+    listB += ['b']
+    assert_true(listA is listB)
+    assert_equal(['a', 'b'], listA)
+    assert_equal(['a', 'b'], listB)
+
+    listA->add('c')
+    assert_true(listA is listB)
+    assert_equal(['a', 'b', 'c'], listA)
+    assert_equal(['a', 'b', 'c'], listB)
+
+    listA += ['d']
+    assert_true(listA is listB)
+    assert_equal(['a', 'b', 'c', 'd'], listA)
+    assert_equal(['a', 'b', 'c', 'd'], listB)
+  END
+  v9.CheckScriptSuccess(lines)
+enddef
+
+" Test for modifying a final variable with a List value using "+=" from a legacy
+" function.
+func Test_final_var_with_list_value_legacy()
+  vim9cmd final g:TestVar = ['a']
+  vim9cmd g:TestVar += ['b']
+  call assert_equal(['a', 'b'], g:TestVar)
+endfunc
+
+" Test for modifying a final variable with a Blob value
+def Test_final_var_with_blob_value()
+  var lines =<< trim END
+    vim9script
+
+    final blobA: blob = 0z10
+    var blobB = blobA
+
+    blobB->add(32)
+    assert_true(blobA is blobB)
+    assert_equal(0z1020, blobA)
+    assert_equal(0z1020, blobB)
+
+    blobB += 0z30
+    assert_true(blobA is blobB)
+    assert_equal(0z102030, blobA)
+    assert_equal(0z102030, blobB)
+
+    blobA->add(64)
+    assert_true(blobA is blobB)
+    assert_equal(0z10203040, blobA)
+    assert_equal(0z10203040, blobB)
+
+    blobA += 0z50
+    assert_true(blobA is blobB)
+    assert_equal(0z1020304050, blobA)
+    assert_equal(0z1020304050, blobB)
+  END
+  v9.CheckScriptSuccess(lines)
+enddef
+
+" Test for overwriting a script-local function using the s: dictionary
+def Test_override_script_local_func()
+  var lines =<< trim END
+    vim9script
+    def MyFunc()
+    enddef
+    var d: dict<any> = s:
+    d.MyFunc = function('min')
+  END
+  v9.CheckScriptFailure(lines, 'E705: Variable name conflicts with existing function: MyFunc', 5)
+enddef
+
+" Test for doing a type check at runtime for a list member type
+def Test_nested_type_check()
+  var lines =<< trim END
+    var d = {a: [10], b: [20]}
+    var l = d->items()
+    l[0][1][0] = 'abc'
+  END
+  v9.CheckSourceDefExecAndScriptFailure(lines, 'E1012: Type mismatch; expected number but got string')
+
+  lines =<< trim END
+    vim9script
+    var d = {a: [10], b: [20]}
+    var l = d->items()
+    l[0][1][0] = 30
+    assert_equal([['a', [30]], ['b', [20]]], l)
+  END
+  v9.CheckScriptSuccess(lines)
+
+  lines =<< trim END
+    vim9script
+    def Foo()
+      var d = {a: [10], b: [20]}
+      var l = d->items()
+      l[0][1][0] = 30
+      assert_equal([['a', [30]], ['b', [20]]], l)
+    enddef
+    Foo()
+  END
+  v9.CheckScriptSuccess(lines)
+
+  # Test for modifying a List item added using add() with a different type.
+  lines =<< trim END
+    vim9script
+
+    var l: list<list<any>> = [['a']]
+    var v = [[10]]
+    l[0]->add(v)
+    l[0][1][0] = [{x: 20}]
+  END
+  v9.CheckScriptFailure(lines, 'E1012: Type mismatch; expected list<number> but got list<dict<number>>', 6)
 enddef
 
 " vim: ts=8 sw=2 sts=2 expandtab tw=80 fdm=marker

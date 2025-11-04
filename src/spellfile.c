@@ -241,13 +241,7 @@
 
 #if defined(FEAT_SPELL) || defined(PROTO)
 
-#ifndef UNIX		// it's in os_unix.h for Unix
-# include <time.h>	// for time_t
-#endif
-
-#ifndef UNIX		// it's in os_unix.h for Unix
-# include <time.h>	// for time_t
-#endif
+#include <time.h>	// for time_t
 
 // Special byte values for <byte>.  Some are only used in the tree for
 // postponed prefixes, some only in the other trees.  This is a bit messy...
@@ -356,7 +350,7 @@ spell_load_file(
     int		c = 0;
     int		res;
     int		did_estack_push = FALSE;
-    ESTACK_CHECK_DECLARATION
+    ESTACK_CHECK_DECLARATION;
 
     fd = mch_fopen((char *)fname, "r");
     if (fd == NULL)
@@ -397,7 +391,7 @@ spell_load_file(
 
     // Set sourcing_name, so that error messages mention the file name.
     estack_push(ETYPE_SPELL, fname, 0);
-    ESTACK_CHECK_SETUP
+    ESTACK_CHECK_SETUP;
     did_estack_push = TRUE;
 
     /*
@@ -588,7 +582,7 @@ endOK:
 	fclose(fd);
     if (did_estack_push)
     {
-	ESTACK_CHECK_NOW
+	ESTACK_CHECK_NOW;
 	estack_pop();
     }
 
@@ -1561,12 +1555,12 @@ mb_str2wide(char_u *s)
     int		i = 0;
 
     res = ALLOC_MULT(int, mb_charlen(s) + 1);
-    if (res != NULL)
-    {
-	for (p = s; *p != NUL; )
-	    res[i++] = mb_ptr2char_adv(&p);
-	res[i] = NUL;
-    }
+    if (res == NULL)
+	return NULL;
+
+    for (p = s; *p != NUL; )
+	res[i++] = mb_ptr2char_adv(&p);
+    res[i] = NUL;
     return res;
 }
 
@@ -1598,27 +1592,27 @@ spell_read_tree(
     if (len >= LONG_MAX / (long)sizeof(int))
 	// Invalid length, multiply with sizeof(int) would overflow.
 	return SP_FORMERROR;
-    if (len > 0)
-    {
-	// Allocate the byte array.
-	bp = alloc(len);
-	if (bp == NULL)
-	    return SP_OTHERERROR;
-	*bytsp = bp;
-	if (bytsp_len != NULL)
-	    *bytsp_len = len;
+    if (len <= 0)
+	return 0;
 
-	// Allocate the index array.
-	ip = lalloc_clear(len * sizeof(int), TRUE);
-	if (ip == NULL)
-	    return SP_OTHERERROR;
-	*idxsp = ip;
+    // Allocate the byte array.
+    bp = alloc(len);
+    if (bp == NULL)
+	return SP_OTHERERROR;
+    *bytsp = bp;
+    if (bytsp_len != NULL)
+	*bytsp_len = len;
 
-	// Recursively read the tree and store it in the array.
-	idx = read_tree_node(fd, bp, ip, len, 0, prefixtree, prefixcnt);
-	if (idx < 0)
-	    return idx;
-    }
+    // Allocate the index array.
+    ip = lalloc_clear(len * sizeof(int), TRUE);
+    if (ip == NULL)
+	return SP_OTHERERROR;
+    *idxsp = ip;
+
+    // Recursively read the tree and store it in the array.
+    idx = read_tree_node(fd, bp, ip, len, 0, prefixtree, prefixcnt);
+    if (idx < 0)
+	return idx;
     return 0;
 }
 
@@ -1771,7 +1765,7 @@ spell_reload_one(
     // When "zg" was used and the file wasn't loaded yet, should redo
     // 'spelllang' to load it now.
     if (added_word && !didit)
-	did_set_spelllang(curwin);
+	parse_spelllang(curwin);
 }
 
 
@@ -2167,15 +2161,14 @@ spell_print_node(wordnode_T *node, int depth)
     static void
 spell_print_tree(wordnode_T *root)
 {
-    if (root != NULL)
-    {
-	// Clear the "wn_u1.index" fields, used to remember what has been
-	// done.
-	spell_clear_flags(root);
+    if (root == NULL)
+	return;
 
-	// Recursively print the tree.
-	spell_print_node(root, 0);
-    }
+    // Clear the "wn_u1.index" fields, used to remember what has been done.
+    spell_clear_flags(root);
+
+    // Recursively print the tree.
+    spell_print_node(root, 0);
 }
 #endif // SPELL_PRINTTREE
 
@@ -2643,7 +2636,7 @@ spell_read_aff(spellinfo_T *spin, char_u *fname)
 			smsg(_("Affix also used for BAD/RARE/KEEPCASE/NEEDAFFIX/NEEDCOMPOUND/NOSUGGEST in %s line %d: %s"),
 						       fname, lnum, items[1]);
 		    STRCPY(cur_aff->ah_key, items[1]);
-		    hash_add(tp, cur_aff->ah_key);
+		    hash_add(tp, cur_aff->ah_key, "spelling");
 
 		    cur_aff->ah_combine = (*items[2] == 'Y');
 		}
@@ -2891,7 +2884,7 @@ spell_read_aff(spellinfo_T *spin, char_u *fname)
 		     || is_aff_rule(items, itemcnt, "REPSAL", 2))
 	    {
 		// Ignore REP/REPSAL count
-		if (!isdigit(*items[1]))
+		if (!SAFE_isdigit(*items[1]))
 		    smsg(_("Expected REP(SAL) count in %s line %d"),
 								 fname, lnum);
 	    }
@@ -2926,7 +2919,7 @@ spell_read_aff(spellinfo_T *spin, char_u *fname)
 		{
 		    // First line contains the count.
 		    found_map = TRUE;
-		    if (!isdigit(*items[1]))
+		    if (!SAFE_isdigit(*items[1]))
 			smsg(_("Expected MAP count in %s line %d"),
 								 fname, lnum);
 		}
@@ -2994,7 +2987,7 @@ spell_read_aff(spellinfo_T *spin, char_u *fname)
 			p = vim_strsave(items[i]);
 			if (p == NULL)
 			    break;
-			hash_add(&spin->si_commonwords, p);
+			hash_add(&spin->si_commonwords, p, "spelling");
 		    }
 		}
 	    }
@@ -3312,7 +3305,7 @@ process_compflags(
 			id = spin->si_newcompID--;
 		    } while (vim_strchr((char_u *)"/?*+[]\\-^", id) != NULL);
 		    ci->ci_newID = id;
-		    hash_add(&aff->af_comp, ci->ci_key);
+		    hash_add(&aff->af_comp, ci->ci_key, "spelling");
 		}
 		*tp++ = id;
 	    }
@@ -3429,15 +3422,15 @@ add_fromto(
     fromto_T	*ftp;
     char_u	word[MAXWLEN];
 
-    if (ga_grow(gap, 1) == OK)
-    {
-	ftp = ((fromto_T *)gap->ga_data) + gap->ga_len;
-	(void)spell_casefold(curwin, from, (int)STRLEN(from), word, MAXWLEN);
-	ftp->ft_from = getroom_save(spin, word);
-	(void)spell_casefold(curwin, to, (int)STRLEN(to), word, MAXWLEN);
-	ftp->ft_to = getroom_save(spin, word);
-	++gap->ga_len;
-    }
+    if (ga_grow(gap, 1) == FAIL)
+	return;
+
+    ftp = ((fromto_T *)gap->ga_data) + gap->ga_len;
+    (void)spell_casefold(curwin, from, (int)STRLEN(from), word, MAXWLEN);
+    ftp->ft_from = getroom_save(spin, word);
+    (void)spell_casefold(curwin, to, (int)STRLEN(to), word, MAXWLEN);
+    ftp->ft_to = getroom_save(spin, word);
+    ++gap->ga_len;
 }
 
 /*
@@ -3467,7 +3460,7 @@ spell_free_aff(afffile_T *aff)
     for (ht = &aff->af_pref; ; ht = &aff->af_suff)
     {
 	todo = (int)ht->ht_used;
-	for (hi = ht->ht_array; todo > 0; ++hi)
+	FOR_ALL_HASHTAB_ITEMS(ht, hi, todo)
 	{
 	    if (!HASHITEM_EMPTY(hi))
 	    {
@@ -4306,7 +4299,7 @@ getroom(
 	    bl = NULL;
 	else
 	    // Allocate a block of memory. It is not freed until much later.
-	    bl = alloc_clear(sizeof(sblock_T) + SBLOCKSIZE);
+	    bl = alloc_clear(offsetof(sblock_T, sb_data) + SBLOCKSIZE + 1);
 	if (bl == NULL)
 	{
 	    if (!spin->si_did_emsg)
@@ -4588,7 +4581,7 @@ tree_add_word(
      *    (si_compress_cnt == 1) and the number of free nodes drops below the
      *    maximum word length.
      */
-#ifndef SPELL_COMPRESS_ALLWAYS
+#ifndef SPELL_COMPRESS_ALWAYS
     if (spin->si_compress_cnt == 1
 	    ? spin->si_free_count < MAXWLEN
 	    : spin->si_blocks_cnt >= compress_start)
@@ -4700,31 +4693,31 @@ wordtree_compress(spellinfo_T *spin, wordnode_T *root, char *name)
 
     // Skip the root itself, it's not actually used.  The first sibling is the
     // start of the tree.
-    if (root->wn_sibling != NULL)
-    {
-	hash_init(&ht);
-	n = node_compress(spin, root->wn_sibling, &ht, &tot);
+    if (root->wn_sibling == NULL)
+	return;
+
+    hash_init(&ht);
+    n = node_compress(spin, root->wn_sibling, &ht, &tot);
 
 #ifndef SPELL_PRINTTREE
-	if (spin->si_verbose || p_verbose > 2)
+    if (spin->si_verbose || p_verbose > 2)
 #endif
-	{
-	    if (tot > 1000000)
-		perc = (tot - n) / (tot / 100);
-	    else if (tot == 0)
-		perc = 0;
-	    else
-		perc = (tot - n) * 100 / tot;
-	    vim_snprintf((char *)IObuff, IOSIZE,
-		       _("Compressed %s: %ld of %ld nodes; %ld (%ld%%) remaining"),
-						       name, n, tot, tot - n, perc);
-	    spell_message(spin, IObuff);
-	}
-#ifdef SPELL_PRINTTREE
-	spell_print_tree(root->wn_sibling);
-#endif
-	hash_clear(&ht);
+    {
+	if (tot > 1000000)
+	    perc = (tot - n) / (tot / 100);
+	else if (tot == 0)
+	    perc = 0;
+	else
+	    perc = (tot - n) * 100 / tot;
+	vim_snprintf((char *)IObuff, IOSIZE,
+		_("Compressed %s: %ld of %ld nodes; %ld (%ld%%) remaining"),
+		name, n, tot, tot - n, perc);
+	spell_message(spin, IObuff);
     }
+#ifdef SPELL_PRINTTREE
+    spell_print_tree(root->wn_sibling);
+#endif
+    hash_clear(&ht);
 }
 
 /*
@@ -5118,7 +5111,7 @@ write_vim_spell(spellinfo_T *spin, char_u *fname)
 	    hashitem_T	*hi;
 
 	    todo = (int)spin->si_commonwords.ht_used;
-	    for (hi = spin->si_commonwords.ht_array; todo > 0; ++hi)
+	    FOR_ALL_HASHTAB_ITEMS(&spin->si_commonwords, hi, todo)
 		if (!HASHITEM_EMPTY(hi))
 		{
 		    l = (int)STRLEN(hi->hi_key) + 1;
@@ -5465,11 +5458,11 @@ ex_mkspell(exarg_T *eap)
     }
 
     // Expand all the remaining arguments (e.g., $VIMRUNTIME).
-    if (get_arglist_exp(arg, &fcount, &fnames, FALSE) == OK)
-    {
-	mkspell(fcount, fnames, ascii, eap->forceit, FALSE);
-	FreeWild(fcount, fnames);
-    }
+    if (get_arglist_exp(arg, &fcount, &fnames, FALSE) != OK)
+	return;
+
+    mkspell(fcount, fnames, ascii, eap->forceit, FALSE);
+    FreeWild(fcount, fnames);
 }
 
 /*
@@ -5878,7 +5871,7 @@ sug_write(spellinfo_T *spin, char_u *fname)
     {
 	// <sugline>: <sugnr> ... NUL
 	line = ml_get_buf(spin->si_spellbuf, lnum, FALSE);
-	len = (int)STRLEN(line) + 1;
+	len = ml_get_buf_len(spin->si_spellbuf, lnum) + 1;
 	if (fwrite(line, (size_t)len, (size_t)1, fd) == 0)
 	{
 	    emsg(_(e_error_while_writing));
@@ -6392,70 +6385,76 @@ init_spellfile(void)
     int		aspath = FALSE;
     char_u	*lstart = curbuf->b_s.b_p_spl;
 
-    if (*curwin->w_s->b_p_spl != NUL && curwin->w_s->b_langp.ga_len > 0)
-    {
-	buf = alloc(MAXPATHL);
-	if (buf == NULL)
-	    return;
+    if (*curwin->w_s->b_p_spl == NUL || curwin->w_s->b_langp.ga_len <= 0)
+	return;
 
-	// Find the end of the language name.  Exclude the region.  If there
-	// is a path separator remember the start of the tail.
-	for (lend = curwin->w_s->b_p_spl; *lend != NUL
-			&& vim_strchr((char_u *)",._", *lend) == NULL; ++lend)
-	    if (vim_ispathsep(*lend))
-	    {
-		aspath = TRUE;
-		lstart = lend + 1;
-	    }
+    buf = alloc(MAXPATHL);
+    if (buf == NULL)
+	return;
 
-	// Loop over all entries in 'runtimepath'.  Use the first one where we
-	// are allowed to write.
-	rtp = p_rtp;
-	while (*rtp != NUL)
+    // Find the end of the language name.  Exclude the region.  If there
+    // is a path separator remember the start of the tail.
+    for (lend = curwin->w_s->b_p_spl; *lend != NUL
+	    && vim_strchr((char_u *)",._", *lend) == NULL; ++lend)
+	if (vim_ispathsep(*lend))
 	{
-	    if (aspath)
-		// Use directory of an entry with path, e.g., for
-		// "/dir/lg.utf-8.spl" use "/dir".
-		vim_strncpy(buf, curbuf->b_s.b_p_spl,
-					    lstart - curbuf->b_s.b_p_spl - 1);
-	    else
-		// Copy the path from 'runtimepath' to buf[].
-		copy_option_part(&rtp, buf, MAXPATHL, ",");
-	    if (filewritable(buf) == 2)
-	    {
-		// Use the first language name from 'spelllang' and the
-		// encoding used in the first loaded .spl file.
-		if (aspath)
-		    vim_strncpy(buf, curbuf->b_s.b_p_spl,
-						  lend - curbuf->b_s.b_p_spl);
-		else
-		{
-		    // Create the "spell" directory if it doesn't exist yet.
-		    l = (int)STRLEN(buf);
-		    vim_snprintf((char *)buf + l, MAXPATHL - l, "/spell");
-		    if (filewritable(buf) != 2)
-			vim_mkdir(buf, 0755);
-
-		    l = (int)STRLEN(buf);
-		    vim_snprintf((char *)buf + l, MAXPATHL - l,
-				 "/%.*s", (int)(lend - lstart), lstart);
-		}
-		l = (int)STRLEN(buf);
-		fname = LANGP_ENTRY(curwin->w_s->b_langp, 0)
-							 ->lp_slang->sl_fname;
-		vim_snprintf((char *)buf + l, MAXPATHL - l, ".%s.add",
-			fname != NULL
-			  && strstr((char *)gettail(fname), ".ascii.") != NULL
-				       ? (char_u *)"ascii" : spell_enc());
-		set_option_value_give_err((char_u *)"spellfile",
-							   0L, buf, OPT_LOCAL);
-		break;
-	    }
-	    aspath = FALSE;
+	    aspath = TRUE;
+	    lstart = lend + 1;
 	}
 
-	vim_free(buf);
+    // Loop over all entries in 'runtimepath'.  Use the first one where we
+    // are allowed to write.
+    rtp = p_rtp;
+    while (*rtp != NUL)
+    {
+	if (aspath)
+	    // Use directory of an entry with path, e.g., for
+	    // "/dir/lg.utf-8.spl" use "/dir".
+	    vim_strncpy(buf, curbuf->b_s.b_p_spl,
+		    lstart - curbuf->b_s.b_p_spl - 1);
+	else
+	    // Copy the path from 'runtimepath' to buf[].
+	    copy_option_part(&rtp, buf, MAXPATHL, ",");
+	if (filewritable(buf) == 2)
+	{
+	    // Use the first language name from 'spelllang' and the
+	    // encoding used in the first loaded .spl file.
+	    if (aspath)
+		vim_strncpy(buf, curbuf->b_s.b_p_spl,
+			lend - curbuf->b_s.b_p_spl);
+	    else
+	    {
+		// Create the "spell" directory if it doesn't exist yet.
+		l = (int)STRLEN(buf);
+		vim_snprintf((char *)buf + l, MAXPATHL - l, "/spell");
+		if (filewritable(buf) != 2)
+		{
+		    if (vim_mkdir(buf, 0755) != 0)
+		    {
+			vim_free(buf);
+			return;
+		    }
+		}
+
+		l = (int)STRLEN(buf);
+		vim_snprintf((char *)buf + l, MAXPATHL - l,
+			"/%.*s", (int)(lend - lstart), lstart);
+	    }
+	    l = (int)STRLEN(buf);
+	    fname = LANGP_ENTRY(curwin->w_s->b_langp, 0)
+		->lp_slang->sl_fname;
+	    vim_snprintf((char *)buf + l, MAXPATHL - l, ".%s.add",
+		    fname != NULL
+		    && strstr((char *)gettail(fname), ".ascii.") != NULL
+		    ? (char_u *)"ascii" : spell_enc());
+	    set_option_value_give_err((char_u *)"spellfile",
+		    0L, buf, OPT_LOCAL);
+	    break;
+	}
+	aspath = FALSE;
     }
+
+    vim_free(buf);
 }
 
 

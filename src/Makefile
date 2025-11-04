@@ -102,7 +102,7 @@
 #	  something wrong you may need to change one of the other files. If
 #	  you find a clean way to fix the problem, consider sending a note to
 #	  the author of autoconf (bug-gnu-utils@prep.ai.mit.edu) or Vim
-#	  (Bram@vim.org). Don't bother to do that when you made a hack
+#	  (vim-dev@vim.org). Don't bother to do that when you made a hack
 #	  solution for a non-standard system.
 #
 # 4. "make test"  {{{1
@@ -345,7 +345,7 @@ CClink = $(CC)
 # --enable-gui=gtk or leave out --enable-gnome-check.
 #
 # GNOME makes sense only for GTK+ 2.  Avoid use of --enable-gnome-check with
-# GTK+ 3 build, as the functionality of GNOME is already incooperated into
+# GTK+ 3 build, as the functionality of GNOME is already incorporated into
 # GTK+ 3.
 #
 # If the selected GUI isn't found, the GUI is disabled automatically
@@ -359,7 +359,7 @@ CClink = $(CC)
 #CONF_OPT_GUI = --enable-gui=motif --with-motif-lib="-static -lXm -shared"
 
 # Uncomment this line to run an individual test with gvim.
-#GUI_TESTARG = GUI_FLAG=-g 
+#GUI_TESTARG = GUI_FLAG=-g
 
 # DARWIN - detecting Mac OS X
 # Uncomment this line when you want to compile a Unix version of Vim on
@@ -396,7 +396,9 @@ CClink = $(CC)
 
 # MZSCHEME
 # Uncomment this when you want to include the MzScheme interface.
-# You may have to build racket from source to make this work.
+# You may have to build racket from source to make this work.  Version 7.9 has
+# been reported to work, version 8.0 probably doesn't work, version 8.5 has
+# been reported to work.
 # NOTE: does not work well together with valgrind.
 #CONF_OPT_MZSCHEME = --enable-mzschemeinterp
 # PLT/mrscheme/drscheme Home dir; the PLTHOME environment variable also works
@@ -453,6 +455,7 @@ CClink = $(CC)
 # Uncomment this when you want to include the Tcl interface.
 # First one is for static linking, second one for dynamic loading.
 # Debian package is "tcl-dev".
+# This requires at least "normal" features, "tiny" doesn't work.
 #CONF_OPT_TCL = --enable-tclinterp
 #CONF_OPT_TCL = --enable-tclinterp=dynamic
 #CONF_OPT_TCL = --enable-tclinterp --with-tclsh=tclsh8.4
@@ -583,7 +586,7 @@ CClink = $(CC)
 # configure or afterwards. For examples see below.
 # When using -g with some older versions of Linux you might get a
 # statically linked executable.
-# When not defined, configure will try to use -O2 -g for gcc and -O for cc.
+# When not defined, configure will try to use -O2 for gcc and -O for others.
 #CFLAGS = -g
 #CFLAGS = -O
 
@@ -624,7 +627,7 @@ CClink = $(CC)
 #EXTRA_LIBS = /usr/local/lib/libefence.a
 
 # Autoconf binary.
-AUTOCONF = autoconf
+AUTOCONF ?= autoconf
 
 # PURIFY - remove the # to use the "purify" program (hoi Nia++!)
 #PURIFY = purify
@@ -981,7 +984,7 @@ MAN1DIR = /man1
 
 ### Vim version (adjusted by a script)
 VIMMAJOR = 9
-VIMMINOR = 0
+VIMMINOR = 1
 
 ### Location of Vim files (should not need to be changed, and  {{{1
 ### some things might not work when they are changed!)
@@ -1178,6 +1181,9 @@ KMAPSOURCE = ../runtime/keymap
 
 # Where to look for print resource files
 PRINTSOURCE = ../runtime/print
+
+# Where to look translated README and LICENSE files
+TRANSSOURCE = ../lang
 
 # If you are using Linux, you might want to use this to make vim the
 # default vi editor, it will create a link from vi to Vim when doing
@@ -1398,6 +1404,7 @@ ALL_LIBS = \
 	   $(GUI_LIBS2) \
 	   $(X_PRE_LIBS) \
 	   $(X_LIBS) \
+	   $(WAYLAND_LIBS) \
 	   $(X_EXTRA_LIBS) \
 	   $(MZSCHEME_LIBS) \
 	   $(LIBS) \
@@ -1516,7 +1523,9 @@ BASIC_SRC = \
 	findfile.c \
 	float.c \
 	fold.c \
+	fuzzy.c \
 	getchar.c \
+	gc.c \
 	gui_xim.c \
 	hardcopy.c \
 	hashtab.c \
@@ -1527,8 +1536,10 @@ BASIC_SRC = \
 	indent.c \
 	insexpand.c \
 	json.c \
+	linematch.c \
 	list.c \
 	locale.c \
+	logfile.c \
 	main.c \
 	map.c \
 	mark.c \
@@ -1567,6 +1578,7 @@ BASIC_SRC = \
 	spellsuggest.c \
 	strings.c \
 	syntax.c \
+	tabpanel.c \
 	tag.c \
 	term.c \
 	terminal.c \
@@ -1575,16 +1587,19 @@ BASIC_SRC = \
 	textobject.c \
 	textprop.c \
 	time.c \
+	tuple.c \
 	typval.c \
 	ui.c \
 	undo.c \
 	usercmd.c \
 	userfunc.c \
 	version.c \
+	vim9class.c \
 	vim9cmds.c \
 	vim9compile.c \
 	vim9execute.c \
 	vim9expr.c \
+	vim9generics.c \
 	vim9instr.c \
 	vim9script.c \
 	vim9type.c \
@@ -1602,12 +1617,22 @@ SRC =	$(BASIC_SRC) \
 	$(PERL_SRC) \
 	$(PYTHON_SRC) $(PYTHON3_SRC) \
 	$(TCL_SRC) \
-	$(RUBY_SRC)
+	$(RUBY_SRC) \
+	$(WAYLAND_SRC)
 
 EXTRA_SRC = if_lua.c if_mzsch.c auto/if_perl.c if_perlsfio.c \
 	    if_python.c if_python3.c if_tcl.c if_ruby.c \
 	    gui_beval.c netbeans.c job.c channel.c \
 	    $(GRESOURCE_SRC)
+
+$(WAYLAND_SRC):
+	cd auto/wayland; $(MAKE)
+
+# Needed for parallel jobs to work
+auto/wayland/ext-data-control-v1.h: auto/wayland/ext-data-control-v1.c
+auto/wayland/wlr-data-control-unstable-v1.h: auto/wayland/wlr-data-control-unstable-v1.c
+auto/wayland/primary-selection-unstable-v1.h: auto/wayland/primary-selection-unstable-v1.c
+auto/wayland/xdg-shell.h: auto/wayland/xdg-shell.c
 
 # Unittest files
 JSON_TEST_SRC = json_test.c
@@ -1624,7 +1649,8 @@ UNITTEST_TARGETS = $(JSON_TEST_TARGET) $(KWORD_TEST_TARGET) $(MEMFILE_TEST_TARGE
 RUN_UNITTESTS = run_json_test run_kword_test run_memfile_test run_message_test
 
 # All sources, also the ones that are not configured
-ALL_LOCAL_SRC = $(BASIC_SRC) $(ALL_GUI_SRC) $(UNITTEST_SRC) $(EXTRA_SRC)
+ALL_LOCAL_SRC = $(BASIC_SRC) $(ALL_GUI_SRC) $(UNITTEST_SRC) $(EXTRA_SRC) \
+		$(WAYLAND_SRC)
 ALL_SRC = $(ALL_LOCAL_SRC) $(TERM_SRC) $(XDIFF_SRC)
 
 # Which files to check with lint.  Select one of these three lines.  ALL_SRC
@@ -1676,7 +1702,9 @@ OBJ_COMMON = \
 	objects/findfile.o \
 	objects/float.o \
 	objects/fold.o \
+	objects/fuzzy.o \
 	objects/getchar.o \
+	objects/gc.o \
 	objects/gui_xim.o \
 	objects/hardcopy.o \
 	objects/hashtab.o \
@@ -1686,8 +1714,10 @@ OBJ_COMMON = \
 	objects/if_xcmdsrv.o \
 	objects/indent.o \
 	objects/insexpand.o \
+	objects/linematch.o \
 	objects/list.o \
 	objects/locale.o \
+	objects/logfile.o \
 	objects/map.o \
 	objects/mark.o \
 	objects/match.o \
@@ -1723,6 +1753,7 @@ OBJ_COMMON = \
 	objects/spellsuggest.o \
 	objects/strings.o \
 	objects/syntax.o \
+	objects/tabpanel.o \
 	objects/tag.o \
 	objects/term.o \
 	objects/terminal.o \
@@ -1731,16 +1762,19 @@ OBJ_COMMON = \
 	objects/textobject.o \
 	objects/textprop.o \
 	objects/time.o \
+	objects/tuple.o \
 	objects/typval.o \
 	objects/ui.o \
 	objects/undo.o \
 	objects/usercmd.o \
 	objects/userfunc.o \
 	objects/version.o \
+	objects/vim9class.o \
 	objects/vim9cmds.o \
 	objects/vim9compile.o \
 	objects/vim9execute.o \
 	objects/vim9expr.o \
+	objects/vim9generics.o \
 	objects/vim9instr.o \
 	objects/vim9script.o \
 	objects/vim9type.o \
@@ -1759,7 +1793,8 @@ OBJ_COMMON = \
 	$(OS_EXTRA_OBJ) \
 	$(NETBEANS_OBJ) \
 	$(CHANNEL_OBJ) \
-	$(XDIFF_OBJS_USED)
+	$(XDIFF_OBJS_USED) \
+	$(WAYLAND_OBJ)
 
 # The files included by tests are not in OBJ_COMMON.
 OBJ_MAIN = \
@@ -1833,6 +1868,7 @@ PRO_AUTO = \
 	debugger.pro \
 	dict.pro \
 	diff.pro \
+	linematch.pro \
 	digraph.pro \
 	drawline.pro \
 	drawscreen.pro \
@@ -1852,7 +1888,9 @@ PRO_AUTO = \
 	findfile.pro \
 	float.pro \
 	fold.pro \
+	fuzzy.pro \
 	getchar.pro \
+	gc.pro \
 	gui_xim.pro \
 	gui_beval.pro \
 	hardcopy.pro \
@@ -1872,6 +1910,7 @@ PRO_AUTO = \
 	json.pro \
 	list.pro \
 	locale.pro \
+	logfile.pro \
 	main.pro \
 	map.pro \
 	mark.pro \
@@ -1911,6 +1950,7 @@ PRO_AUTO = \
 	spellsuggest.pro \
 	strings.pro \
 	syntax.pro \
+	tabpanel.pro \
 	tag.pro \
 	term.pro \
 	terminal.pro \
@@ -1920,16 +1960,19 @@ PRO_AUTO = \
 	textobject.pro \
 	textprop.pro \
 	time.pro \
+	tuple.pro \
 	typval.pro \
 	ui.pro \
 	undo.pro \
 	usercmd.pro \
 	userfunc.pro \
 	version.pro \
+	vim9class.pro \
 	vim9cmds.pro \
 	vim9compile.pro \
 	vim9execute.pro \
 	vim9expr.pro \
+	vim9generics.pro \
 	vim9instr.pro \
 	vim9script.pro \
 	vim9type.pro \
@@ -2005,9 +2048,6 @@ reconfig: scratch clean
 # - Use sed to change ./config.log to auto/config.log in the configure script.
 # Autoconf 2.5x (2.59 at least) produces a few more files that we need to take
 # care of:
-# - configure.lineno: has the line numbers replaced with $LINENO.  That
-#   improves patches a LOT, thus use it instead (until someone says it doesn't
-#   work on some system).
 # - autom4te.cache directory is created and not cleaned up.  Delete it.
 # - Uses ">config.log" instead of "./config.log".
 autoconf:
@@ -2019,7 +2059,7 @@ autoconf:
 	-rm -rf autom4te.cache
 	-rm -f auto/config.status auto/config.cache
 
-# Run vim script to generate the Ex command lookup table.
+# Run Vim script to generate the Ex command lookup table.
 # This only needs to be run when a command name has been added or changed.
 # If this fails because you don't have Vim yet, first build and install Vim
 # without changes.
@@ -2027,7 +2067,7 @@ autoconf:
 cmdidxs: ex_cmds.h
 	vim --clean -X --not-a-term -S create_cmdidxs.vim -c quit
 
-# Run vim script to generate the normal/visual mode command lookup table.
+# Run Vim script to generate the normal/visual mode command lookup table.
 # This only needs to be run when a new normal/visual mode command has been
 # added.
 # This requires a "vim" executable with the +eval feature.
@@ -2047,12 +2087,12 @@ CCC = $(CCC_NF) $(ALL_CFLAGS)
 
 # Link the target for normal use or debugging.
 # A shell script is used to try linking without unnecessary libraries.
-$(VIMTARGET): auto/config.mk objects $(OBJ) version.c version.h
-	$(CCC) version.c -o objects/version.o
+$(VIMTARGET): auto/config.mk $(OBJ) objects/version.o
 	@$(BUILD_DATE_MSG)
 	@LINK="$(PURIFY) $(SHRPENV) $(CClink) $(ALL_LIB_DIRS) $(LDFLAGS) \
 		-o $(VIMTARGET) $(OBJ) $(ALL_LIBS)" \
 		MAKE="$(MAKE)" LINK_AS_NEEDED=$(LINK_AS_NEEDED) \
+		PROG="vim" \
 		sh $(srcdir)/link.sh
 
 xxd/xxd$(EXEEXT): xxd/xxd.c
@@ -2064,7 +2104,7 @@ xxd/xxd$(EXEEXT): xxd/xxd.c
 languages:
 	@if test -n "$(MAKEMO)" -a -f $(PODIR)/Makefile; then \
 		cd $(PODIR); \
-		  CC="$(CC)" $(MAKE) prefix=$(DESTDIR)$(prefix); \
+		  CC="$(CC)" $(MAKE) prefix=$(DESTDIR)$(prefix) originals; \
 	fi
 	-@if test -n "$(MAKEMO)" -a -f $(PODIR)/Makefile; then \
 		cd $(PODIR); \
@@ -2145,6 +2185,15 @@ notags:
 tags TAGS: notags
 	$(TAGPRG) $(TAGS_FILES)
 
+# Build the cscope database.
+# This may search more files than necessary.
+.PHONY: cscope csclean
+csclean:
+	-rm -vf cscope.out
+cscope.out:
+	cscope -bv ./*.[ch] ./*.cpp ./if_perl.xs auto/*.h auto/pathdef.c proto/*.pro xxd/xxd.c
+cscope: csclean cscope.out  ;
+
 # Make a highlight file for types.  Requires Exuberant ctags and awk
 types: types.vim
 types.vim: $(TAGS_FILES)
@@ -2171,7 +2220,7 @@ test check: unittests $(TERM_TEST) scripttests
 scripttests:
 	$(MAKE) -f Makefile $(VIMTARGET)
 	if test -n "$(MAKEMO)" -a -f $(PODIR)/Makefile; then \
-		cd $(PODIR); $(MAKE) -f Makefile check VIM=../$(VIMTARGET); \
+		cd $(PODIR); $(MAKE) -f Makefile check VIMPROG=../$(VIMTARGET); \
 	fi
 	-if test $(VIMTARGET) != vim -a ! -r vim; then \
 		ln -s $(VIMTARGET) vim; \
@@ -2252,32 +2301,32 @@ testclean:
 
 # Unittests
 # It's build just like Vim to satisfy all dependencies.
-$(JSON_TEST_TARGET): auto/config.mk objects $(JSON_TEST_OBJ)
-	$(CCC) version.c -o objects/version.o
+$(JSON_TEST_TARGET): auto/config.mk $(JSON_TEST_OBJ) objects/version.o
 	@LINK="$(PURIFY) $(SHRPENV) $(CClink) $(ALL_LIB_DIRS) $(LDFLAGS) \
 		-o $(JSON_TEST_TARGET) $(JSON_TEST_OBJ) $(ALL_LIBS)" \
 		MAKE="$(MAKE)" LINK_AS_NEEDED=$(LINK_AS_NEEDED) \
+		PROG="json_test" \
 		sh $(srcdir)/link.sh
 
-$(KWORD_TEST_TARGET): auto/config.mk objects $(KWORD_TEST_OBJ)
-	$(CCC) version.c -o objects/version.o
+$(KWORD_TEST_TARGET): auto/config.mk $(KWORD_TEST_OBJ) objects/version.o
 	@LINK="$(PURIFY) $(SHRPENV) $(CClink) $(ALL_LIB_DIRS) $(LDFLAGS) \
 		-o $(KWORD_TEST_TARGET) $(KWORD_TEST_OBJ) $(ALL_LIBS)" \
 		MAKE="$(MAKE)" LINK_AS_NEEDED=$(LINK_AS_NEEDED) \
+		PROG="kword_test" \
 		sh $(srcdir)/link.sh
 
-$(MEMFILE_TEST_TARGET): auto/config.mk objects $(MEMFILE_TEST_OBJ)
-	$(CCC) version.c -o objects/version.o
+$(MEMFILE_TEST_TARGET): auto/config.mk $(MEMFILE_TEST_OBJ) objects/version.o
 	@LINK="$(PURIFY) $(SHRPENV) $(CClink) $(ALL_LIB_DIRS) $(LDFLAGS) \
 		-o $(MEMFILE_TEST_TARGET) $(MEMFILE_TEST_OBJ) $(ALL_LIBS)" \
 		MAKE="$(MAKE)" LINK_AS_NEEDED=$(LINK_AS_NEEDED) \
+		PROG="memfile_test" \
 		sh $(srcdir)/link.sh
 
-$(MESSAGE_TEST_TARGET): auto/config.mk objects $(MESSAGE_TEST_OBJ)
-	$(CCC) version.c -o objects/version.o
+$(MESSAGE_TEST_TARGET): auto/config.mk $(MESSAGE_TEST_OBJ) objects/version.o
 	@LINK="$(PURIFY) $(SHRPENV) $(CClink) $(ALL_LIB_DIRS) $(LDFLAGS) \
 		-o $(MESSAGE_TEST_TARGET) $(MESSAGE_TEST_OBJ) $(ALL_LIBS)" \
 		MAKE="$(MAKE)" LINK_AS_NEEDED=$(LINK_AS_NEEDED) \
+		PROG="message_test" \
 		sh $(srcdir)/link.sh
 
 # install targets
@@ -2321,12 +2370,17 @@ installruntime: installrtbase installmacros installpack installtutor installspel
 
 # Install the help files; first adjust the contents for the final location.
 # Also install most of the other runtime files.
-installrtbase: $(HELPSOURCE)/vim.1 $(DEST_VIM) $(DEST_RT) \
+installrtbase: $(HELPSOURCE)/vim.1 $(DEST_VIM) $(VIMTARGET) $(DEST_RT) \
 		$(DEST_HELP) $(DEST_PRINT) $(DEST_COL) \
-		$(DEST_SYN) $(DEST_SYN)/shared $(DEST_IND) \
-		$(DEST_FTP) $(DEST_AUTO) $(DEST_AUTO)/dist $(DEST_AUTO)/xml \
+		$(DEST_SYN) $(DEST_SYN)/modula2 $(DEST_SYN)/modula2/opt $(DEST_SYN)/shared \
+		$(DEST_IND) $(DEST_FTP) \
+		$(DEST_AUTO) $(DEST_AUTO)/dist $(DEST_AUTO)/xml \
+		$(DEST_AUTO)/rust $(DEST_AUTO)/cargo \
 		$(DEST_IMPORT) $(DEST_IMPORT)/dist \
-		$(DEST_PLUG) $(DEST_TUTOR) $(DEST_SPELL) $(DEST_COMP)
+		$(DEST_PLUG) \
+	       	$(DEST_TUTOR) $(DEST_TUTOR)/en $(DEST_TUTOR)/it $(DEST_TUTOR)/sr \
+		$(DEST_TUTOR)/ru \
+		$(DEST_SPELL) $(DEST_COMP)
 	-$(SHELL) ./installman.sh install $(DEST_MAN) "" $(INSTALLMANARGS)
 # Generate the help tags with ":helptags" to handle all languages.
 # Move the distributed tags file aside and restore it, to avoid it being
@@ -2334,8 +2388,8 @@ installrtbase: $(HELPSOURCE)/vim.1 $(DEST_VIM) $(DEST_RT) \
 	cd $(HELPSOURCE); if test -z "$(CROSS_COMPILING)" -a -f tags; then \
 		mv -f tags tags.dist; fi
 	@echo generating help tags
-	-@cd $(HELPSOURCE); if test -z "$(CROSS_COMPILING)"; then \
-		$(MAKE) VIMEXE=$(DEST_BIN)/$(VIMTARGET) vimtags; fi
+	-@BUILD_DIR=`pwd`; cd $(HELPSOURCE); if test -z "$(CROSS_COMPILING)"; then \
+		$(MAKE) VIMPROG="$$BUILD_DIR/$(VIMTARGET)" vimtags; fi
 	cd $(HELPSOURCE); \
 		files=`ls *.txt tags`; \
 		files="$$files `ls *.??x tags-?? 2>/dev/null || true`"; \
@@ -2384,6 +2438,11 @@ installrtbase: $(HELPSOURCE)/vim.1 $(DEST_VIM) $(DEST_RT) \
 	chmod $(VIMSCRIPTMOD) $(SYS_INDOFF_FILE)
 	$(INSTALL_DATA) $(SCRIPTSOURCE)/optwin.vim $(SYS_OPTWIN_FILE)
 	chmod $(VIMSCRIPTMOD) $(SYS_OPTWIN_FILE)
+# install README and LICENCE files
+	$(INSTALL_DATA) ../README.txt $(DEST_RT)
+	chmod $(HELPMOD) $(DEST_RT)/README.txt
+	$(INSTALL_DATA) ../LICENSE $(DEST_RT)
+	chmod $(HELPMOD) $(DEST_RT)/LICENSE
 # install the print resource files
 	cd $(PRINTSOURCE); $(INSTALL_DATA) *.ps $(DEST_PRINT)
 	cd $(DEST_PRINT); chmod $(FILEMOD) *.ps
@@ -2396,6 +2455,8 @@ installrtbase: $(HELPSOURCE)/vim.1 $(DEST_VIM) $(DEST_RT) \
 	cd $(DEST_SYN); chmod $(HELPMOD) *.vim README.txt
 	cd $(SYNSOURCE)/shared; $(INSTALL_DATA) *.vim README.txt $(DEST_SYN)/shared
 	cd $(DEST_SYN)/shared; chmod $(HELPMOD) *.vim README.txt
+	cd $(SYNSOURCE)/modula2/opt; $(INSTALL_DATA) *.vim $(DEST_SYN)/modula2/opt
+	cd $(DEST_SYN)/modula2/opt; chmod $(HELPMOD) *.vim
 # install the indent files
 	cd $(INDSOURCE); $(INSTALL_DATA) *.vim README.txt $(DEST_IND)
 	cd $(DEST_IND); chmod $(HELPMOD) *.vim README.txt
@@ -2406,6 +2467,10 @@ installrtbase: $(HELPSOURCE)/vim.1 $(DEST_VIM) $(DEST_RT) \
 	cd $(DEST_AUTO)/dist; chmod $(HELPMOD) *.vim
 	cd $(AUTOSOURCE)/xml; $(INSTALL_DATA) *.vim $(DEST_AUTO)/xml
 	cd $(DEST_AUTO)/xml; chmod $(HELPMOD) *.vim
+	cd $(AUTOSOURCE)/cargo; $(INSTALL_DATA) *.vim $(DEST_AUTO)/cargo
+	cd $(DEST_AUTO)/cargo; chmod $(HELPMOD) *.vim
+	cd $(AUTOSOURCE)/rust; $(INSTALL_DATA) *.vim $(DEST_AUTO)/rust
+	cd $(DEST_AUTO)/rust; chmod $(HELPMOD) *.vim
 # install the standard import files
 	cd $(IMPORTSOURCE)/dist; $(INSTALL_DATA) *.vim $(DEST_IMPORT)/dist
 	cd $(DEST_IMPORT)/dist; chmod $(HELPMOD) *.vim
@@ -2445,10 +2510,18 @@ installgtutorbin: $(DEST_BIN)
 	$(INSTALL_DATA) gvimtutor $(DEST_BIN)/$(GVIMNAME)tutor
 	chmod $(SCRIPTMOD) $(DEST_BIN)/$(GVIMNAME)tutor
 
-installtutor: $(DEST_RT) $(DEST_TUTOR)
+installtutor: $(DEST_RT) $(DEST_TUTOR)/en $(DEST_TUTOR)/it $(DEST_TUTOR)/sr $(DEST_TUTOR)/ru
 	-$(INSTALL_DATA) $(TUTORSOURCE)/README* $(TUTORSOURCE)/tutor* $(DEST_TUTOR)
+	-$(INSTALL_DATA) $(TUTORSOURCE)/en/* $(DEST_TUTOR)/en/
+	-$(INSTALL_DATA) $(TUTORSOURCE)/it/* $(DEST_TUTOR)/it/
+	-$(INSTALL_DATA) $(TUTORSOURCE)/ru/* $(DEST_TUTOR)/ru/
+	-$(INSTALL_DATA) $(TUTORSOURCE)/sr/* $(DEST_TUTOR)/sr/
 	-rm -f $(DEST_TUTOR)/*.info
 	chmod $(HELPMOD) $(DEST_TUTOR)/*
+	chmod $(DIRMOD) $(DEST_TUTOR)/en
+	chmod $(DIRMOD) $(DEST_TUTOR)/it
+	chmod $(DIRMOD) $(DEST_TUTOR)/ru
+	chmod $(DIRMOD) $(DEST_TUTOR)/sr
 
 # Install the spell files, if they exist.  This assumes at least the English
 # spell file is there.
@@ -2512,7 +2585,7 @@ install-tool-languages:
 
 
 # install the language specific files, if they were unpacked
-install-languages: languages $(DEST_LANG) $(DEST_KMAP)
+install-languages: languages $(DEST_LANG) $(DEST_KMAP) $(DEST_RT)
 	-$(SHELL) ./installman.sh install $(DEST_MAN_DA) "-da" $(INSTALLMANARGS)
 	-$(SHELL) ./installman.sh install $(DEST_MAN_DA_I) "-da" $(INSTALLMANARGS)
 	-$(SHELL) ./installman.sh install $(DEST_MAN_DA_U) "-da.UTF-8" $(INSTALLMANARGS)
@@ -2588,6 +2661,29 @@ install-languages: languages $(DEST_LANG) $(DEST_KMAP)
 	   $(INSTALL_DATA) $(KMAPSOURCE)/README.txt $(KMAPSOURCE)/*.vim $(DEST_KMAP); \
 	   chmod $(FILEMOD) $(DEST_KMAP)/README.txt $(DEST_KMAP)/*.vim; \
 	fi
+# Installing translated README and LICENSE files
+	if test -d $(TRANSSOURCE) ; then \
+	  if test -n "$(LANG)" ; then \
+	    lngusr=$${LANG%%.*} ; \
+	  elif test -n "$(LANGUAGE)" ; then \
+	    lngusr=$${LANGUAGE%%:*} ; \
+	  elif test -n "$(LC_MESSAGES)" ; then \
+	    lngusr=$${LC_MESSAGES%%.*} ; \
+	  fi; \
+	  if test "$$lngusr" = "zh_TW" -o "$$lngusr" = "zh_CN" -o "$$lngusr" = "pt_BR" ; then \
+	    lngusr=`echo $$lngusr | tr '[:upper:]' '[:lower:]'` ; \
+	  elif test -n "$$lngusr" -a "$$lngusr" != "C" -a "$$lngusr" != "POSIX" ; then \
+	    lngusr=$${lngusr%%_*} ; \
+	  fi ; \
+	  if test -f $(TRANSSOURCE)/README.$$lngusr.txt ; then \
+	    $(INSTALL_DATA) $(TRANSSOURCE)/README.$$lngusr.txt $(DEST_RT) ; \
+	    chmod $(HELPMOD) $(DEST_RT)/README.$$lngusr.txt ; \
+	  fi ; \
+	  if test -f $(TRANSSOURCE)/LICENSE.$$lngusr.txt ; then \
+	    $(INSTALL_DATA) $(TRANSSOURCE)/LICENSE.$$lngusr.txt $(DEST_RT) ; \
+	    chmod $(HELPMOD) $(DEST_RT)/LICENSE.$$lngusr.txt ; \
+	  fi ; \
+	fi
 
 # Install the icons for KDE, if the directory exists and the icon doesn't.
 # Always when $(DESTDIR) is not empty.
@@ -2598,7 +2694,7 @@ ICONTHEMEPATH = $(DATADIR)/icons/hicolor
 DESKTOPPATH = $(DESTDIR)$(DATADIR)/applications
 KDEPATH = $(HOME)/.kde/share/icons
 install-icons:
-	if test -n "$(DESTDIR)"; then \
+	if test -n "$(DESTDIR)$(DATADIR)"; then \
 		$(MKDIR_P) $(ICON48PATH) $(ICON32PATH) \
 		$(ICON16PATH) $(DESKTOPPATH); \
 	fi
@@ -2642,15 +2738,20 @@ $(HELPSOURCE)/vim.1 $(MACROSOURCE) $(TOOLSSOURCE):
 $(DESTDIR)$(exec_prefix) $(DEST_BIN) \
 		$(DEST_VIM) $(DEST_RT) $(DEST_HELP) \
 		$(DEST_PRINT) $(DEST_COL) $(DEST_SYN) $(DEST_SYN)/shared \
+		$(DEST_SYN)/modula2 $(DEST_SYN)/modula2/opt \
 		$(DEST_IND) $(DEST_FTP) \
 		$(DEST_LANG) $(DEST_KMAP) $(DEST_COMP) $(DEST_MACRO) \
-		$(DEST_PACK) $(DEST_TOOLS) $(DEST_TUTOR) $(DEST_SPELL) \
+		$(DEST_PACK) $(DEST_TOOLS) \
+		$(DEST_TUTOR) $(DEST_TUTOR)/en $(DEST_TUTOR)/it \
+		$(DEST_TUTOR)/sr $(DEST_TUTOR)/ru \
+		$(DEST_SPELL) \
 		$(DEST_AUTO) $(DEST_AUTO)/dist $(DEST_AUTO)/xml \
+		$(DEST_AUTO)/cargo $(DEST_AUTO)/rust \
 		$(DEST_IMPORT) $(DEST_IMPORT)/dist $(DEST_PLUG):
 	$(MKDIR_P) $@
 	-chmod $(DIRMOD) $@
 
-# create links from various names to vim.  This is only done when the links
+# Create links from various names to vim.  This is only done when the links
 # (or executables with the same name) don't exist yet.
 installlinks: $(GUI_TARGETS) \
 			$(DEST_BIN)/$(EXTARGET) \
@@ -2670,40 +2771,40 @@ installglinks: $(DEST_BIN)/$(GVIMTARGET) \
 installvimdiff: $(DEST_BIN)/$(VIMDIFFTARGET)
 installgvimdiff: $(DEST_BIN)/$(GVIMDIFFTARGET)
 
-$(DEST_BIN)/$(EXTARGET):
+$(DEST_BIN)/$(EXTARGET): $(DEST_BIN)
 	cd $(DEST_BIN); ln -s $(VIMTARGET) $(EXTARGET)
 
-$(DEST_BIN)/$(VIEWTARGET):
+$(DEST_BIN)/$(VIEWTARGET): $(DEST_BIN)
 	cd $(DEST_BIN); ln -s $(VIMTARGET) $(VIEWTARGET)
 
-$(DEST_BIN)/$(GVIMTARGET):
+$(DEST_BIN)/$(GVIMTARGET): $(DEST_BIN)
 	cd $(DEST_BIN); ln -s $(VIMTARGET) $(GVIMTARGET)
 
-$(DEST_BIN)/$(GVIEWTARGET):
+$(DEST_BIN)/$(GVIEWTARGET): $(DEST_BIN)
 	cd $(DEST_BIN); ln -s $(VIMTARGET) $(GVIEWTARGET)
 
-$(DEST_BIN)/$(RVIMTARGET):
+$(DEST_BIN)/$(RVIMTARGET): $(DEST_BIN)
 	cd $(DEST_BIN); ln -s $(VIMTARGET) $(RVIMTARGET)
 
-$(DEST_BIN)/$(RVIEWTARGET):
+$(DEST_BIN)/$(RVIEWTARGET): $(DEST_BIN)
 	cd $(DEST_BIN); ln -s $(VIMTARGET) $(RVIEWTARGET)
 
-$(DEST_BIN)/$(RGVIMTARGET):
+$(DEST_BIN)/$(RGVIMTARGET): $(DEST_BIN)
 	cd $(DEST_BIN); ln -s $(VIMTARGET) $(RGVIMTARGET)
 
-$(DEST_BIN)/$(RGVIEWTARGET):
+$(DEST_BIN)/$(RGVIEWTARGET): $(DEST_BIN)
 	cd $(DEST_BIN); ln -s $(VIMTARGET) $(RGVIEWTARGET)
 
-$(DEST_BIN)/$(VIMDIFFTARGET):
+$(DEST_BIN)/$(VIMDIFFTARGET): $(DEST_BIN)
 	cd $(DEST_BIN); ln -s $(VIMTARGET) $(VIMDIFFTARGET)
 
-$(DEST_BIN)/$(GVIMDIFFTARGET):
+$(DEST_BIN)/$(GVIMDIFFTARGET): $(DEST_BIN)
 	cd $(DEST_BIN); ln -s $(VIMTARGET) $(GVIMDIFFTARGET)
 
-$(DEST_BIN)/$(EVIMTARGET):
+$(DEST_BIN)/$(EVIMTARGET): $(DEST_BIN)
 	cd $(DEST_BIN); ln -s $(VIMTARGET) $(EVIMTARGET)
 
-$(DEST_BIN)/$(EVIEWTARGET):
+$(DEST_BIN)/$(EVIEWTARGET): $(DEST_BIN)
 	cd $(DEST_BIN); ln -s $(VIMTARGET) $(EVIEWTARGET)
 
 # Create links for the manual pages with various names to vim.	This is only
@@ -2817,12 +2918,19 @@ uninstall_runtime:
 	-rm -f $(SYS_OPTWIN_FILE)
 	-rm -f $(DEST_COL)/*.vim $(DEST_COL)/README.txt
 	-rm -rf $(DEST_COL)/tools
+	-rm -f $(DESKTOPPATH)/vim.desktop $(DESKTOPPATH)/gvim.desktop
+	-rm -f $(ICON16PATH)/gvim.png $(ICON32PATH)/gvim.png $(ICON48PATH)/gvim.png
 	-rm -rf $(DEST_COL)/lists
 	-rm -f $(DEST_SYN)/shared/*.vim $(DEST_SYN)/shared/README.txt
+	-rm -f $(DEST_SYN)/modula2/opt/*.vim
 	-rm -f $(DEST_SYN)/*.vim $(DEST_SYN)/README.txt
 	-rm -f $(DEST_IND)/*.vim $(DEST_IND)/README.txt
 	-rm -rf $(DEST_MACRO)
 	-rm -rf $(DEST_PACK)
+	-rm -rf $(DEST_TUTOR)/en
+	-rm -rf $(DEST_TUTOR)/it
+	-rm -rf $(DEST_TUTOR)/ru
+	-rm -rf $(DEST_TUTOR)/sr
 	-rm -rf $(DEST_TUTOR)
 	-rm -rf $(DEST_SPELL)
 	-rm -rf $(DEST_TOOLS)
@@ -2831,14 +2939,20 @@ uninstall_runtime:
 	-rm -rf $(DEST_COMP)
 	-rm -f $(DEST_PRINT)/*.ps
 	-rmdir $(DEST_HELP) $(DEST_PRINT) $(DEST_COL) $(DEST_SYN)/shared
+	-rmdir $(DEST_SYN)/modula2/opt $(DEST_SYN)/modula2
 	-rmdir $(DEST_SYN) $(DEST_IND)
 	-rm -rf $(DEST_FTP)/*.vim $(DEST_FTP)/README.txt $(DEST_FTP)/logtalk.dict
 	-rm -f $(DEST_AUTO)/*.vim $(DEST_AUTO)/README.txt
-	-rm -f $(DEST_AUTO)/dist/*.vim $(DEST_AUTO)/xml/*.vim
+	-rm -f $(DEST_AUTO)/dist/*.vim $(DEST_AUTO)/xml/*.vim $(DEST_AUTO)/cargo/*.vim $(DEST_AUTO)/rust/*.vim
 	-rm -f $(DEST_IMPORT)/dist/*.vim
 	-rm -f $(DEST_PLUG)/*.vim $(DEST_PLUG)/README.txt
-	-rmdir $(DEST_FTP) $(DEST_AUTO)/dist $(DEST_AUTO)/xml $(DEST_AUTO)
+	-rmdir $(DEST_FTP) $(DEST_AUTO)/dist $(DEST_AUTO)/xml $(DEST_AUTO)/cargo $(DEST_AUTO)/rust $(DEST_AUTO)
 	-rmdir $(DEST_IMPORT)/dist $(DEST_IMPORT)
+	-rm -f $(DEST_RT)/README.??.txt
+	-rm -f $(DEST_RT)/README.??_??.txt
+	-rm -f $(DEST_RT)/LICENSE.??.txt
+	-rm -f $(DEST_RT)/LICENSE.??_??.txt
+	-rm -f $(DEST_RT)/README.txt $(DEST_RT)/LICENSE
 	-rmdir $(DEST_PLUG) $(DEST_RT)
 #	This will fail when other Vim versions are installed, no worries.
 	-rmdir $(DEST_VIM)
@@ -2846,18 +2960,20 @@ uninstall_runtime:
 # Clean up all the files that have been produced, except configure's.
 # We support common typing mistakes for Juergen! :-)
 clean celan: testclean
-	-rm -f *.o core $(VIMTARGET).core $(VIMTARGET) vim xxd/*.o
+	-rm -f *.o core $(VIMTARGET).core $(VIMTARGET) vim
 	-rm -rf objects
-	-rm -f $(TOOLS) auto/osdef.h auto/pathdef.c auto/if_perl.c auto/gui_gtk_gresources.c auto/gui_gtk_gresources.h auto/os_haiku.rdef
+	-rm -f auto/osdef.h auto/pathdef.c auto/if_perl.c auto/gui_gtk_gresources.c auto/gui_gtk_gresources.h auto/os_haiku.rdef
 	-rm -f conftest* *~ auto/link.sed
 	-rm -f testdir/opt_test.vim
 	-rm -f $(UNITTEST_TARGETS)
 	-rm -f runtime pixmaps
 	-rm -f mzscheme_base.c
-	-rm -rf libvterm/.libs libterm/t/.libs libvterm/src/*.o libvterm/src/*.lo libvterm/t/*.o libvterm/t/*.lo libvterm/t/harness libvterm/libvterm.la
+	-rm -rf libvterm/.libs libvterm/src/.libs libvterm/t/.libs libvterm/src/*.o libvterm/src/*.lo libvterm/t/*.o libvterm/t/*.lo libvterm/t/harness libvterm/libvterm.la
 	if test -d $(PODIR); then \
 		cd $(PODIR); $(MAKE) prefix=$(DESTDIR)$(prefix) clean; \
 	fi
+	cd xxd; $(MAKE) clean
+	cd auto/wayland; $(MAKE) clean
 
 # Make a shadow directory for compilation on another system or with different
 # features:
@@ -2886,6 +3002,8 @@ shadow:	runtime pixmaps
 	$(MKDIR_P) $(SHADOWDIR)
 	cd $(SHADOWDIR); ln -s $(LINKEDFILES) .
 	mkdir $(SHADOWDIR)/auto
+	mkdir $(SHADOWDIR)/auto/wayland
+	cd $(SHADOWDIR)/auto/wayland; ln -s ../../../auto/wayland/* .
 	cd $(SHADOWDIR)/auto; ln -s ../../auto/configure .
 	$(MKDIR_P) $(SHADOWDIR)/po
 	cd $(SHADOWDIR)/po; ln -s ../../po/*.po ../../po/*.mak ../../po/*.vim ../../po/*.in ../../po/Makefile ../../po/*.c .
@@ -2907,8 +3025,10 @@ shadow:	runtime pixmaps
 				 ../../testdir/*.py \
 				 ../../testdir/python* \
 				 ../../testdir/pyxfile \
+				 ../../testdir/ru_RU \
 				 ../../testdir/sautest \
 				 ../../testdir/samples \
+				 ../../testdir/util \
 				 ../../testdir/dumps \
 				 ../../testdir/*.ok \
 				 ../../testdir/testluaplugin \
@@ -2923,6 +3043,8 @@ shadowupdate:
 # Link needed for doing "make install" in a shadow directory.
 runtime:
 	-ln -s ../runtime .
+	-ln -s ../README.txt .
+	-ln -s ../LICENSE .
 
 # Link needed for doing "make" using GTK in a shadow directory.
 pixmaps:
@@ -3190,8 +3312,14 @@ objects/float.o: float.c
 objects/fold.o: fold.c
 	$(CCC) -o $@ fold.c
 
+objects/fuzzy.o: fuzzy.c
+	$(CCC) -o $@ fuzzy.c
+
 objects/getchar.o: getchar.c
 	$(CCC) -o $@ getchar.c
+
+objects/gc.o: gc.c
+	$(CCC) -o $@ gc.c
 
 objects/hardcopy.o: hardcopy.c
 	$(CCC) -o $@ hardcopy.c
@@ -3298,11 +3426,17 @@ objects/json_test.o: json_test.c
 objects/kword_test.o: kword_test.c
 	$(CCC) -o $@ kword_test.c
 
+objects/linematch.o: linematch.c
+	$(CCC) -o $@ linematch.c
+
 objects/list.o: list.c
 	$(CCC) -o $@ list.c
 
 objects/locale.o: locale.c
 	$(CCC) -o $@ locale.c
+
+objects/logfile.o: logfile.c
+	$(CCC) -o $@ logfile.c
 
 objects/main.o: main.c
 	$(CCC) -o $@ main.c
@@ -3442,6 +3576,9 @@ objects/strings.o: strings.c
 objects/syntax.o: syntax.c
 	$(CCC) -o $@ syntax.c
 
+objects/tabpanel.o: tabpanel.c
+	$(CCC) -o $@ tabpanel.c
+
 objects/tag.o: tag.c
 	$(CCC) -o $@ tag.c
 
@@ -3466,6 +3603,9 @@ objects/textprop.o: textprop.c
 objects/time.o: time.c
 	$(CCC) -o $@ time.c
 
+objects/tuple.o: tuple.c
+	$(CCC) -o $@ tuple.c
+
 objects/typval.o: typval.c
 	$(CCC) -o $@ typval.c
 
@@ -3481,6 +3621,12 @@ objects/usercmd.o: usercmd.c
 objects/userfunc.o: userfunc.c
 	$(CCC) -o $@ userfunc.c
 
+objects/version.o: version.c
+	$(CCC) -o $@ version.c
+
+objects/vim9class.o: vim9class.c
+	$(CCC) -o $@ vim9class.c
+
 objects/vim9cmds.o: vim9cmds.c
 	$(CCC) -o $@ vim9cmds.c
 
@@ -3492,6 +3638,9 @@ objects/vim9execute.o: vim9execute.c
 
 objects/vim9expr.o: vim9expr.c
 	$(CCC) -o $@ vim9expr.c
+
+objects/vim9generics.o: vim9generics.c
+	$(CCC) -o $@ vim9generics.c
 
 objects/vim9instr.o: vim9instr.c
 	$(CCC) -o $@ vim9instr.c
@@ -3507,6 +3656,21 @@ objects/viminfo.o: viminfo.c
 
 objects/window.o: window.c
 	$(CCC) -o $@ window.c
+
+objects/wayland.o: wayland.c
+	$(CCC) $(WAYLAND_CFLAGS) $(WAYLAND_CPPFLAGS) -o $@ wayland.c
+
+objects/wlr-data-control-unstable-v1.o: auto/wayland/wlr-data-control-unstable-v1.c
+	$(CCC) $(WAYLAND_CFLAGS) $(WAYLAND_CPPFLAGS) -o $@ auto/wayland/wlr-data-control-unstable-v1.c
+
+objects/ext-data-control-v1.o: auto/wayland/ext-data-control-v1.c
+	$(CCC) $(WAYLAND_CFLAGS) $(WAYLAND_CPPFLAGS) -o $@ auto/wayland/ext-data-control-v1.c
+
+objects/xdg-shell.o: auto/wayland/xdg-shell.c
+	$(CCC) $(WAYLAND_CFLAGS) $(WAYLAND_CPPFLAGS) -o $@ auto/wayland/xdg-shell.c
+
+objects/primary-selection-unstable-v1.o: auto/wayland/primary-selection-unstable-v1.c
+	$(CCC) $(WAYLAND_CFLAGS) $(WAYLAND_CPPFLAGS) -o $@ auto/wayland/primary-selection-unstable-v1.c
 
 objects/netbeans.o: netbeans.c
 	$(CCC) -o $@ netbeans.c
@@ -3830,7 +3994,17 @@ objects/fold.o: fold.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
  libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
  globals.h errors.h
+objects/fuzzy.o: fuzzy.c vim.h protodef.h auto/config.h feature.h os_unix.h \
+ auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h beval.h \
+ proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
+ libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
+ globals.h errors.h
 objects/getchar.o: getchar.c vim.h protodef.h auto/config.h feature.h os_unix.h \
+ auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h beval.h \
+ proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
+ libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
+ globals.h errors.h
+objects/gc.o: gc.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h beval.h \
  proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
  libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
@@ -3885,12 +4059,22 @@ objects/json.o: json.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
  libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
  globals.h errors.h
+objects/linematch.o: linematch.c vim.h protodef.h auto/config.h feature.h \
+ os_unix.h auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h \
+ beval.h proto/gui_beval.pro structs.h regexp.h gui.h \
+ libvterm/include/vterm.h libvterm/include/vterm_keycodes.h xdiff/xdiff.h \
+ xdiff/../vim.h alloc.h ex_cmds.h spell.h proto.h globals.h errors.h
 objects/list.o: list.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h beval.h \
  proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
  libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
  globals.h errors.h
 objects/locale.o: locale.c vim.h protodef.h auto/config.h feature.h os_unix.h \
+ auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h beval.h \
+ proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
+ libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
+ globals.h errors.h
+objects/logfile.o: logfile.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h beval.h \
  proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
  libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
@@ -4085,6 +4269,11 @@ objects/syntax.o: syntax.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
  libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
  globals.h errors.h
+objects/tabpanel.o: tabpanel.c vim.h protodef.h auto/config.h feature.h os_unix.h \
+ auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h beval.h \
+ proto/gui_beval.pro structs.h regexp.h gui.h \
+ libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
+ globals.h errors.h
 objects/tag.o: tag.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h beval.h \
  proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
@@ -4125,6 +4314,11 @@ objects/time.o: time.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
  libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
  globals.h errors.h
+objects/tuple.o: tuple.c vim.h protodef.h auto/config.h feature.h os_unix.h \
+ auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h beval.h \
+ proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
+ libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
+ globals.h errors.h
 objects/typval.o: typval.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h beval.h \
  proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
@@ -4155,6 +4349,11 @@ objects/version.o: version.c vim.h protodef.h auto/config.h feature.h os_unix.h 
  proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
  libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
  globals.h errors.h version.h
+objects/vim9class.o: vim9class.c vim.h protodef.h auto/config.h feature.h \
+ os_unix.h auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h \
+ beval.h proto/gui_beval.pro structs.h regexp.h gui.h \
+ libvterm/include/vterm.h libvterm/include/vterm_keycodes.h alloc.h \
+ ex_cmds.h spell.h proto.h globals.h errors.h vim9.h
 objects/vim9cmds.o: vim9cmds.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h beval.h \
  proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
@@ -4175,6 +4374,11 @@ objects/vim9expr.o: vim9expr.c vim.h protodef.h auto/config.h feature.h os_unix.
  proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
  libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
  globals.h errors.h vim9.h
+objects/vim9generics.o: vim9generics.c vim.h protodef.h auto/config.h feature.h \
+ os_unix.h auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h \
+ beval.h proto/gui_beval.pro structs.h regexp.h gui.h \
+ libvterm/include/vterm.h libvterm/include/vterm_keycodes.h alloc.h \
+ ex_cmds.h spell.h proto.h globals.h errors.h vim9.h
 objects/vim9instr.o: vim9instr.c vim.h protodef.h auto/config.h feature.h \
  os_unix.h auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h \
  beval.h proto/gui_beval.pro structs.h regexp.h gui.h \
@@ -4350,6 +4554,20 @@ objects/channel.o: channel.c vim.h protodef.h auto/config.h feature.h os_unix.h 
  proto/gui_beval.pro structs.h regexp.h gui.h libvterm/include/vterm.h \
  libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
  globals.h errors.h
+objects/wlr-data-control-unstable-v1.o: \
+ auto/wayland/wlr-data-control-unstable-v1.c
+objects/ext-data-control-v1.o: auto/wayland/ext-data-control-v1.c
+objects/xdg-shell.o: auto/wayland/xdg-shell.c
+objects/primary-selection-unstable-v1.o: \
+ auto/wayland/primary-selection-unstable-v1.c
+objects/wayland.o: wayland.c vim.h protodef.h auto/config.h feature.h os_unix.h \
+ auto/osdef.h ascii.h keymap.h termdefs.h macros.h option.h beval.h \
+ structs.h regexp.h gui.h libvterm/include/vterm.h \
+ libvterm/include/vterm_keycodes.h xdiff/xdiff.h xdiff/../vim.h alloc.h \
+ ex_cmds.h spell.h proto.h globals.h errors.h \
+ auto/wayland/wlr-data-control-unstable-v1.h \
+ auto/wayland/ext-data-control-v1.h auto/wayland/xdg-shell.h \
+ auto/wayland/primary-selection-unstable-v1.h
 objects/gui_gtk_gresources.o: auto/gui_gtk_gresources.c
 objects/vterm_encoding.o: libvterm/src/encoding.c libvterm/src/vterm_internal.h \
  libvterm/include/vterm.h libvterm/include/vterm_keycodes.h \

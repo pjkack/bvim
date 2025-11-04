@@ -55,8 +55,10 @@ ga_concat_esc(garray_T *gap, char_u *p, int clen)
 	mch_memmove(buf, p, clen);
 	buf[clen] = NUL;
 	ga_concat(gap, buf);
+	return;
     }
-    else switch (*p)
+
+    switch (*p)
     {
 	case BS: ga_concat(gap, (char_u *)"\\b"); break;
 	case ESC: ga_concat(gap, (char_u *)"\\e"); break;
@@ -97,7 +99,7 @@ ga_concat_shorten_esc(garray_T *gap, char_u *str)
 	return;
     }
 
-    for (p = str; *p != NUL; ++p)
+    for (p = str; *p != NUL; )
     {
 	same_len = 1;
 	s = p;
@@ -116,10 +118,13 @@ ga_concat_shorten_esc(garray_T *gap, char_u *str)
 	    vim_snprintf((char *)buf, NUMBUFLEN, "%d", same_len);
 	    ga_concat(gap, buf);
 	    ga_concat(gap, (char_u *)" times]");
-	    p = s - 1;
+	    p = s;
 	}
 	else
+	{
 	    ga_concat_esc(gap, p, clen);
+	    p += clen;
+	}
     }
 }
 
@@ -179,13 +184,13 @@ fill_assert_error(
 		return;
 
 	    todo = (int)exp_d->dv_hashtab.ht_used;
-	    for (hi = exp_d->dv_hashtab.ht_array; todo > 0; ++hi)
+	    FOR_ALL_HASHTAB_ITEMS(&exp_d->dv_hashtab, hi, todo)
 	    {
 		if (!HASHITEM_EMPTY(hi))
 		{
 		    item2 = dict_find(got_d, hi->hi_key, -1);
 		    if (item2 == NULL || !tv_equal(&HI2DI(hi)->di_tv,
-						  &item2->di_tv, FALSE, FALSE))
+						  &item2->di_tv, FALSE))
 		    {
 			// item of exp_d not present in got_d or values differ.
 			dict_add_tv(exp_tv->vval.v_dict,
@@ -202,7 +207,7 @@ fill_assert_error(
 
 	    // Add items only present in got_d.
 	    todo = (int)got_d->dv_hashtab.ht_used;
-	    for (hi = got_d->dv_hashtab.ht_array; todo > 0; ++hi)
+	    FOR_ALL_HASHTAB_ITEMS(&got_d->dv_hashtab, hi, todo)
 	    {
 		if (!HASHITEM_EMPTY(hi))
 		{
@@ -221,9 +226,11 @@ fill_assert_error(
     }
     else
     {
-	ga_concat(gap, (char_u *)"'");
+	if (atype == ASSERT_FAILS)
+	    ga_concat(gap, (char_u *)"'");
 	ga_concat_shorten_esc(gap, exp_str);
-	ga_concat(gap, (char_u *)"'");
+	if (atype == ASSERT_FAILS)
+	    ga_concat(gap, (char_u *)"'");
     }
     if (atype != ASSERT_NOTEQUAL)
     {
@@ -258,7 +265,7 @@ assert_equal_common(typval_T *argvars, assert_type_T atype)
 {
     garray_T	ga;
 
-    if (tv_equal(&argvars[0], &argvars[1], FALSE, FALSE)
+    if (tv_equal(&argvars[0], &argvars[1], FALSE)
 						   != (atype == ASSERT_EQUAL))
     {
 	prepare_assert_error(&ga);
@@ -277,9 +284,6 @@ assert_match_common(typval_T *argvars, assert_type_T atype)
     garray_T	ga;
     char_u	buf1[NUMBUFLEN];
     char_u	buf2[NUMBUFLEN];
-    int		called_emsg_before = called_emsg;
-    char_u	*pat;
-    char_u	*text;
 
     if (in_vim9script()
 	    && (check_for_string_arg(argvars, 0) == FAIL
@@ -287,9 +291,9 @@ assert_match_common(typval_T *argvars, assert_type_T atype)
 		|| check_for_opt_string_arg(argvars, 2) == FAIL))
 	return 1;
 
-    pat = tv_get_string_buf_chk(&argvars[0], buf1);
-    text = tv_get_string_buf_chk(&argvars[1], buf2);
-    if (called_emsg == called_emsg_before
+    char_u *pat = tv_get_string_buf_chk(&argvars[0], buf1);
+    char_u *text = tv_get_string_buf_chk(&argvars[1], buf2);
+    if (pat != NULL && text != NULL
 		 && pattern_match(pat, text, FALSE) != (atype == ASSERT_MATCH))
     {
 	prepare_assert_error(&ga);
@@ -416,24 +420,23 @@ assert_equalfile(typval_T *argvars)
 {
     char_u	buf1[NUMBUFLEN];
     char_u	buf2[NUMBUFLEN];
-    int		called_emsg_before = called_emsg;
     char_u	*fname1 = tv_get_string_buf_chk(&argvars[0], buf1);
     char_u	*fname2 = tv_get_string_buf_chk(&argvars[1], buf2);
-    garray_T	ga;
     FILE	*fd1;
     FILE	*fd2;
     char	line1[200];
     char	line2[200];
     int		lineidx = 0;
 
-    if (called_emsg > called_emsg_before)
+    if (fname1 == NULL || fname2 == NULL)
 	return 0;
 
     IObuff[0] = NUL;
     fd1 = mch_fopen((char *)fname1, READBIN);
     if (fd1 == NULL)
     {
-	vim_snprintf((char *)IObuff, IOSIZE, (char *)e_cant_read_file_str, fname1);
+	vim_snprintf((char *)IObuff, IOSIZE, (char *)e_cant_read_file_str,
+								       fname1);
     }
     else
     {
@@ -441,7 +444,8 @@ assert_equalfile(typval_T *argvars)
 	if (fd2 == NULL)
 	{
 	    fclose(fd1);
-	    vim_snprintf((char *)IObuff, IOSIZE, (char *)e_cant_read_file_str, fname2);
+	    vim_snprintf((char *)IObuff, IOSIZE, (char *)e_cant_read_file_str,
+								       fname2);
 	}
 	else
 	{
@@ -494,8 +498,10 @@ assert_equalfile(typval_T *argvars)
 	    fclose(fd2);
 	}
     }
+
     if (IObuff[0] != NUL)
     {
+	garray_T	ga;
 	prepare_assert_error(&ga);
 	if (argvars[2].v_type != VAR_UNKNOWN)
 	{
@@ -524,6 +530,7 @@ assert_equalfile(typval_T *argvars)
 	ga_clear(&ga);
 	return 1;
     }
+
     return 0;
 }
 
@@ -592,7 +599,6 @@ f_assert_exception(typval_T *argvars, typval_T *rettv)
     void
 f_assert_fails(typval_T *argvars, typval_T *rettv)
 {
-    char_u	*cmd;
     garray_T	ga;
     int		save_trylevel = trylevel;
     int		called_emsg_before = called_emsg;
@@ -608,13 +614,13 @@ f_assert_fails(typval_T *argvars, typval_T *rettv)
 			    && check_for_opt_string_arg(argvars, 4) == FAIL)))))
 	return;
 
-    cmd = tv_get_string_chk(&argvars[0]);
-
     // trylevel must be zero for a ":throw" command to be considered failed
     trylevel = 0;
     suppress_errthrow = TRUE;
     in_assert_fails = TRUE;
+    ++no_wait_return;
 
+    char_u *cmd = tv_get_string_chk(&argvars[0]);
     do_cmdline_cmd(cmd);
 
     // reset here for any errors reported below
@@ -742,7 +748,7 @@ f_assert_fails(typval_T *argvars, typval_T *rettv)
 		actual_tv.vval.v_string = actual;
 	    }
 	    fill_assert_error(&ga, &argvars[2], expected_str,
-			&argvars[error_found_index], &actual_tv, ASSERT_OTHER);
+			&argvars[error_found_index], &actual_tv, ASSERT_FAILS);
 	    ga_concat(&ga, (char_u *)": ");
 	    assert_append_cmd_or_arg(&ga, argvars, cmd);
 	    assert_error(&ga);
@@ -758,6 +764,7 @@ theend:
     did_emsg = FALSE;
     got_int = FALSE;
     msg_col = 0;
+    --no_wait_return;
     need_wait_return = FALSE;
     emsg_on_display = FALSE;
     msg_scrolled = 0;
@@ -783,9 +790,7 @@ assert_inrange(typval_T *argvars)
 {
     garray_T	ga;
     int		error = FALSE;
-    char_u	*tofree;
-    char	msg[200];
-    char_u	numbuf[NUMBUFLEN];
+    char_u	expected_str[200];
 
     if (argvars[0].v_type == VAR_FLOAT
 	    || argvars[1].v_type == VAR_FLOAT
@@ -798,17 +803,10 @@ assert_inrange(typval_T *argvars)
 	if (factual < flower || factual > fupper)
 	{
 	    prepare_assert_error(&ga);
-	    if (argvars[3].v_type != VAR_UNKNOWN)
-	    {
-		ga_concat(&ga, tv2string(&argvars[3], &tofree, numbuf, 0));
-		vim_free(tofree);
-	    }
-	    else
-	    {
-		vim_snprintf(msg, 200, "Expected range %g - %g, but got %g",
-						      flower, fupper, factual);
-		ga_concat(&ga, (char_u *)msg);
-	    }
+	    vim_snprintf((char *)expected_str, 200, "range %g - %g,",
+							       flower, fupper);
+	    fill_assert_error(&ga, &argvars[3], expected_str, NULL,
+						    &argvars[2], ASSERT_OTHER);
 	    assert_error(&ga);
 	    ga_clear(&ga);
 	    return 1;
@@ -825,17 +823,10 @@ assert_inrange(typval_T *argvars)
 	if (actual < lower || actual > upper)
 	{
 	    prepare_assert_error(&ga);
-	    if (argvars[3].v_type != VAR_UNKNOWN)
-	    {
-		ga_concat(&ga, tv2string(&argvars[3], &tofree, numbuf, 0));
-		vim_free(tofree);
-	    }
-	    else
-	    {
-		vim_snprintf(msg, 200, "Expected range %ld - %ld, but got %ld",
-				       (long)lower, (long)upper, (long)actual);
-		ga_concat(&ga, (char_u *)msg);
-	    }
+	    vim_snprintf((char *)expected_str, 200, "range %ld - %ld,",
+						     (long)lower, (long)upper);
+	    fill_assert_error(&ga, &argvars[3], expected_str, NULL,
+						    &argvars[2], ASSERT_OTHER);
 	    assert_error(&ga);
 	    ga_clear(&ga);
 	    return 1;
@@ -1051,6 +1042,8 @@ f_test_override(typval_T *argvars, typval_T *rettv UNUSED)
 	no_wait_return = val;
     else if (STRCMP(name, (char_u *)"ui_delay") == 0)
 	ui_delay_for_testing = val;
+    else if (STRCMP(name, (char_u *)"unreachable") == 0)
+	ignore_unreachable_code_for_testing = val;
     else if (STRCMP(name, (char_u *)"term_props") == 0)
 	reset_term_props_on_termresponse = val;
     else if (STRCMP(name, (char_u *)"vterm_title") == 0)
@@ -1061,6 +1054,8 @@ f_test_override(typval_T *argvars, typval_T *rettv UNUSED)
 	ml_get_alloc_lines = val;
     else if (STRCMP(name, (char_u *)"autoload") == 0)
 	override_autoload = val;
+    else if (STRCMP(name, (char_u *)"defcompile") == 0)
+	override_defcompile = val;
     else if (STRCMP(name, (char_u *)"ALL") == 0)
     {
 	disable_char_avail_for_testing = FALSE;
@@ -1102,6 +1097,7 @@ f_test_refcount(typval_T *argvars, typval_T *rettv)
 	case VAR_STRING:
 	case VAR_INSTR:
 	    break;
+
 	case VAR_JOB:
 #ifdef FEAT_JOB_CHANNEL
 	    if (argvars[0].vval.v_job != NULL)
@@ -1136,9 +1132,25 @@ f_test_refcount(typval_T *argvars, typval_T *rettv)
 	    if (argvars[0].vval.v_list != NULL)
 		retval = argvars[0].vval.v_list->lv_refcount - 1;
 	    break;
+	case VAR_TUPLE:
+	    if (argvars[0].vval.v_tuple != NULL)
+		retval = argvars[0].vval.v_tuple->tv_refcount - 1;
+	    break;
 	case VAR_DICT:
 	    if (argvars[0].vval.v_dict != NULL)
 		retval = argvars[0].vval.v_dict->dv_refcount - 1;
+	    break;
+	case VAR_CLASS:
+	    if (argvars[0].vval.v_class != NULL)
+		retval = argvars[0].vval.v_class->class_refcount - 1;
+	    break;
+	case VAR_OBJECT:
+	    if (argvars[0].vval.v_object != NULL)
+		retval = argvars[0].vval.v_object->obj_refcount - 1;
+	    break;
+	case VAR_TYPEALIAS:
+	    if (argvars[0].vval.v_typealias != NULL)
+		retval = argvars[0].vval.v_typealias->ta_refcount - 1;
 	    break;
     }
 
@@ -1189,7 +1201,7 @@ f_test_null_blob(typval_T *argvars UNUSED, typval_T *rettv)
     rettv->vval.v_blob = NULL;
 }
 
-#ifdef FEAT_JOB_CHANNEL
+#if defined(FEAT_JOB_CHANNEL) || defined(PROTO)
     void
 f_test_null_channel(typval_T *argvars UNUSED, typval_T *rettv)
 {
@@ -1204,7 +1216,7 @@ f_test_null_dict(typval_T *argvars UNUSED, typval_T *rettv)
     rettv_dict_set(rettv, NULL);
 }
 
-#ifdef FEAT_JOB_CHANNEL
+#if defined(FEAT_JOB_CHANNEL) || defined(PROTO)
     void
 f_test_null_job(typval_T *argvars UNUSED, typval_T *rettv)
 {
@@ -1238,6 +1250,12 @@ f_test_null_string(typval_T *argvars UNUSED, typval_T *rettv)
 {
     rettv->v_type = VAR_STRING;
     rettv->vval.v_string = NULL;
+}
+
+    void
+f_test_null_tuple(typval_T *argvars UNUSED, typval_T *rettv)
+{
+    rettv_tuple_set(rettv, NULL);
 }
 
     void
@@ -1386,13 +1404,18 @@ test_gui_mouse_event(dict_T *args)
 
     if (move)
     {
+	int pY = row;
+	int pX = col;
+	// the "move" argument expects row and col coordnates to be in pixels,
+	// unless "cell" is specified and is TRUE.
 	if (dict_get_bool(args, "cell", FALSE))
 	{
-	    // click in the middle of the character cell
-	    row = row * gui.char_height + gui.char_height / 2;
-	    col = col * gui.char_width + gui.char_width / 2;
+	    // calculate the middle of the character cell
+	    // Note: Cell coordinates are 1-based from Vim script
+	    pY = (row - 1) * gui.char_height + gui.char_height / 2;
+	    pX = (col - 1) * gui.char_width + gui.char_width / 2;
 	}
-	gui_mouse_moved(col, row);
+	gui_mouse_moved(pX, pY);
     }
     else
     {
@@ -1487,6 +1510,30 @@ test_gui_tabmenu_event(dict_T *args UNUSED)
 # endif
 
     void
+f_test_mswin_event(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
+{
+# ifdef MSWIN
+    rettv->v_type = VAR_BOOL;
+    rettv->vval.v_number = FALSE;
+
+    if (sandbox != 0)
+    {
+	emsg(_(e_not_allowed_in_sandbox));
+	return;
+    }
+
+    if (check_for_string_arg(argvars, 0) == FAIL
+	    || check_for_dict_arg(argvars, 1) == FAIL
+	    || argvars[1].vval.v_dict == NULL)
+	return;
+
+    char_u *event = tv_get_string(&argvars[0]);
+    rettv->vval.v_number = test_mswin_event(event, argvars[1].vval.v_dict);
+
+# endif
+}
+
+    void
 f_test_gui_event(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
 {
 # ifdef FEAT_GUI
@@ -1513,6 +1560,10 @@ f_test_gui_event(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
     else if (STRCMP(event, "findrepl") == 0)
 	rettv->vval.v_number = test_gui_find_repl(argvars[1].vval.v_dict);
 #  endif
+#  ifdef MSWIN
+    else if (STRCMP(event, "key") == 0 || STRCMP(event, "mouse") == 0 || STRCMP(event, "set_keycode_trans_strategy") == 0)
+	rettv->vval.v_number = test_mswin_event(event, argvars[1].vval.v_dict);
+#  endif
     else if (STRCMP(event, "mouse") == 0)
 	rettv->vval.v_number = test_gui_mouse_event(argvars[1].vval.v_dict);
     else if (STRCMP(event, "scrollbar") == 0)
@@ -1521,10 +1572,6 @@ f_test_gui_event(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
 	rettv->vval.v_number = test_gui_tabline_event(argvars[1].vval.v_dict);
     else if (STRCMP(event, "tabmenu") == 0)
 	rettv->vval.v_number = test_gui_tabmenu_event(argvars[1].vval.v_dict);
-#  ifdef FEAT_GUI_MSWIN
-    else if (STRCMP(event, "sendevent") == 0)
-	rettv->vval.v_number = test_gui_w32_sendevent(argvars[1].vval.v_dict);
-#  endif
     else
     {
 	semsg(_(e_invalid_argument_str), event);

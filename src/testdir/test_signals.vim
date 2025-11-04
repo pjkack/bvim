@@ -1,11 +1,6 @@
 " Test signal handling.
 
-source check.vim
-source term_util.vim
-
 CheckUnix
-
-source shared.vim
 
 " Check whether a signal is available on this system.
 func HasSignal(signal)
@@ -133,7 +128,7 @@ func Test_signal_TSTP()
   sleep 100m
 
   " We resume after the suspend.  Sleep a bit for the signal to take effect,
-  " also when running under valgrind. 
+  " also when running under valgrind.
   exe 'silent !kill -s CONT ' .. pid_vim
   call WaitForAssert({-> assert_true(filereadable('XautoOut2'))})
   sleep 10m

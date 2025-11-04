@@ -1,6 +1,6 @@
 " Test for tabline
 
-source shared.vim
+source util/screendump.vim
 
 func TablineWithCaughtError()
   let s:func_in_tabline_called = 1
@@ -130,7 +130,7 @@ func Test_tabline_empty_group()
   tabnew
   redraw!
 
-  tabclose
+  bw!
   set tabline=
 endfunc
 
@@ -158,5 +158,82 @@ func Test_mouse_click_in_tab()
   call RunVim([], [], "-e -s -S Xclickscript -c qa")
 endfunc
 
+func Test_tabline_showcmd()
+  CheckScreendump
+
+  let lines =<< trim END
+    func MyTabLine()
+      return '%S'
+    endfunc
+
+    set showtabline=2
+    set tabline=%!MyTabLine()
+    set showcmdloc=tabline
+    call setline(1, ['a', 'b', 'c'])
+    set foldopen+=jump
+    1,2fold
+    3
+  END
+  call writefile(lines, 'XTest_tabline', 'D')
+
+  let buf = RunVimInTerminal('-S XTest_tabline', {'rows': 6})
+
+  call term_sendkeys(buf, "g")
+  call VerifyScreenDump(buf, 'Test_tabline_showcmd_1', {})
+
+  " typing "gg" should open the fold
+  call term_sendkeys(buf, "g")
+  call VerifyScreenDump(buf, 'Test_tabline_showcmd_2', {})
+
+  call term_sendkeys(buf, "\<C-V>Gl")
+  call VerifyScreenDump(buf, 'Test_tabline_showcmd_3', {})
+
+  call term_sendkeys(buf, "\<Esc>1234")
+  call VerifyScreenDump(buf, 'Test_tabline_showcmd_4', {})
+
+  call term_sendkeys(buf, "\<Esc>:set tabline=\<CR>")
+  call term_sendkeys(buf, ":\<CR>")
+  call term_sendkeys(buf, "1234")
+  call VerifyScreenDump(buf, 'Test_tabline_showcmd_5', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func TruncTabLine()
+  return '%1T口口%2Ta' .. repeat('b', &columns - 4) .. '%999X%#TabLine#c'
+endfunc
+
+" Test 'tabline' with truncated double-width label at the start.
+func Test_tabline_truncated_double_width()
+  tabnew
+  redraw
+  call assert_match('X$', Screenline(1))
+  let attr_TabLineFill = screenattr(1, &columns - 1)
+  let attr_TabLine = screenattr(1, &columns)
+  call assert_notequal(attr_TabLine, attr_TabLineFill)
+
+  set tabline=%!TruncTabLine()
+  redraw
+  call assert_equal('<a' .. repeat('b', &columns - 4) .. 'c', Screenline(1))
+  call assert_equal(attr_TabLineFill, screenattr(1, &columns - 2))
+  call assert_equal(attr_TabLine, screenattr(1, &columns - 1))
+  call assert_equal(attr_TabLine, screenattr(1, &columns))
+
+  bw!
+  set tabline=
+endfunc
+
+" Test that 'X' is removed when mouse is disabled.
+func Test_tabline_mouse_enable()
+  tabnew
+  for val in ['n', 'i', 'v', 'a']
+    set mouse=
+    redraw
+    call assert_notmatch('X$', Screenline(1))
+    execute $'set mouse={val}'
+    redraw
+    call assert_match('X$', Screenline(1))
+  endfor
+endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

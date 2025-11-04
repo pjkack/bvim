@@ -1,46 +1,65 @@
 " Tests for mappings and abbreviations
 
-source shared.vim
-source check.vim
-source screendump.vim
-source term_util.vim
-import './vim9.vim' as v9
+source util/screendump.vim
+import './util/vim9.vim' as v9
 
 func Test_abbreviation()
+  new
   " abbreviation with 0x80 should work
   inoreab чкпр   vim
   call feedkeys("Goчкпр \<Esc>", "xt")
   call assert_equal('vim ', getline('$'))
   iunab чкпр
-  set nomodified
+  bwipe!
+endfunc
+
+func Test_abbreviation_with_noremap()
+  nnoremap <F2> :echo "cheese"
+  cabbr cheese xxx
+  call feedkeys(":echo \"cheese\"\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"echo "xxx"', @:)
+  call feedkeys("\<F2>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"echo "cheese"', @:)
+  nnoremap <F2> :echo "cheese<C-]>"
+  call feedkeys("\<F2>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"echo "xxx"', @:)
+  nunmap <F2>
+  cunabbr cheese
+
+  new
+  inoremap <buffer> ( <C-]>()
+  iabbr <buffer> fnu fun
+  call feedkeys("ifnu(", 'tx')
+  call assert_equal('fun()', getline(1))
+  bwipe!
 endfunc
 
 func Test_abclear()
-   abbrev foo foobar
-   iabbrev fooi foobari
-   cabbrev fooc foobarc
-   call assert_equal("\n\n"
-         \        .. "c  fooc          foobarc\n"
-         \        .. "i  fooi          foobari\n"
-         \        .. "!  foo           foobar", execute('abbrev'))
+  abbrev foo foobar
+  iabbrev fooi foobari
+  cabbrev fooc foobarc
+  call assert_equal("\n\n"
+        \        .. "c  fooc          foobarc\n"
+        \        .. "i  fooi          foobari\n"
+        \        .. "!  foo           foobar", execute('abbrev'))
 
-   iabclear
-   call assert_equal("\n\n"
-         \        .. "c  fooc          foobarc\n"
-         \        .. "c  foo           foobar", execute('abbrev'))
-   abbrev foo foobar
-   iabbrev fooi foobari
+  iabclear
+  call assert_equal("\n\n"
+        \        .. "c  fooc          foobarc\n"
+        \        .. "c  foo           foobar", execute('abbrev'))
+  abbrev foo foobar
+  iabbrev fooi foobari
 
-   cabclear
-   call assert_equal("\n\n"
-         \        .. "i  fooi          foobari\n"
-         \        .. "i  foo           foobar", execute('abbrev'))
-   abbrev foo foobar
-   cabbrev fooc foobarc
+  cabclear
+  call assert_equal("\n\n"
+        \        .. "i  fooi          foobari\n"
+        \        .. "i  foo           foobar", execute('abbrev'))
+  abbrev foo foobar
+  cabbrev fooc foobarc
 
-   abclear
-   call assert_equal("\n\nNo abbreviation found", execute('abbrev'))
-   call assert_fails('%abclear', 'E481:')
+  abclear
+  call assert_equal("\n\nNo abbreviation found", execute('abbrev'))
+  call assert_fails('%abclear', 'E481:')
 endfunc
 
 func Test_abclear_buffer()
@@ -67,7 +86,7 @@ func Test_abclear_buffer()
         \        .. "!  foo           foobar", execute('abbrev'))
 
   abclear
-   call assert_equal("\n\nNo abbreviation found", execute('abbrev'))
+  call assert_equal("\n\nNo abbreviation found", execute('abbrev'))
 
   %bwipe
 endfunc
@@ -120,7 +139,7 @@ func Test_map_langmap()
   unmap x
   bwipe!
 
-  " 'langnoremap' follows 'langremap' and vise versa
+  " 'langnoremap' follows 'langremap' and vice versa
   set langremap
   set langnoremap
   call assert_equal(0, &langremap)
@@ -161,7 +180,7 @@ func Test_map_langmap()
   imap a c
   call feedkeys("Go\<C-R>a\<Esc>", "xt")
   call assert_equal('bbbb', getline('$'))
- 
+
   " langmap should not apply in Command-line mode
   set langmap=+{ nolangremap
   call feedkeys(":call append(line('$'), '+')\<CR>", "xt")
@@ -245,6 +264,28 @@ func Test_map_meta_multibyte()
   imap <M-á> foo
   call assert_match('i  <M-á>\s*foo', execute('imap'))
   iunmap <M-á>
+endfunc
+
+func Test_map_super_quotes()
+  if "\<D-j>"[-1:] == '>'
+    throw 'Skipped: <D- modifier not supported'
+  endif
+
+  imap <D-"> foo
+  call feedkeys("Go-\<*D-\">-\<Esc>", "xt")
+  call assert_equal("-foo-", getline('$'))
+  set nomodified
+  iunmap <D-">
+endfunc
+
+func Test_map_super_multibyte()
+  if "\<D-j>"[-1:] == '>'
+    throw 'Skipped: <D- modifier not supported'
+  endif
+
+  imap <D-á> foo
+  call assert_match('i  <D-á>\s*foo', execute('imap'))
+  iunmap <D-á>
 endfunc
 
 func Test_abbr_after_line_join()
@@ -478,10 +519,24 @@ func Test_list_mappings()
         \ execute('nmap ,n')->trim()->split("\n"))
 
   " verbose map
-  " first line might be "seen modifyOtherKeys"
   let lines = execute('verbose map ,n')->trim()->split("\n")
+
+  " Remove "Seen modifyOtherKeys" and other optional info.
+  if lines[0] =~ 'Seen modifyOtherKeys'
+    call remove(lines, 0)
+  endif
+  if lines[0] =~ 'modifyOtherKeys detected:'
+    call remove(lines, 0)
+  endif
+  if lines[0] =~ 'Kitty keyboard protocol:'
+    call remove(lines, 0)
+  endif
+  if lines[0] == ''
+    call remove(lines, 0)
+  endif
+
   let index = indexof(lines, 'v:val =~ "Last set"')
-  call assert_inrange(1, 2, index)
+  call assert_equal(1, index)
   call assert_match("\tLast set from .*/test_mapping.vim line \\d\\+$",
         \ lines[index])
 
@@ -570,7 +625,7 @@ func Test_expr_map_restore_cursor()
   END
   call writefile(lines, 'XtestExprMap', 'D')
   let buf = RunVimInTerminal('-S XtestExprMap', #{rows: 10})
-  call term_sendkeys(buf, "\<C-B>")
+  call term_sendkeys(buf, GetEscCodeWithModifier('C', 'B'))
   call VerifyScreenDump(buf, 'Test_map_expr_1', {})
 
   " clean up
@@ -769,11 +824,12 @@ func Test_mapcomplete()
   call feedkeys(":abbr! \<C-A>\<C-B>\"\<CR>", 'tx')
   call assert_equal("\"abbr! \x01", @:)
 
-  " Multiple matches for a map
-  nmap ,f /H<CR>
-  omap ,f /H<CR>
+  " When multiple matches have the same {lhs}, it should only appear once.
+  " The simplified form should also not be included.
+  nmap ,<C-F> /H<CR>
+  omap ,<C-F> /H<CR>
   call feedkeys(":map ,\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"map ,f', @:)
+  call assert_equal('"map ,<C-F>', @:)
   mapclear
 endfunc
 
@@ -986,10 +1042,6 @@ func Test_map_cmdkey()
   call assert_fails('call feedkeys("\<F3>", "xt")', 'E1136:')
   call assert_equal(0, x)
 
-  noremap <F3> <Cmd><F3>let x = 2<CR>
-  call assert_fails('call feedkeys("\<F3>", "xt")', 'E1137:')
-  call assert_equal(0, x)
-
   noremap <F3> <Cmd>let x = 3
   call assert_fails('call feedkeys("\<F3>", "xt!")', 'E1255:')
   call assert_equal(0, x)
@@ -1089,11 +1141,6 @@ func Test_map_cmdkey()
   unmap <F3>
   unmap! <F3>
   %bw!
-
-  " command line ending in "0" is handled without errors
-  onoremap ix <cmd>eval 0<cr>
-  call feedkeys('dix.', 'xt')
-  ounmap ix
 endfunc
 
 " text object enters visual mode
@@ -1335,13 +1382,13 @@ func Test_map_cmdkey_op_pending_mode()
   call assert_equal(['lines', 'of test text'], getline(1, '$'))
   call assert_equal(['some short '], getreg('"', 1, 1))
   " create a new undo point
-  let &undolevels = &undolevels
+  let &g:undolevels = &g:undolevels
 
   call feedkeys(".", 'xt')
   call assert_equal(['test text'], getline(1, '$'))
   call assert_equal(['lines', 'of '], getreg('"', 1, 1))
   " create a new undo point
-  let &undolevels = &undolevels
+  let &g:undolevels = &g:undolevels
 
   call feedkeys("uu", 'xt')
   call assert_equal(['some short lines', 'of test text'], getline(1, '$'))
@@ -1480,6 +1527,24 @@ func Test_map_cmdkey_redo()
   call delete('Xcmdtext')
   delfunc SelectDash
   ounmap i-
+
+  new
+  call setline(1, 'aaa bbb ccc ddd')
+
+  " command can contain special keys
+  onoremap ix <Cmd>let g:foo ..= '…'<Bar>normal! <C-Right><CR>
+  let g:foo = ''
+  call feedkeys('0dix.', 'xt')
+  call assert_equal('……', g:foo)
+  call assert_equal('ccc ddd', getline(1))
+  unlet g:foo
+
+  " command line ending in "0" is handled without errors
+  onoremap ix <Cmd>eval 0<CR>
+  call feedkeys('dix.', 'xt')
+
+  ounmap ix
+  bwipe!
 endfunc
 
 func Test_map_script_cmd_restore()
@@ -1540,15 +1605,15 @@ func Test_map_script_cmd_redo()
   let lines =<< trim END
       vim9script
       export def Func()
-        normal! dd
+        normal! V
       enddef
   END
   call writefile(lines, 'Xmapcmd/script.vim')
   new
-  call setline(1, ['one', 'two', 'three', 'four'])
+  call setline(1, ['one', 'two', 'three', 'four', 'five'])
   nnoremap j j
   source Xmapcmd/plugin.vim
-  call feedkeys("d\<F3>j.", 'xt')
+  call feedkeys("d\<F3>j.j.", 'xt')
   call assert_equal(['two', 'four'], getline(1, '$'))
 
   ounmap <F3>
@@ -1648,6 +1713,30 @@ func Test_mouse_drag_mapped_start_select()
   set mouse&
 endfunc
 
+func Test_mouse_drag_statusline()
+  set laststatus=2
+  set mouse=a
+  func ClickExpr()
+    call test_setmouse(&lines - 1, 1)
+    return "\<LeftMouse>"
+  endfunc
+  func DragExpr()
+    call test_setmouse(&lines - 2, 1)
+    return "\<LeftDrag>"
+  endfunc
+  nnoremap <expr> <F2> ClickExpr()
+  nnoremap <expr> <F3> DragExpr()
+
+  " this was causing a crash in win_drag_status_line()
+  call feedkeys("\<F2>:tabnew\<CR>\<F3>", 'tx')
+
+  nunmap <F2>
+  nunmap <F3>
+  delfunc ClickExpr
+  delfunc DragExpr
+  set laststatus& mouse&
+endfunc
+
 " Test for mapping <LeftDrag> in Insert mode
 func Test_mouse_drag_insert_map()
   set mouse=a
@@ -1697,6 +1786,49 @@ func Test_unmap_simplifiable()
   unmap <C-I>
 endfunc
 
+" Test that the first byte of rhs is not remapped if rhs starts with lhs.
+func Test_map_rhs_starts_with_lhs()
+  new
+  func MapExpr()
+    return "\<C-R>\<C-P>"
+  endfunc
+
+  for expr in [v:false, v:true]
+    if expr
+      imap <buffer><expr> <C-R> MapExpr()
+    else
+      imap <buffer> <C-R> <C-R><C-P>
+    endif
+
+    for restore in [v:false, v:true]
+      if restore
+        let saved = maparg('<C-R>', 'i', v:false, v:true)
+        iunmap <buffer> <C-R>
+        call mapset(saved)
+      endif
+
+      let @a = 'foo'
+      call assert_nobeep('call feedkeys("S\<C-R>a", "tx")')
+      call assert_equal('foo', getline('.'))
+
+      let @a = 'bar'
+      call assert_nobeep('call feedkeys("S\<*C-R>a", "tx")')
+      call assert_equal('bar', getline('.'))
+    endfor
+  endfor
+
+  " When two mappings are used for <C-I> and <Tab>, remapping should work.
+  imap <buffer> <C-I> <Tab>bar
+  imap <buffer> <Tab> foo
+  call feedkeys("S\<Tab>", 'xt')
+  call assert_equal('foo', getline('.'))
+  call feedkeys("S\<*C-I>", 'xt')
+  call assert_equal('foobar', getline('.'))
+
+  delfunc MapExpr
+  bwipe!
+endfunc
+
 func Test_expr_map_escape_special()
   nnoremap … <Cmd>let g:got_ellipsis += 1<CR>
   func Func()
@@ -1741,6 +1873,49 @@ func Test_map_after_timed_out_nop()
   call StopVimInTerminal(buf)
 endfunc
 
+" Test 'showcmd' behavior with a partial mapping
+func Test_showcmd_part_map()
+  CheckRunVimInTerminal
+
+  let lines =<< trim END
+    set notimeout showcmd
+    nnoremap ,a <Ignore>
+    nnoremap ;a <Ignore>
+    nnoremap Àa <Ignore>
+    nnoremap Ëa <Ignore>
+    nnoremap βa <Ignore>
+    nnoremap ωa <Ignore>
+    nnoremap …a <Ignore>
+    nnoremap <C-W>a <Ignore>
+  END
+  call writefile(lines, 'Xtest_showcmd_part_map', 'D')
+  let buf = RunVimInTerminal('-S Xtest_showcmd_part_map', #{rows: 6})
+
+  call term_sendkeys(buf, ":set noruler | echo\<CR>")
+  call WaitForAssert({-> assert_equal('', term_getline(buf, 6))})
+
+  for c in [',', ';', 'À', 'Ë', 'β', 'ω', '…']
+    call term_sendkeys(buf, c)
+    call WaitForAssert({-> assert_equal(c, trim(term_getline(buf, 6)))})
+    call term_sendkeys(buf, 'a')
+    call WaitForAssert({-> assert_equal('', trim(term_getline(buf, 6)))})
+  endfor
+
+  call term_sendkeys(buf, "\<C-W>")
+  call WaitForAssert({-> assert_equal('^W', trim(term_getline(buf, 6)))})
+  call term_sendkeys(buf, 'a')
+  call WaitForAssert({-> assert_equal('', trim(term_getline(buf, 6)))})
+
+  " Use feedkeys() as terminal buffer cannot forward unsimplified Ctrl-W.
+  " This is like typing Ctrl-W with modifyOtherKeys enabled.
+  call term_sendkeys(buf, ':call feedkeys("\<*C-W>", "m")' .. " | echo\<CR>")
+  call WaitForAssert({-> assert_equal('^W', trim(term_getline(buf, 6)))})
+  call term_sendkeys(buf, 'a')
+  call WaitForAssert({-> assert_equal('', trim(term_getline(buf, 6)))})
+
+  call StopVimInTerminal(buf)
+endfunc
+
 func Test_using_past_typeahead()
   nnoremap :00 0
   exe "norm :set \x80\xfb0=0\<CR>"
@@ -1748,6 +1923,30 @@ func Test_using_past_typeahead()
 
   exe "norm :set \x80\xfb0=\<CR>"
   nunmap :00
+endfunc
+
+func Test_mapclear_while_listing()
+  CheckRunVimInTerminal
+
+  let lines =<< trim END
+      set nocompatible
+      mapclear
+      for i in range(1, 999)
+        exe 'map ' .. 'foo' .. i .. ' bar'
+      endfor
+      au CmdlineLeave : call timer_start(0, {-> execute('mapclear')})
+  END
+  call writefile(lines, 'Xmapclear', 'D')
+  let buf = RunVimInTerminal('-S Xmapclear', {'rows': 10})
+
+  " this was using freed memory
+  call term_sendkeys(buf, ":map\<CR>")
+  call TermWait(buf, 50)
+  call term_sendkeys(buf, "G")
+  call TermWait(buf, 50)
+  call term_sendkeys(buf, "\<CR>")
+
+  call StopVimInTerminal(buf)
 endfunc
 
 

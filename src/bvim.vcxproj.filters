@@ -399,6 +399,30 @@
     <ClCompile Include="gui_xim.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="create_nvcmdidxs.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="logfile.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vim9class.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="fuzzy.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="tuple.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gc.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="linematch.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="vim9generics.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="bvim.rc">
@@ -877,6 +901,57 @@
     <None Include="proto\vim9instr.pro">
       <Filter>Proto Files</Filter>
     </None>
+    <None Include="evalfunc.c.orig">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="os_vms_fix.com">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="config.h.in">
+      <Filter>Header Files</Filter>
+    </None>
+    <None Include="ex_cmdidxs.h.orig">
+      <Filter>Header Files</Filter>
+    </None>
+    <None Include="osdef1.h.in">
+      <Filter>Header Files</Filter>
+    </None>
+    <None Include="osdef2.h.in">
+      <Filter>Header Files</Filter>
+    </None>
+    <None Include="vim.h.orig">
+      <Filter>Header Files</Filter>
+    </None>
+    <None Include="proto\alloc.pro">
+      <Filter>Proto Files</Filter>
+    </None>
+    <None Include="proto\float.pro">
+      <Filter>Proto Files</Filter>
+    </None>
+    <None Include="proto\logfile.pro">
+      <Filter>Proto Files</Filter>
+    </None>
+    <None Include="proto\os_macosx.pro">
+      <Filter>Proto Files</Filter>
+    </None>
+    <None Include="proto\strings.pro">
+      <Filter>Proto Files</Filter>
+    </None>
+    <None Include="proto\vim9class.pro">
+      <Filter>Proto Files</Filter>
+    </None>
+    <None Include="proto\fuzzy.pro">
+      <Filter>Proto Files</Filter>
+    </None>
+    <None Include="proto\tuple.pro">
+      <Filter>Proto Files</Filter>
+    </None>
+    <None Include="proto\gc.pro">
+      <Filter>Proto Files</Filter>
+    </None>
+    <None Include="proto\vim9generics.pro">
+      <Filter>Proto Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="arabic.h">
@@ -1063,6 +1138,21 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="spell.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gui_haiku.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="nv_cmdidxs.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="nv_cmds.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="os_haiku.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="termdefs.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

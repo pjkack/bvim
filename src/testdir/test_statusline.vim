@@ -3,9 +3,7 @@
 " Not tested yet:
 "   %N
 
-source view_util.vim
-source check.vim
-source screendump.vim
+source util/screendump.vim
 
 func SetUp()
   set laststatus=2
@@ -16,6 +14,10 @@ func TearDown()
 endfunc
 
 func s:get_statusline()
+  if has('gui_running')
+    redraw!
+    sleep 1m
+  endif
   return ScreenLines(&lines - 1, &columns)[0]
 endfunc
 
@@ -220,6 +222,10 @@ func Test_statusline()
   wincmd j
   call assert_match('^\[Preview\],PRV\s*$', s:get_statusline())
   pclose
+  pbuffer
+  wincmd j
+  call assert_match('^\[Preview\],PRV\s*$', s:get_statusline())
+  pclose
 
   " %y: Type of file in the buffer, e.g., "[vim]". See 'filetype'.
   " %Y: Type of file in the buffer, e.g., ",VIM". See 'filetype'.
@@ -231,6 +237,10 @@ func Test_statusline()
   " %=: Separation point between left and right aligned items.
   set statusline=foo%=bar
   call assert_match('^foo\s\+bar\s*$', s:get_statusline())
+  set statusline=foo%=bar%=baz
+  call assert_match('^foo\s\+bar\s\+baz\s*$', s:get_statusline())
+  set statusline=foo%=bar%=baz%=qux
+  call assert_match('^foo\s\+bar\s\+baz\s\+qux\s*$', s:get_statusline())
 
   " Test min/max width, leading zeroes, left/right justify.
   set statusline=%04B
@@ -413,7 +423,7 @@ func Test_statusline()
   " Test statusline works with 80+ items
   function! StatusLabel()
     redrawstatus
-    return '[label]'	
+    return '[label]'
   endfunc
   let statusline = '%{StatusLabel()}'
   for i in range(150)
@@ -438,6 +448,13 @@ func Test_statusline()
   call delete('Xstatusline')
   set statusline&
   set splitbelow&
+endfunc
+
+func Test_statusline_trailing_percent_zero()
+  " this was causing illegal memory access
+  set laststatus=2 stl=%!%0
+  call assert_fails('redraw', 'E15: Invalid expression: "%0"')
+  set laststatus& stl&
 endfunc
 
 func Test_statusline_visual()
@@ -554,6 +571,68 @@ func Test_statusline_highlight_truncate()
 
   let buf = RunVimInTerminal('-S XTest_statusline', {'rows': 6})
   call VerifyScreenDump(buf, 'Test_statusline_hl', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_statusline_showcmd()
+  CheckScreendump
+
+  let lines =<< trim END
+    func MyStatusLine()
+      return '%S'
+    endfunc
+
+    set laststatus=2
+    set statusline=%!MyStatusLine()
+    set showcmdloc=statusline
+    call setline(1, ['a', 'b', 'c'])
+    set foldopen+=jump
+    1,2fold
+    3
+  END
+  call writefile(lines, 'XTest_statusline', 'D')
+
+  let buf = RunVimInTerminal('-S XTest_statusline', {'rows': 6})
+
+  call term_sendkeys(buf, "g")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_1', {})
+
+  " typing "gg" should open the fold
+  call term_sendkeys(buf, "g")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_2', {})
+
+  call term_sendkeys(buf, "\<C-V>Gl")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_3', {})
+
+  call term_sendkeys(buf, "\<Esc>1234")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_4', {})
+
+  call term_sendkeys(buf, "\<Esc>:set statusline=\<CR>")
+  call term_sendkeys(buf, ":\<CR>")
+  call term_sendkeys(buf, "1234")
+  call VerifyScreenDump(buf, 'Test_statusline_showcmd_5', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_statusline_highlight_group_cleared()
+  CheckScreendump
+
+  " the laststatus option is there to prevent
+  " the code-style test from complaining about
+  " trailing whitespace
+  let lines =<< trim END
+    set fillchars=stl:\ ,stlnc:\  laststatus=2
+    split
+    hi clear StatusLine
+    hi clear StatusLineNC
+  END
+  call writefile(lines, 'XTest_statusline_stl', 'D')
+
+  let buf = RunVimInTerminal('-S XTest_statusline_stl', {})
+
+  call VerifyScreenDump(buf, 'Test_statusline_stl_1', {})
 
   call StopVimInTerminal(buf)
 endfunc

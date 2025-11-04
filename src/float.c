@@ -41,7 +41,7 @@ string2float(
 	*value = INFINITY;
 	return 3;
     }
-    if (STRNICMP(text, "-inf", 3) == 0)
+    if (STRNICMP(text, "-inf", 4) == 0)
     {
 	*value = -INFINITY;
 	return 4;
@@ -288,15 +288,15 @@ f_float2nr(typval_T *argvars, typval_T *rettv)
     if (in_vim9script() && check_for_float_or_nr_arg(argvars, 0) == FAIL)
 	return;
 
-    if (get_float_arg(argvars, &f) == OK)
-    {
-	if (f <= (float_T)-VARNUM_MAX + DBL_EPSILON)
-	    rettv->vval.v_number = -VARNUM_MAX;
-	else if (f >= (float_T)VARNUM_MAX - DBL_EPSILON)
-	    rettv->vval.v_number = VARNUM_MAX;
-	else
-	    rettv->vval.v_number = (varnumber_T)f;
-    }
+    if (get_float_arg(argvars, &f) != OK)
+	return;
+
+    if (f <= (float_T)-VARNUM_MAX + DBL_EPSILON)
+	rettv->vval.v_number = -VARNUM_MAX;
+    else if (f >= (float_T)VARNUM_MAX - DBL_EPSILON)
+	rettv->vval.v_number = VARNUM_MAX;
+    else
+	rettv->vval.v_number = (varnumber_T)f;
 }
 
 /*

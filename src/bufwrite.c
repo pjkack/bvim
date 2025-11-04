@@ -690,7 +690,7 @@ buf_write(
     int		    write_undo_file = FALSE;
     context_sha256_T sha_ctx;
 #endif
-    unsigned int    bkc = get_bkc_value(buf);
+    unsigned int    bkc = get_bkc_flags(buf);
     pos_T	    orig_start = buf->b_op_start;
     pos_T	    orig_end = buf->b_op_end;
 
@@ -802,8 +802,15 @@ buf_write(
 	if (fname == buf->b_sfname)
 	    buf_fname_s = TRUE;
 
-	// set curwin/curbuf to buf and save a few things
+	// Set curwin/curbuf to buf and save a few things.
 	aucmd_prepbuf(&aco, buf);
+	if (curbuf != buf)
+	{
+	    // Could not find a window for "buf".  Doing more might cause
+	    // problems, better bail out.
+	    return FAIL;
+	}
+
 	set_bufref(&bufref, buf);
 
 	if (append)
@@ -1166,8 +1173,6 @@ buf_write(
 #if defined(UNIX) || defined(MSWIN)
 	else if ((bkc & BKC_AUTO))	// "auto"
 	{
-	    int		i;
-
 # ifdef UNIX
 	    // Don't rename the file when:
 	    // - it's a hard link
@@ -1194,18 +1199,24 @@ buf_write(
 #  endif
 # endif
 	    {
+		size_t	dirlen;
+		char_u	tmp_fname[MAXPATHL];
+		int	i;
+
 		// Check if we can create a file and set the owner/group to
 		// the ones from the original file.
 		// First find a file name that doesn't exist yet (use some
 		// arbitrary numbers).
-		STRCPY(IObuff, fname);
+		dirlen = (size_t)(gettail(fname) - fname);
+		vim_strncpy(tmp_fname, fname, dirlen);
 		fd = -1;
 		for (i = 4913; ; i += 123)
 		{
-		    sprintf((char *)gettail(IObuff), "%d", i);
-		    if (mch_lstat((char *)IObuff, &st) < 0)
+		    vim_snprintf((char *)tmp_fname + dirlen,
+			sizeof(tmp_fname) - dirlen, "%d", i);
+		    if (mch_lstat((char *)tmp_fname, &st) < 0)
 		    {
-			fd = mch_open((char *)IObuff,
+			fd = mch_open((char *)tmp_fname,
 				    O_CREAT|O_WRONLY|O_EXCL|O_NOFOLLOW, perm);
 			if (fd < 0 && errno == EEXIST)
 			    // If the same file name is created by another
@@ -1223,7 +1234,7 @@ buf_write(
 #  ifdef HAVE_FCHOWN
 		    vim_ignored = fchown(fd, st_old.st_uid, st_old.st_gid);
 #  endif
-		    if (mch_stat((char *)IObuff, &st) < 0
+		    if (mch_stat((char *)tmp_fname, &st) < 0
 			    || st.st_uid != st_old.st_uid
 			    || st.st_gid != st_old.st_gid
 			    || (long)st.st_mode != perm)
@@ -1232,7 +1243,7 @@ buf_write(
 		    // Close the file before removing it, on MS-Windows we
 		    // can't delete an open file.
 		    close(fd);
-		    mch_remove(IObuff);
+		    mch_remove(tmp_fname);
 # ifdef MSWIN
 		    // MS-Windows may trigger a virus scanner to open the
 		    // file, we can't delete it then.  Keep trying for half a
@@ -1242,10 +1253,10 @@ buf_write(
 
 			for (try = 0; try < 10; ++try)
 			{
-			    if (mch_lstat((char *)IObuff, &st) < 0)
+			    if (mch_lstat((char *)tmp_fname, &st) < 0)
 				break;
 			    ui_delay(50L, TRUE);  // wait 50 msec
-			    mch_remove(IObuff);
+			    mch_remove(tmp_fname);
 			}
 		    }
 # endif
@@ -1343,7 +1354,7 @@ buf_write(
 		p = copybuf + STRLEN(copybuf);
 		if (after_pathsep(copybuf, p) && p[-1] == p[-2])
 		    // Ends with '//', use full path
-		    if ((p = make_percent_swname(copybuf, fname)) != NULL)
+		    if ((p = make_percent_swname(copybuf, p, fname)) != NULL)
 		    {
 			backup = modname(p, backup_ext, FALSE);
 			vim_free(p);
@@ -1464,6 +1475,9 @@ buf_write(
 # if defined(HAVE_SELINUX) || defined(HAVE_SMACK)
 			mch_copy_sec(fname, backup);
 # endif
+# ifdef FEAT_XATTR
+			mch_copy_xattr(fname, backup);
+# endif
 #endif
 
 			// copy the file.
@@ -1475,7 +1489,7 @@ buf_write(
 			{
 			    if (buf_write_bytes(&write_info) == FAIL)
 			    {
-				errmsg = (char_u *)_(e_canot_write_to_backup_file_add_bang_to_override);
+				errmsg = (char_u *)_(e_cant_write_to_backup_file_add_bang_to_override);
 				break;
 			    }
 			    ui_breakcheck();
@@ -1498,6 +1512,9 @@ buf_write(
 #endif
 #if defined(HAVE_SELINUX) || defined(HAVE_SMACK)
 			mch_copy_sec(fname, backup);
+#endif
+#ifdef FEAT_XATTR
+			mch_copy_xattr(fname, backup);
 #endif
 #ifdef MSWIN
 			(void)mch_copy_file_attribute(fname, backup);
@@ -1551,7 +1568,7 @@ buf_write(
 		p = IObuff + STRLEN(IObuff);
 		if (after_pathsep(IObuff, p) && p[-1] == p[-2])
 		    // path ends with '//', use full path
-		    if ((p = make_percent_swname(IObuff, fname)) != NULL)
+		    if ((p = make_percent_swname(IObuff, p, fname)) != NULL)
 		    {
 			backup = modname(p, backup_ext, FALSE);
 			vim_free(p);
@@ -2050,10 +2067,6 @@ restore_backup:
 		len = 0;
 		write_info.bw_start_lnum = lnum;
 	    }
-	    if (!buf->b_p_fixeol && buf->b_p_eof)
-		// write trailing CTRL-Z
-		(void)write_eintr(write_info.bw_fd, "\x1a", 1);
-
 	    // write failed or last line has no EOL: stop here
 	    if (end == 0
 		    || (lnum == end
@@ -2158,6 +2171,13 @@ restore_backup:
 	    nchars += len;
 	}
 
+	if (!buf->b_p_fixeol && buf->b_p_eof)
+	{
+	    // write trailing CTRL-Z
+	    (void)write_eintr(write_info.bw_fd, "\x1a", 1);
+	    nchars++;
+	}
+
 	// Stop when writing done or an error was encountered.
 	if (!checking_conversion || end == 0)
 	    break;
@@ -2186,10 +2206,17 @@ restore_backup:
 	}
 #endif
 
-#if defined(HAVE_SELINUX) || defined(HAVE_SMACK)
+#if defined(HAVE_SELINUX) || defined(HAVE_SMACK) || defined(FEAT_XATTR)
 	// Probably need to set the security context.
 	if (!backup_copy)
+	{
+#if defined(HAVE_SELINUX) || defined(HAVE_SMACK)
 	    mch_copy_sec(backup, wfname);
+#endif
+#ifdef FEAT_XATTR
+	    mch_copy_xattr(backup, wfname);
+#endif
+	}
 #endif
 
 #ifdef UNIX
@@ -2293,6 +2320,8 @@ restore_backup:
 		{
 		    errmsg_allocated = TRUE;
 		    errmsg = alloc(300);
+		    if (errmsg == NULL)
+			goto fail;
 		    vim_snprintf((char *)errmsg, 300, _(e_write_error_conversion_failed_in_line_nr_make_fenc_empty_to_override),
 					 (long)write_info.bw_conv_error_lnum);
 		}
@@ -2589,23 +2618,26 @@ nofail:
 
 	// Apply POST autocommands.
 	// Careful: The autocommands may call buf_write() recursively!
+	// Only do this when a window was found for "buf".
 	aucmd_prepbuf(&aco, buf);
+	if (curbuf == buf)
+	{
+	    if (append)
+		apply_autocmds_exarg(EVENT_FILEAPPENDPOST, fname, fname,
+							   FALSE, curbuf, eap);
+	    else if (filtering)
+		apply_autocmds_exarg(EVENT_FILTERWRITEPOST, NULL, fname,
+							   FALSE, curbuf, eap);
+	    else if (reset_changed && whole)
+		apply_autocmds_exarg(EVENT_BUFWRITEPOST, fname, fname,
+							   FALSE, curbuf, eap);
+	    else
+		apply_autocmds_exarg(EVENT_FILEWRITEPOST, fname, fname,
+							   FALSE, curbuf, eap);
 
-	if (append)
-	    apply_autocmds_exarg(EVENT_FILEAPPENDPOST, fname, fname,
-							  FALSE, curbuf, eap);
-	else if (filtering)
-	    apply_autocmds_exarg(EVENT_FILTERWRITEPOST, NULL, fname,
-							  FALSE, curbuf, eap);
-	else if (reset_changed && whole)
-	    apply_autocmds_exarg(EVENT_BUFWRITEPOST, fname, fname,
-							  FALSE, curbuf, eap);
-	else
-	    apply_autocmds_exarg(EVENT_FILEWRITEPOST, fname, fname,
-							  FALSE, curbuf, eap);
-
-	// restore curwin/curbuf and a few other things
-	aucmd_restbuf(&aco);
+	    // restore curwin/curbuf and a few other things
+	    aucmd_restbuf(&aco);
+	}
 
 #ifdef FEAT_EVAL
 	if (aborting())	    // autocmds may abort script processing

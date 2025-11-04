@@ -1,4 +1,4 @@
-*os_390.txt*    For Vim version 9.0.  Last change: 2019 Dec 07
+*os_390.txt*    For Vim version 9.1.  Last change: 2025 Aug 06
 
 
 		  VIM REFERENCE MANUAL	  by Ralf Schandl
@@ -10,7 +10,7 @@ This file contains the particulars for the z/OS UNIX version of Vim.
 2. Putty and Colors                     |zOS-PuTTY|
 3. Motif Problems			|zOS-Motif|
 4. Bugs					|zOS-Bugs|
-5. Limitations     			|zOS-limitations|
+5. Limitations				|zOS-limitations|
 6. Open source on z/OS UNIX		|zOS-open-source|
 
 Contributors: ~
@@ -75,7 +75,7 @@ There is no solution for this yet.
   this occurs in both the terminal and gui versions.
 
 ==============================================================================
-5. Limitations     			*OS390-limitations* *zOS-limitations*
+5. Limitations				*OS390-limitations* *zOS-limitations*
 
 - No binary search in tag files.
   The program /bin/sort sorts by ASCII value by default.  This program is
@@ -105,9 +105,9 @@ Never tested:
     - Perl interface		(|perl|)
     - Hangul input		(|hangul|)
     - Encryption support	(|encryption|)
-    - Langmap			(|'langmap'|)
+    - Langmap			('langmap')
     - Python support		(|Python|)
-    - Right-to-left mode	(|'rightleft'|)
+    - Right-to-left mode	('rightleft')
     - TCL interface		(|tcl|)
     ...
 

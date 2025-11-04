@@ -83,7 +83,7 @@
 #  define rb_gc_writebarrier_unprotect	rb_gc_writebarrier_unprotect_stub
 # endif
 
-# if RUBY_VERSION >= 26
+# if RUBY_VERSION >= 26 && RUBY_VERSION <= 32
 #  define rb_ary_detransient	rb_ary_detransient_stub
 # endif
 
@@ -107,7 +107,14 @@
 # undef SIZEOF_TIME_T
 #endif
 
+#ifdef __GNUC__
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Wunused-parameter"
+#endif
 #include <ruby.h>
+#ifdef __GNUC__
+# pragma GCC diagnostic pop
+#endif
 #include <ruby/encoding.h>
 
 // See above.
@@ -174,7 +181,13 @@
 #include "version.h"
 
 #ifdef DYNAMIC_RUBY
-# if !defined(MSWIN)  // must come after including vim.h, where it is defined
+# ifdef MSWIN	// must come after including vim.h, where it is defined
+#  define RUBY_PROC FARPROC
+#  define load_dll vimLoadLib
+#  define symbol_from_dll GetProcAddress
+#  define close_dll FreeLibrary
+#  define load_dll_error GetWin32Error
+# else
 #  include <dlfcn.h>
 #  define HINSTANCE void*
 #  define RUBY_PROC void*
@@ -182,12 +195,6 @@
 #  define symbol_from_dll dlsym
 #  define close_dll dlclose
 #  define load_dll_error dlerror
-# else
-#  define RUBY_PROC FARPROC
-#  define load_dll vimLoadLib
-#  define symbol_from_dll GetProcAddress
-#  define close_dll FreeLibrary
-#  define load_dll_error GetWin32Error
 # endif
 #endif
 
@@ -386,12 +393,12 @@ static void (*dll_rb_debug_rstring_null_ptr) (const char*);
 # endif
 static VALUE (*dll_rb_define_class_under) (VALUE, const char*, VALUE);
 static void (*dll_rb_define_const) (VALUE,const char*,VALUE);
-static void (*dll_rb_define_global_function) (const char*,VALUE(*)(),int);
-static void (*dll_rb_define_method) (VALUE,const char*,VALUE(*)(),int);
+static void (*dll_rb_define_global_function) (const char*,VALUE(*)(int,VALUE*,VALUE),int);
+static void (*dll_rb_define_method) (VALUE,const char*,VALUE(*)(ANYARGS),int);
 static VALUE (*dll_rb_define_module) (const char*);
-static void (*dll_rb_define_module_function) (VALUE,const char*,VALUE(*)(),int);
-static void (*dll_rb_define_singleton_method) (VALUE,const char*,VALUE(*)(),int);
-static void (*dll_rb_define_virtual_variable) (const char*,VALUE(*)(),void(*)());
+static void (*dll_rb_define_module_function) (VALUE,const char*,VALUE(*)(VALUE,VALUE),int);
+static void (*dll_rb_define_singleton_method) (VALUE,const char*,VALUE(*)(ANYARGS),int);
+static void (*dll_rb_define_virtual_variable) (const char*,VALUE(*)(ID,VALUE*),void(*)());
 static VALUE *dll_rb_stdout;
 static VALUE *dll_rb_stderr;
 static VALUE *dll_rb_eArgError;
@@ -456,7 +463,7 @@ static VALUE (*dll_rb_float_new) (double);
 static VALUE (*dll_rb_ary_new) (void);
 static VALUE (*dll_rb_ary_new4) (long n, const VALUE *elts);
 static VALUE (*dll_rb_ary_push) (VALUE, VALUE);
-# if RUBY_VERSION >= 26
+# if RUBY_VERSION >= 26 && RUBY_VERSION <= 32
 static void (*dll_rb_ary_detransient) (VALUE);
 # endif
 # ifdef __ia64
@@ -491,7 +498,7 @@ NORETURN(static void (*dll_ruby_malloc_size_overflow)(size_t, size_t));
 #  endif
 # endif
 
-# if RUBY_VERSION >= 26
+# if RUBY_VERSION >= 26 && RUBY_VERSION <= 32
 void rb_ary_detransient_stub(VALUE x);
 # endif
 
@@ -561,7 +568,7 @@ rb_gc_writebarrier_unprotect_stub(VALUE obj)
 }
 #   endif
 #  endif
-#  if RUBY_VERSION >= 26
+#  if RUBY_VERSION >= 26 && RUBY_VERSION <= 32
     void
 rb_ary_detransient_stub(VALUE x)
 {
@@ -718,7 +725,7 @@ static struct
     {"rb_ary_new4", (RUBY_PROC*)&dll_rb_ary_new4},
 # endif
     {"rb_ary_push", (RUBY_PROC*)&dll_rb_ary_push},
-# if RUBY_VERSION >= 26
+# if RUBY_VERSION >= 26 && RUBY_VERSION <= 32
     {"rb_ary_detransient", (RUBY_PROC*)&dll_rb_ary_detransient},
 # endif
     {"rb_int2big", (RUBY_PROC*)&dll_rb_int2big},
@@ -866,44 +873,44 @@ ex_rubydo(exarg_T *eap)
     linenr_T i;
     buf_T   *was_curbuf = curbuf;
 
-    if (ensure_ruby_initialized())
-    {
-	if (u_save(eap->line1 - 1, eap->line2 + 1) != OK)
-	    return;
-	for (i = eap->line1; i <= eap->line2; i++)
-	{
-	    VALUE line;
+    if (!ensure_ruby_initialized())
+	return;
 
-	    if (i > curbuf->b_ml.ml_line_count)
-		break;
-	    line = vim_str2rb_enc_str((char *)ml_get(i));
-	    rb_lastline_set(line);
-	    eval_enc_string_protect((char *) eap->arg, &state);
-	    if (state)
-	    {
-		error_print(state);
-		break;
-	    }
-	    if (was_curbuf != curbuf)
-		break;
-	    line = rb_lastline_get();
-	    if (!NIL_P(line))
-	    {
-		if (TYPE(line) != T_STRING)
-		{
-		    emsg(_(e_dollar_must_be_an_instance_of_string));
-		    return;
-		}
-		ml_replace(i, (char_u *) StringValuePtr(line), 1);
-		changed();
-#ifdef SYNTAX_HL
-		syn_changed(i); // recompute syntax hl. for this line
-#endif
-	    }
+    if (u_save(eap->line1 - 1, eap->line2 + 1) != OK)
+	return;
+    for (i = eap->line1; i <= eap->line2; i++)
+    {
+	VALUE line;
+
+	if (i > curbuf->b_ml.ml_line_count)
+	    break;
+	line = vim_str2rb_enc_str((char *)ml_get(i));
+	rb_lastline_set(line);
+	eval_enc_string_protect((char *) eap->arg, &state);
+	if (state)
+	{
+	    error_print(state);
+	    break;
 	}
-	check_cursor();
-	update_curbuf(UPD_NOT_VALID);
+	if (was_curbuf != curbuf || i > curbuf->b_ml.ml_line_count)
+	    break;
+	line = rb_lastline_get();
+	if (!NIL_P(line))
+	{
+	    if (TYPE(line) != T_STRING)
+	    {
+		emsg(_(e_dollar_must_be_an_instance_of_string));
+		return;
+	    }
+	    ml_replace(i, (char_u *) StringValuePtr(line), 1);
+	    changed();
+#ifdef SYNTAX_HL
+	    syn_changed(i); // recompute syntax hl. for this line
+#endif
+	}
     }
+    check_cursor();
+    update_curbuf(UPD_NOT_VALID);
 }
 
     static VALUE
@@ -918,73 +925,74 @@ ex_rubyfile(exarg_T *eap)
 {
     int state;
 
-    if (ensure_ruby_initialized())
-    {
-	VALUE file_to_load = rb_str_new2((const char *)eap->arg);
-	rb_protect(rb_load_wrap, file_to_load, &state);
-	if (state)
-	    error_print(state);
-    }
+    if (!ensure_ruby_initialized())
+	return;
+
+    VALUE file_to_load = rb_str_new2((const char *)eap->arg);
+    rb_protect(rb_load_wrap, file_to_load, &state);
+    if (state)
+	error_print(state);
 }
 
     void
 ruby_buffer_free(buf_T *buf)
 {
-    if (buf->b_ruby_ref)
-    {
-	rb_hash_aset(objtbl, rb_obj_id((VALUE) buf->b_ruby_ref), Qnil);
-	RDATA(buf->b_ruby_ref)->data = NULL;
-    }
+    if (buf->b_ruby_ref == NULL)
+	return;
+
+    rb_hash_aset(objtbl, rb_obj_id((VALUE) buf->b_ruby_ref), Qnil);
+    RDATA(buf->b_ruby_ref)->data = NULL;
 }
 
     void
 ruby_window_free(win_T *win)
 {
-    if (win->w_ruby_ref)
-    {
-	rb_hash_aset(objtbl, rb_obj_id((VALUE) win->w_ruby_ref), Qnil);
-	RDATA(win->w_ruby_ref)->data = NULL;
-    }
+    if (win->w_ruby_ref == NULL)
+	return;
+
+    rb_hash_aset(objtbl, rb_obj_id((VALUE) win->w_ruby_ref), Qnil);
+    RDATA(win->w_ruby_ref)->data = NULL;
 }
 
     static int
 ensure_ruby_initialized(void)
 {
-    if (!ruby_initialized)
+    if (ruby_initialized)
+	return ruby_initialized;
+
+#ifdef DYNAMIC_RUBY
+    if (ruby_enabled(TRUE))
+#endif
     {
-#ifdef DYNAMIC_RUBY
-	if (ruby_enabled(TRUE))
-#endif
-	{
 #ifdef MSWIN
-	    // suggested by Ariya Mizutani
-	    int argc = 1;
-	    char *argv[] = {"gvim.exe"};
-	    char **argvp = argv;
-	    ruby_sysinit(&argc, &argvp);
+	// suggested by Ariya Mizutani
+	int argc = 1;
+	char *argv[] = {"gvim.exe"};
+	char **argvp = argv;
+	ruby_sysinit(&argc, &argvp);
 #endif
-	    {
-		ruby_init_stack(ruby_stack_start);
-		ruby_init();
-	    }
-	    {
-		int dummy_argc = 2;
-		char *dummy_argv[] = {"vim-ruby", "-e_=0"};
-		ruby_options(dummy_argc, dummy_argv);
-	    }
-	    ruby_script("vim-ruby");
-	    ruby_io_init();
-	    ruby_vim_init();
-	    ruby_initialized = 1;
-	}
-#ifdef DYNAMIC_RUBY
-	else
 	{
-	    emsg(_(e_sorry_this_command_is_disabled_the_ruby_library_could_not_be_loaded));
-	    return 0;
+	    ruby_init_stack(ruby_stack_start);
+	    ruby_init();
 	}
-#endif
+	{
+	    int dummy_argc = 2;
+	    char *dummy_argv[] = {"vim-ruby", "-e_=0"};
+	    ruby_options(dummy_argc, dummy_argv);
+	}
+	ruby_script("vim-ruby");
+	ruby_io_init();
+	ruby_vim_init();
+	ruby_initialized = 1;
     }
+#ifdef DYNAMIC_RUBY
+    else
+    {
+	emsg(_(e_sorry_this_command_is_disabled_the_ruby_library_could_not_be_loaded));
+	return 0;
+    }
+#endif
+
     return ruby_initialized;
 }
 
@@ -1146,7 +1154,7 @@ vim_to_ruby(typval_T *tv)
 	    hashitem_T  *hi;
 	    dictitem_T  *di;
 
-	    for (hi = ht->ht_array; todo > 0; ++hi)
+	    FOR_ALL_HASHTAB_ITEMS(ht, hi, todo)
 	    {
 		if (!HASHITEM_EMPTY(hi))
 		{
@@ -1371,21 +1379,24 @@ set_buffer_line(buf_T *buf, linenr_T n, VALUE str)
 
     if (n > 0 && n <= buf->b_ml.ml_line_count && line != NULL)
     {
-	// set curwin/curbuf for "buf" and save some things
+	// Set curwin/curbuf for "buf" and save some things.
 	aucmd_prepbuf(&aco, buf);
-
-	if (u_savesub(n) == OK)
+	if (curbuf == buf)
 	{
-	    ml_replace(n, (char_u *)line, TRUE);
-	    changed();
+	    // Only when it worked to set "curbuf".
+	    if (u_savesub(n) == OK)
+	    {
+		ml_replace(n, (char_u *)line, TRUE);
+		changed();
 #ifdef SYNTAX_HL
-	    syn_changed(n); // recompute syntax hl. for this line
+		syn_changed(n); // recompute syntax hl. for this line
 #endif
-	}
+	    }
 
-	// restore curwin/curbuf and a few other things
-	aucmd_restbuf(&aco);
-	// Careful: autocommands may have made "buf" invalid!
+	    // restore curwin/curbuf and a few other things
+	    aucmd_restbuf(&aco);
+	    // Careful: autocommands may have made "buf" invalid!
+	}
 
 	update_curbuf(UPD_NOT_VALID);
     }
@@ -1415,23 +1426,26 @@ buffer_delete(VALUE self, VALUE num)
 
     if (n > 0 && n <= buf->b_ml.ml_line_count)
     {
-	// set curwin/curbuf for "buf" and save some things
+	// Set curwin/curbuf for "buf" and save some things.
 	aucmd_prepbuf(&aco, buf);
-
-	if (u_savedel(n, 1) == OK)
+	if (curbuf == buf)
 	{
-	    ml_delete(n);
+	    // Only when it worked to set "curbuf".
+	    if (u_savedel(n, 1) == OK)
+	    {
+		ml_delete(n);
 
-	    // Changes to non-active buffers should properly refresh
-	    //   SegPhault - 01/09/05
-	    deleted_lines_mark(n, 1L);
+		// Changes to non-active buffers should properly refresh
+		//   SegPhault - 01/09/05
+		deleted_lines_mark(n, 1L);
 
-	    changed();
+		changed();
+	    }
+
+	    // restore curwin/curbuf and a few other things
+	    aucmd_restbuf(&aco);
+	    // Careful: autocommands may have made "buf" invalid!
 	}
-
-	// restore curwin/curbuf and a few other things
-	aucmd_restbuf(&aco);
-	// Careful: autocommands may have made "buf" invalid!
 
 	update_curbuf(UPD_NOT_VALID);
     }
@@ -1458,21 +1472,24 @@ buffer_append(VALUE self, VALUE num, VALUE str)
     {
 	// set curwin/curbuf for "buf" and save some things
 	aucmd_prepbuf(&aco, buf);
-
-	if (u_inssub(n + 1) == OK)
+	if (curbuf == buf)
 	{
-	    ml_append(n, (char_u *) line, (colnr_T) 0, FALSE);
+	    // Only when it worked to set "curbuf".
+	    if (u_inssub(n + 1) == OK)
+	    {
+		ml_append(n, (char_u *) line, (colnr_T) 0, FALSE);
 
-	    //  Changes to non-active buffers should properly refresh screen
-	    //    SegPhault - 12/20/04
-	    appended_lines_mark(n, 1L);
+		//  Changes to non-active buffers should properly refresh screen
+		//    SegPhault - 12/20/04
+		appended_lines_mark(n, 1L);
 
-	    changed();
+		changed();
+	    }
+
+	    // restore curwin/curbuf and a few other things
+	    aucmd_restbuf(&aco);
+	    // Careful: autocommands may have made "buf" invalid!
 	}
-
-	// restore curwin/curbuf and a few other things
-	aucmd_restbuf(&aco);
-	// Careful: autocommands may have made "buf" invalid!
 
 	update_curbuf(UPD_NOT_VALID);
     }
@@ -1710,10 +1727,10 @@ ruby_io_init(void)
 
     rb_stdout = rb_obj_alloc(rb_cObject);
     rb_stderr = rb_obj_alloc(rb_cObject);
-    rb_define_singleton_method(rb_stdout, "write", vim_message, 1);
-    rb_define_singleton_method(rb_stdout, "flush", f_nop, 0);
-    rb_define_singleton_method(rb_stderr, "write", vim_message, 1);
-    rb_define_singleton_method(rb_stderr, "flush", f_nop, 0);
+    rb_define_singleton_method(rb_stdout, "write", (void*)vim_message, 1);
+    rb_define_singleton_method(rb_stdout, "flush", (void*)f_nop, 0);
+    rb_define_singleton_method(rb_stderr, "write", (void*)vim_message, 1);
+    rb_define_singleton_method(rb_stderr, "flush", (void*)f_nop, 0);
     rb_define_global_function("p", f_p, -1);
 }
 
@@ -1747,36 +1764,36 @@ ruby_vim_init(void)
 						rb_eStandardError);
 
     cBuffer = rb_define_class_under(mVIM, "Buffer", rb_cObject);
-    rb_define_singleton_method(cBuffer, "current", buffer_s_current, 0);
-    rb_define_singleton_method(cBuffer, "count", buffer_s_count, 0);
-    rb_define_singleton_method(cBuffer, "[]", buffer_s_aref, 1);
-    rb_define_method(cBuffer, "name", buffer_name, 0);
-    rb_define_method(cBuffer, "number", buffer_number, 0);
-    rb_define_method(cBuffer, "count", buffer_count, 0);
-    rb_define_method(cBuffer, "length", buffer_count, 0);
-    rb_define_method(cBuffer, "[]", buffer_aref, 1);
-    rb_define_method(cBuffer, "[]=", buffer_aset, 2);
-    rb_define_method(cBuffer, "delete", buffer_delete, 1);
-    rb_define_method(cBuffer, "append", buffer_append, 2);
+    rb_define_singleton_method(cBuffer, "current", (void*)buffer_s_current, 0);
+    rb_define_singleton_method(cBuffer, "count", (void*)buffer_s_count, 0);
+    rb_define_singleton_method(cBuffer, "[]", (void*)buffer_s_aref, 1);
+    rb_define_method(cBuffer, "name", (void*)buffer_name, 0);
+    rb_define_method(cBuffer, "number", (void*)buffer_number, 0);
+    rb_define_method(cBuffer, "count", (void*)buffer_count, 0);
+    rb_define_method(cBuffer, "length", (void*)buffer_count, 0);
+    rb_define_method(cBuffer, "[]", (void*)buffer_aref, 1);
+    rb_define_method(cBuffer, "[]=", (void*)buffer_aset, 2);
+    rb_define_method(cBuffer, "delete", (void*)buffer_delete, 1);
+    rb_define_method(cBuffer, "append", (void*)buffer_append, 2);
 
     // Added line manipulation functions
     //   SegPhault - 03/07/05
-    rb_define_method(cBuffer, "line_number", current_line_number, 0);
-    rb_define_method(cBuffer, "line", line_s_current, 0);
-    rb_define_method(cBuffer, "line=", set_current_line, 1);
+    rb_define_method(cBuffer, "line_number", (void*)current_line_number, 0);
+    rb_define_method(cBuffer, "line", (void*)line_s_current, 0);
+    rb_define_method(cBuffer, "line=", (void*)set_current_line, 1);
 
 
     cVimWindow = rb_define_class_under(mVIM, "Window", rb_cObject);
-    rb_define_singleton_method(cVimWindow, "current", window_s_current, 0);
-    rb_define_singleton_method(cVimWindow, "count", window_s_count, 0);
-    rb_define_singleton_method(cVimWindow, "[]", window_s_aref, 1);
-    rb_define_method(cVimWindow, "buffer", window_buffer, 0);
-    rb_define_method(cVimWindow, "height", window_height, 0);
-    rb_define_method(cVimWindow, "height=", window_set_height, 1);
-    rb_define_method(cVimWindow, "width", window_width, 0);
-    rb_define_method(cVimWindow, "width=", window_set_width, 1);
-    rb_define_method(cVimWindow, "cursor", window_cursor, 0);
-    rb_define_method(cVimWindow, "cursor=", window_set_cursor, 1);
+    rb_define_singleton_method(cVimWindow, "current", (void*)window_s_current, 0);
+    rb_define_singleton_method(cVimWindow, "count", (void*)window_s_count, 0);
+    rb_define_singleton_method(cVimWindow, "[]", (void*)window_s_aref, 1);
+    rb_define_method(cVimWindow, "buffer", (void*)window_buffer, 0);
+    rb_define_method(cVimWindow, "height", (void*)window_height, 0);
+    rb_define_method(cVimWindow, "height=", (void*)window_set_height, 1);
+    rb_define_method(cVimWindow, "width", (void*)window_width, 0);
+    rb_define_method(cVimWindow, "width=", (void*)window_set_width, 1);
+    rb_define_method(cVimWindow, "cursor", (void*)window_cursor, 0);
+    rb_define_method(cVimWindow, "cursor=", (void*)window_set_cursor, 1);
 
     rb_define_virtual_variable("$curbuf", buffer_s_current_getter, 0);
     rb_define_virtual_variable("$curwin", window_s_current_getter, 0);
@@ -1799,7 +1816,7 @@ convert_hash2dict(VALUE key, VALUE val, VALUE arg)
     if (di == NULL || ruby_convert_to_vim_value(val, &di->di_tv) != OK
 						     || dict_add(d, di) != OK)
     {
-	d->dv_hashtab.ht_error = TRUE;
+	d->dv_hashtab.ht_flags |= HTFLAGS_ERROR;
 	return ST_STOP;
     }
     return ST_CONTINUE;
@@ -1879,7 +1896,7 @@ ruby_convert_to_vim_value(VALUE val, typval_T *rettv)
 		    return FAIL;
 
 		rb_hash_foreach(val, convert_hash2dict, (VALUE)d);
-		if (d->dv_hashtab.ht_error)
+		if (d->dv_hashtab.ht_flags & HTFLAGS_ERROR)
 		{
 		    dict_unref(d);
 		    return FAIL;

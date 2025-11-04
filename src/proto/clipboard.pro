@@ -18,7 +18,7 @@ void clip_scroll_selection(int rows);
 void clip_copy_modeless_selection(int both);
 void clip_gen_set_selection(Clipboard_T *cbd);
 int clip_gen_owner_exists(Clipboard_T *cbd);
-char *check_clipboard_option(void);
+char *did_set_clipboard(optset_T *args);
 void open_app_context(void);
 void x11_setup_atoms(Display *dpy);
 void x11_setup_selection(Widget w);
@@ -35,4 +35,6 @@ int clip_convert_selection(char_u **str, long_u *len, Clipboard_T *cbd);
 int may_get_selection(int regname);
 void may_set_selection(void);
 void adjust_clip_reg(int *rp);
+char *choose_clipmethod(void);
+void ex_clipreset(exarg_T *eap);
 /* vim: set ft=c : */

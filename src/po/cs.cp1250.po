@@ -13,7 +13,7 @@ msgstr ""
 "Last-Translator: Jiøí Pavlovský <jpavlovsky@mbox.vol.cz>\n"
 "Language-Team: Czech <cs@li.org>\n"
 "MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=cp1250\n"
+"Content-Type: text/plain; charset=CP1250\n"
 "Content-Transfer-Encoding: 8bit\n"
 
 msgid "E82: Cannot allocate any buffer, exiting..."
@@ -2954,7 +2954,7 @@ msgstr "øádek %4ld:"
 msgid "[string too long]"
 msgstr "[pøíliš dlouhý øetìzec]"
 
-msgid "Messages maintainer: Bram Moolenaar <Bram@vim.org>"
+msgid "Messages maintainer: The Vim Project"
 msgstr "Správce zpráv: Jiøí Pavlovský <jpavlovsky@mbox.vol.cz>"
 
 msgid "Interrupt: "

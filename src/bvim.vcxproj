@@ -234,6 +234,7 @@
     <ClCompile Include="clipboard.c" />
     <ClCompile Include="cmdexpand.c" />
     <ClCompile Include="cmdhist.c" />
+    <ClCompile Include="create_nvcmdidxs.c" />
     <ClCompile Include="crypt.c" />
     <ClCompile Include="crypt_zip.c" />
     <ClCompile Include="debugger.c" />
@@ -258,6 +259,8 @@
     <ClCompile Include="findfile.c" />
     <ClCompile Include="float.c" />
     <ClCompile Include="fold.c" />
+    <ClCompile Include="fuzzy.c" />
+    <ClCompile Include="gc.c" />
     <ClCompile Include="getchar.c" />
     <ClCompile Include="gui.c" />
     <ClCompile Include="gui_beval.c" />
@@ -276,8 +279,10 @@
     <ClCompile Include="iscygpty.c" />
     <ClCompile Include="job.c" />
     <ClCompile Include="json.c" />
+    <ClCompile Include="linematch.c" />
     <ClCompile Include="list.c" />
     <ClCompile Include="locale.c" />
+    <ClCompile Include="logfile.c" />
     <ClCompile Include="main.c" />
     <ClCompile Include="map.c" />
     <ClCompile Include="mark.c" />
@@ -331,16 +336,19 @@
     <ClCompile Include="textobject.c" />
     <ClCompile Include="textprop.c" />
     <ClCompile Include="time.c" />
+    <ClCompile Include="tuple.c" />
     <ClCompile Include="typval.c" />
     <ClCompile Include="ui.c" />
     <ClCompile Include="undo.c" />
     <ClCompile Include="usercmd.c" />
     <ClCompile Include="userfunc.c" />
     <ClCompile Include="version.c" />
+    <ClCompile Include="vim9class.c" />
     <ClCompile Include="vim9cmds.c" />
     <ClCompile Include="vim9compile.c" />
     <ClCompile Include="vim9execute.c" />
     <ClCompile Include="vim9expr.c" />
+    <ClCompile Include="vim9generics.c" />
     <ClCompile Include="vim9instr.c" />
     <ClCompile Include="vim9script.c" />
     <ClCompile Include="vim9type.c" />
@@ -368,7 +376,14 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="bvim.exe.mnf" />
+    <None Include="config.h.in" />
+    <None Include="evalfunc.c.orig" />
+    <None Include="ex_cmdidxs.h.orig" />
     <None Include="gvim.exe.mnf" />
+    <None Include="osdef1.h.in" />
+    <None Include="osdef2.h.in" />
+    <None Include="os_vms_fix.com" />
+    <None Include="proto\alloc.pro" />
     <None Include="proto\arabic.pro" />
     <None Include="proto\arglist.pro" />
     <None Include="proto\autocmd.pro" />
@@ -408,7 +423,10 @@
     <None Include="proto\fileio.pro" />
     <None Include="proto\filepath.pro" />
     <None Include="proto\findfile.pro" />
+    <None Include="proto\float.pro" />
     <None Include="proto\fold.pro" />
+    <None Include="proto\fuzzy.pro" />
+    <None Include="proto\gc.pro" />
     <None Include="proto\getchar.pro" />
     <None Include="proto\gui.pro" />
     <None Include="proto\gui_athena.pro" />
@@ -449,6 +467,7 @@
     <None Include="proto\json.pro" />
     <None Include="proto\list.pro" />
     <None Include="proto\locale.pro" />
+    <None Include="proto\logfile.pro" />
     <None Include="proto\main.pro" />
     <None Include="proto\map.pro" />
     <None Include="proto\mark.pro" />
@@ -468,6 +487,7 @@
     <None Include="proto\option.pro" />
     <None Include="proto\optionstr.pro" />
     <None Include="proto\os_amiga.pro" />
+    <None Include="proto\os_macosx.pro" />
     <None Include="proto\os_mac_conv.pro" />
     <None Include="proto\os_msdos.pro" />
     <None Include="proto\os_mswin.pro" />
@@ -496,6 +516,7 @@
     <None Include="proto\spell.pro" />
     <None Include="proto\spellfile.pro" />
     <None Include="proto\spellsuggest.pro" />
+    <None Include="proto\strings.pro" />
     <None Include="proto\syntax.pro" />
     <None Include="proto\tag.pro" />
     <None Include="proto\term.pro" />
@@ -506,16 +527,19 @@
     <None Include="proto\textobject.pro" />
     <None Include="proto\textprop.pro" />
     <None Include="proto\time.pro" />
+    <None Include="proto\tuple.pro" />
     <None Include="proto\typval.pro" />
     <None Include="proto\ui.pro" />
     <None Include="proto\undo.pro" />
     <None Include="proto\usercmd.pro" />
     <None Include="proto\userfunc.pro" />
     <None Include="proto\version.pro" />
+    <None Include="proto\vim9class.pro" />
     <None Include="proto\vim9cmds.pro" />
     <None Include="proto\vim9compile.pro" />
     <None Include="proto\vim9execute.pro" />
     <None Include="proto\vim9expr.pro" />
+    <None Include="proto\vim9generics.pro" />
     <None Include="proto\vim9instr.pro" />
     <None Include="proto\vim9script.pro" />
     <None Include="proto\vim9type.pro" />
@@ -523,6 +547,7 @@
     <None Include="proto\winclip.pro" />
     <None Include="proto\window.pro" />
     <None Include="proto\workshop.pro" />
+    <None Include="vim.h.orig" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="alloc.h" />
@@ -543,6 +568,7 @@
     <ClInclude Include="gui_dwrite.h" />
     <ClInclude Include="gui_gtk_f.h" />
     <ClInclude Include="gui_gtk_vms.h" />
+    <ClInclude Include="gui_haiku.h" />
     <ClInclude Include="gui_w32_rc.h" />
     <ClInclude Include="gui_x11_pm.h" />
     <ClInclude Include="gui_xmebw.h" />
@@ -558,11 +584,14 @@
     <ClInclude Include="keymap.h" />
     <ClInclude Include="macros.h" />
     <ClInclude Include="nbdebug.h" />
+    <ClInclude Include="nv_cmdidxs.h" />
+    <ClInclude Include="nv_cmds.h" />
     <ClInclude Include="option.h" />
     <ClInclude Include="optiondefs.h" />
     <ClInclude Include="os_amiga.h" />
     <ClInclude Include="os_beos.h" />
     <ClInclude Include="os_dos.h" />
+    <ClInclude Include="os_haiku.h" />
     <ClInclude Include="os_mac.h" />
     <ClInclude Include="os_mint.h" />
     <ClInclude Include="os_msdos.h" />
@@ -579,6 +608,7 @@
     <ClInclude Include="spell.h" />
     <ClInclude Include="structs.h" />
     <ClInclude Include="term.h" />
+    <ClInclude Include="termdefs.h" />
     <ClInclude Include="version.h" />
     <ClInclude Include="vim.h" />
     <ClInclude Include="vim9.h" />

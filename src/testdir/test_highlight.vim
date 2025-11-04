@@ -1,10 +1,8 @@
 " Tests for ":highlight" and highlighting.
 
-source view_util.vim
-source screendump.vim
-source check.vim
-source script_util.vim
-import './vim9.vim' as v9
+source util/screendump.vim
+source util/script_util.vim
+import './util/vim9.vim' as v9
 
 func ClearDict(d)
   for k in keys(a:d)
@@ -46,6 +44,10 @@ func Test_highlight()
   call assert_equal("Group3         xxx cleared",
 				\ split(execute("hi Group3"), "\n")[0])
   call assert_fails("hi Crash term='asdf", "E475:")
+
+  if has('gui_running')
+    call assert_fails('hi NotUsed guibg=none', 'E1361:')
+  endif
 endfunc
 
 func HighlightArgs(name)
@@ -553,22 +555,23 @@ func Test_cursorline_after_yank()
   call StopVimInTerminal(buf)
 endfunc
 
-" test for issue #4862
+" Test for issue #4862: pasting above 'cursorline' redraws properly.
 func Test_put_before_cursorline()
   new
   only!
-  call setline(1, 'A')
+  call setline(1, ['A', 'B', 'C'])
+  call cursor(2, 1)
   redraw
-  let std_attr = screenattr(1, 1)
+  let std_attr = screenattr(2, 1)
   set cursorline
   redraw
-  let cul_attr = screenattr(1, 1)
+  let cul_attr = screenattr(2, 1)
   normal yyP
   redraw
-  " Line 1 has cursor so it should be highlighted with CursorLine.
-  call assert_equal(cul_attr, screenattr(1, 1))
-  " And CursorLine highlighting from the second line should be gone.
-  call assert_equal(std_attr, screenattr(2, 1))
+  " Line 2 has cursor so it should be highlighted with CursorLine.
+  call assert_equal(cul_attr, screenattr(2, 1))
+  " And CursorLine highlighting from line 3 should be gone.
+  call assert_equal(std_attr, screenattr(3, 1))
   set nocursorline
   bwipe!
 endfunc
@@ -740,12 +743,32 @@ func Test_colorcolumn_sbr()
   let lines =<< trim END
 	call setline(1, 'The quick brown fox jumped over the lazy dogs')
   END
-  call writefile(lines, 'Xtest_colorcolumn_srb', 'D')
-  let buf = RunVimInTerminal('-S Xtest_colorcolumn_srb', {'rows': 10,'columns': 40})
+  call writefile(lines, 'Xtest_colorcolumn_sbr', 'D')
+  let buf = RunVimInTerminal('-S Xtest_colorcolumn_sbr', {'rows': 10,'columns': 40})
   call term_sendkeys(buf, ":set co=40 showbreak=+++>\\  cc=40,41,43\<CR>")
   call VerifyScreenDump(buf, 'Test_colorcolumn_3', {})
 
   " clean up
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_visual_sbr()
+  CheckScreendump
+
+  " check Visual highlight when 'showbreak' is set
+  let lines =<< trim END
+      set showbreak=>
+      call setline(1, 'Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet.')
+      exe "normal! z1\<CR>"
+  END
+  call writefile(lines, 'Xtest_visual_sbr', 'D')
+  let buf = RunVimInTerminal('-S Xtest_visual_sbr', {'rows': 6,'columns': 60})
+
+  call term_sendkeys(buf, "v$")
+  call VerifyScreenDump(buf, 'Test_visual_sbr_1', {})
+
+  " clean up
+  call term_sendkeys(buf, "\<Esc>")
   call StopVimInTerminal(buf)
 endfunc
 
@@ -756,8 +779,8 @@ func Test_1_highlight_Normalgroup_exists()
   if !has('gui_running')
     call assert_match('hi Normal\s*clear', hlNormal)
   elseif has('gui_gtk2') || has('gui_gnome') || has('gui_gtk3')
-    " expect is DEFAULT_FONT of gui_gtk_x11.c
-    call assert_match('hi Normal\s*font=Monospace 10', hlNormal)
+    " expect is DEFAULT_FONT of gui_gtk_x11.c (any size)
+    call assert_match('hi Normal\s*font=Monospace\>', hlNormal)
   elseif has('gui_motif')
     " expect is DEFAULT_FONT of gui_x11.c
     call assert_match('hi Normal\s*font=7x13', hlNormal)
@@ -831,6 +854,15 @@ func Test_highlight_User()
   hi clear
 endfunc
 
+" Test for MsgArea highlighting
+func Test_highlight_MsgArea()
+  CheckNotGui
+  hi MsgArea ctermfg=20
+  redraw!
+  call assert_equal('20', synIDattr(synIDtrans(hlID('MsgArea')), 'fg'))
+  hi clear
+endfunc
+
 " Test for using RGB color values in a highlight group
 func Test_xxlast_highlight_RGB_color()
   CheckCanRunGui
@@ -854,7 +886,7 @@ func Test_highlight_default()
   hi clear
 endfunc
 
-" Test for 'ctermul in a highlight group
+" Test for 'ctermul' in a highlight group
 func Test_highlight_ctermul()
   CheckNotGui
   call assert_notmatch('ctermul=', HighlightArgs('Normal'))
@@ -862,6 +894,16 @@ func Test_highlight_ctermul()
   call assert_match('ctermul=3', HighlightArgs('Normal'))
   call assert_equal('3', synIDattr(synIDtrans(hlID('Normal')), 'ul'))
   highlight Normal ctermul=NONE
+endfunc
+
+" Test for 'ctermfont' in a highlight group
+func Test_highlight_ctermfont()
+  CheckNotGui
+  call assert_notmatch('ctermfont=', HighlightArgs('Normal'))
+  highlight Normal ctermfont=3
+  call assert_match('ctermfont=3', HighlightArgs('Normal'))
+  call assert_equal('3', synIDattr(synIDtrans(hlID('Normal')), 'font'))
+  highlight Normal ctermfont=NONE
 endfunc
 
 " Test for specifying 'start' and 'stop' in a highlight group
@@ -874,6 +916,13 @@ func Test_highlight_start_stop()
   call assert_match("stop=^[[27h;^[[ r;", HighlightArgs('HlGrp2'))
   hi HlGrp2 stop=NONE
   call assert_notmatch("stop=", HighlightArgs('HlGrp2'))
+  set t_xy=^[foo;
+  set t_xz=^[bar;
+  hi HlGrp3 start=t_xy stop=t_xz
+  let d = hlget('HlGrp3')
+  call assert_equal('^[foo;', d[0].start)
+  call assert_equal('^[bar;', d[0].stop)
+  set t_xy= t_xz=
   hi clear
 endfunc
 
@@ -1036,7 +1085,7 @@ func Test_colornames_assignment_and_unassignment()
   let v:colornames['x1'] = '#111111'
   call assert_equal(v:colornames['x1'], '#111111')
   unlet v:colornames['x1']
-  call assert_fails("echo v:colornames['x1']")
+  call assert_fails("echo v:colornames['x1']", 'E716: Key not present in Dictionary: "x1"')
 endfunc
 
 " Test for the hlget() function
@@ -1093,6 +1142,17 @@ endfunc
 
 " Test for the hlset() function
 func Test_hlset()
+  " FIXME: With GVim, _current_ test cases that are run before this one may
+  "	influence the result of calling "hlset(hlget())", depending on what
+  "	"&guifont" is set to.  For example, introduce SetUp() as follows:
+  "
+  " if CanRunVimInTerminal() && has('gui_running') && has('gui_gtk')
+  "   def SetUp()
+  "     set guifont=Monospace\ 10
+  "   enddef
+  " endif
+  "
+  "	and see "E416: Missing equal sign: ... line 4" for this test case.
   let lines =<< trim END
     call assert_equal(0, hlset(test_null_list()))
     call assert_equal(0, hlset([]))
@@ -1283,6 +1343,7 @@ func Test_hlset()
   call hlset([{'name': 'hlg11', 'ctermfg': ''}])
   call hlset([{'name': 'hlg11', 'ctermbg': ''}])
   call hlset([{'name': 'hlg11', 'ctermul': ''}])
+  call hlset([{'name': 'hlg11', 'ctermfont': ''}])
   call hlset([{'name': 'hlg11', 'font': ''}])
   call hlset([{'name': 'hlg11', 'gui': {}}])
   call hlset([{'name': 'hlg11', 'guifg': ''}])

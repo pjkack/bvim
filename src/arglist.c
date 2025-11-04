@@ -184,6 +184,8 @@ alist_set(
 /*
  * Add file "fname" to argument list "al".
  * "fname" must have been allocated and "al" must have been checked for room.
+ *
+ * May trigger Buf* autocommands
  */
     void
 alist_add(
@@ -196,6 +198,7 @@ alist_add(
     if (check_arglist_locked() == FAIL)
 	return;
     arglist_locked = TRUE;
+    curwin->w_locked = TRUE;
 
 #ifdef BACKSLASH_IN_FILENAME
     slash_adjust(fname);
@@ -207,6 +210,7 @@ alist_add(
     ++al->al_ga.ga_len;
 
     arglist_locked = FALSE;
+    curwin->w_locked = FALSE;
 }
 
 #if defined(BACKSLASH_IN_FILENAME) || defined(PROTO)
@@ -365,6 +369,7 @@ alist_add_list(
 	    mch_memmove(&(ARGLIST[after + count]), &(ARGLIST[after]),
 				       (ARGCOUNT - after) * sizeof(aentry_T));
 	arglist_locked = TRUE;
+	curwin->w_locked = TRUE;
 	for (i = 0; i < count; ++i)
 	{
 	    int flags = BLN_LISTED | (will_edit ? BLN_CURBUF : 0);
@@ -373,6 +378,7 @@ alist_add_list(
 	    ARGLIST[after + i].ae_fnum = buflist_add(files[i], flags);
 	}
 	arglist_locked = FALSE;
+	curwin->w_locked = FALSE;
 	ALIST(curwin)->al_ga.ga_len += count;
 	if (old_argcount > 0 && curwin->w_arg_idx >= after)
 	    curwin->w_arg_idx += count;
@@ -413,8 +419,7 @@ arglist_del_files(garray_T *alist_ga)
 
 	didone = FALSE;
 	for (match = 0; match < ARGCOUNT; ++match)
-	    if (vim_regexec(&regmatch, alist_name(&ARGLIST[match]),
-			(colnr_T)0))
+	    if (vim_regexec(&regmatch, alist_name(&ARGLIST[match]), (colnr_T)0))
 	    {
 		didone = TRUE;
 		vim_free(ARGLIST[match].ae_fname);
@@ -503,7 +508,7 @@ do_arglist(
     void
 set_arglist(char_u *str)
 {
-    do_arglist(str, AL_SET, 0, FALSE);
+    do_arglist(str, AL_SET, 0, TRUE);
 }
 
 /*
@@ -556,7 +561,7 @@ check_arg_idx(win_T *win)
 }
 
 /*
- * ":args", ":argslocal" and ":argsglobal".
+ * ":args", ":arglocal" and ":argglobal".
  */
     void
 ex_args(exarg_T *eap)
@@ -683,6 +688,7 @@ do_argfile(exarg_T *eap, int argn)
     int		other;
     char_u	*p;
     int		old_arg_idx = curwin->w_arg_idx;
+    int is_split_cmd = *eap->cmd == 's';
 
     if (ERROR_IF_ANY_POPUP_WINDOW)
 	return;
@@ -694,56 +700,61 @@ do_argfile(exarg_T *eap, int argn)
 	    emsg(_(e_cannot_go_before_first_file));
 	else
 	    emsg(_(e_cannot_go_beyond_last_file));
+
+	return;
+    }
+
+    if (!is_split_cmd
+	    && (&ARGLIST[argn])->ae_fnum != curbuf->b_fnum
+	    && !check_can_set_curbuf_forceit(eap->forceit))
+	return;
+
+    setpcmark();
+#ifdef FEAT_GUI
+    need_mouse_correct = TRUE;
+#endif
+
+    // split window or create new tab page first
+    if (is_split_cmd || cmdmod.cmod_tab != 0)
+    {
+	if (win_split(0, 0) == FAIL)
+	    return;
+	RESET_BINDING(curwin);
     }
     else
     {
-	setpcmark();
-#ifdef FEAT_GUI
-	need_mouse_correct = TRUE;
-#endif
-
-	// split window or create new tab page first
-	if (*eap->cmd == 's' || cmdmod.cmod_tab != 0)
+	// if 'hidden' set, only check for changed file when re-editing
+	// the same buffer
+	other = TRUE;
+	if (buf_hide(curbuf))
 	{
-	    if (win_split(0, 0) == FAIL)
-		return;
-	    RESET_BINDING(curwin);
+	    p = fix_fname(alist_name(&ARGLIST[argn]));
+	    other = otherfile(p);
+	    vim_free(p);
 	}
-	else
-	{
-	    // if 'hidden' set, only check for changed file when re-editing
-	    // the same buffer
-	    other = TRUE;
-	    if (buf_hide(curbuf))
-	    {
-		p = fix_fname(alist_name(&ARGLIST[argn]));
-		other = otherfile(p);
-		vim_free(p);
-	    }
-	    if ((!buf_hide(curbuf) || !other)
-		  && check_changed(curbuf, CCGD_AW
-					 | (other ? 0 : CCGD_MULTWIN)
-					 | (eap->forceit ? CCGD_FORCEIT : 0)
-					 | CCGD_EXCMD))
-		return;
-	}
-
-	curwin->w_arg_idx = argn;
-	if (argn == ARGCOUNT - 1 && curwin->w_alist == &global_alist)
-	    arg_had_last = TRUE;
-
-	// Edit the file; always use the last known line number.
-	// When it fails (e.g. Abort for already edited file) restore the
-	// argument index.
-	if (do_ecmd(0, alist_name(&ARGLIST[curwin->w_arg_idx]), NULL,
-		      eap, ECMD_LAST,
-		      (buf_hide(curwin->w_buffer) ? ECMD_HIDE : 0)
-			 + (eap->forceit ? ECMD_FORCEIT : 0), curwin) == FAIL)
-	    curwin->w_arg_idx = old_arg_idx;
-	// like Vi: set the mark where the cursor is in the file.
-	else if (eap->cmdidx != CMD_argdo)
-	    setmark('\'');
+	if ((!buf_hide(curbuf) || !other)
+		&& check_changed(curbuf, CCGD_AW
+		    | (other ? 0 : CCGD_MULTWIN)
+		    | (eap->forceit ? CCGD_FORCEIT : 0)
+		    | CCGD_EXCMD))
+	    return;
     }
+
+    curwin->w_arg_idx = argn;
+    if (argn == ARGCOUNT - 1 && curwin->w_alist == &global_alist)
+	arg_had_last = TRUE;
+
+    // Edit the file; always use the last known line number.
+    // When it fails (e.g. Abort for already edited file) restore the
+    // argument index.
+    if (do_ecmd(0, alist_name(&ARGLIST[curwin->w_arg_idx]), NULL,
+		eap, ECMD_LAST,
+		(buf_hide(curwin->w_buffer) ? ECMD_HIDE : 0)
+		+ (eap->forceit ? ECMD_FORCEIT : 0), curwin) == FAIL)
+	curwin->w_arg_idx = old_arg_idx;
+    // like Vi: set the mark where the cursor is in the file.
+    else if (eap->cmdidx != CMD_argdo)
+	setmark('\'');
 }
 
 /*
@@ -784,9 +795,25 @@ ex_argdedupe(exarg_T *eap UNUSED)
     int j;
 
     for (i = 0; i < ARGCOUNT; ++i)
+    {
+	// Expand each argument to a full path to catch different paths leading
+	// to the same file.
+	char_u *firstFullname = FullName_save(ARGLIST[i].ae_fname, FALSE);
+	if (firstFullname == NULL)
+	    return;  // out of memory
+
 	for (j = i + 1; j < ARGCOUNT; ++j)
-	    if (fnamecmp(ARGLIST[i].ae_fname, ARGLIST[j].ae_fname) == 0)
+	{
+	    char_u *secondFullname = FullName_save(ARGLIST[j].ae_fname, FALSE);
+	    if (secondFullname == NULL)
+		break;  // out of memory
+	    int areNamesDuplicate =
+				  fnamecmp(firstFullname, secondFullname) == 0;
+	    vim_free(secondFullname);
+
+	    if (areNamesDuplicate)
 	    {
+		// remove one duplicate argument
 		vim_free(ARGLIST[j].ae_fname);
 		mch_memmove(ARGLIST + j, ARGLIST + j + 1,
 					(ARGCOUNT - j - 1) * sizeof(aentry_T));
@@ -799,6 +826,10 @@ ex_argdedupe(exarg_T *eap UNUSED)
 
 		--j;
 	    }
+	}
+
+	vim_free(firstFullname);
+    }
 }
 
 /*
@@ -964,6 +995,9 @@ arg_all_close_unused_windows(arg_all_state_T *aall)
 
     if (aall->had_tab > 0)
 	goto_tabpage_tp(first_tabpage, TRUE, TRUE);
+
+    // moving tabpages around in an autocommand may cause an endless loop
+    tabpage_move_disallowed++;
     for (;;)
     {
 	tpnext = curtab->tp_next;
@@ -1074,6 +1108,7 @@ arg_all_close_unused_windows(arg_all_state_T *aall)
 
 	goto_tabpage_tp(tpnext, TRUE, TRUE);
     }
+    tabpage_move_disallowed--;
 }
 
 /*
@@ -1221,6 +1256,12 @@ do_arg_all(
     need_mouse_correct = TRUE;
 #endif
 
+    tabpage_T *new_lu_tp = curtab;
+
+    // Stop Visual mode, the cursor and "VIsual" may very well be invalid after
+    // switching to another buffer.
+    reset_VIsual_and_resel();
+
     // Try closing all windows that are not in the argument list.
     // Also close windows that are not full width;
     // When 'hidden' or "forceit" set the buffer becomes hidden.
@@ -1262,6 +1303,11 @@ do_arg_all(
     // to window with first arg
     if (valid_tabpage(aall.new_curtab))
 	goto_tabpage_tp(aall.new_curtab, TRUE, TRUE);
+
+    // Now set the last used tabpage to where we started.
+    if (valid_tabpage(new_lu_tp))
+	lastused_tabpage = new_lu_tp;
+
     if (win_valid(aall.new_curwin))
 	win_enter(aall.new_curwin, FALSE);
 

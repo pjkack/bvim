@@ -1,4 +1,4 @@
-*version8.txt*  For Vim version 9.0.  Last change: 2022 Feb 26
+*version8.txt*  For Vim version 9.1.  Last change: 2025 Jul 21
 
 
 		  VIM REFERENCE MANUAL    by Bram Moolenaar
@@ -342,11 +342,11 @@ New Vim variables: ~
 |v:mouse_winid|		Window ID for a mouse click obtained with |getchar()|
 |v:none|		an empty String, used for JSON
 |v:null|		an empty String, used for JSON
-|v:option_new|    	new value of the option, used by |OptionSet|
-|v:option_old|    	old value of the option, used by |OptionSet|
+|v:option_new|		new value of the option, used by |OptionSet|
+|v:option_old|		old value of the option, used by |OptionSet|
 |v:option_oldlocal|	old local value of the option, used by |OptionSet|
 |v:option_oldglobal|	old global value of the option, used by |OptionSet|
-|v:option_type|   	scope of the set command, used by |OptionSet|
+|v:option_type|		scope of the set command, used by |OptionSet|
 |v:option_command|	command used to set the option, used by |OptionSet|
 |v:progpath|		the command with which Vim was invoked
 |v:t_bool|		value of Boolean type
@@ -14558,7 +14558,7 @@ Changed							*changed-8.1*
 -------
 
 Internal: A few C99 features are now allowed such as // comments and a
-comma after the last enum entry.  See |style-compiler|.
+comma after the last enum entry.  See |assumptions-C-compiler|.
 
 Since patch 8.0.0029 removed support for older MS-Windows systems, only
 MS-Windows XP and later are supported.

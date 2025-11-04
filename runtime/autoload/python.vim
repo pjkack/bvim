@@ -20,11 +20,12 @@ let g:python_indent = extend(get(g:, 'python_indent', {}), #{
 let s:maxoff = 50       " maximum number of lines to look backwards for ()
 
 function s:SearchBracket(fromlnum, flags)
+  " VIM_INDENT_TEST_TRACE_START
   return searchpairpos('[[({]', '', '[])}]', a:flags,
           \ {-> synstack('.', col('.'))
-          \   ->map({_, id -> id->synIDattr('name')})
-          \   ->match('\%(Comment\|Todo\|String\)$') >= 0},
+          \ ->indexof({_, id -> synIDattr(id, 'name') =~ '\%(Comment\|Todo\|String\)$'}) >= 0},
           \ [0, a:fromlnum - s:maxoff]->max(), g:python_indent.searchpair_timeout)
+  " VIM_INDENT_TEST_TRACE_END python#s:SearchBracket
 endfunction
 
 " See if the specified line is already user-dedented from the expected value.
@@ -157,15 +158,13 @@ function python#GetIndent(lnum, ...)
     " the start of the comment.  synID() is slow, a linear search would take
     " too long on a long line.
     if synstack(plnum, pline_len)
-    \ ->map({_, id -> id->synIDattr('name')})
-    \ ->match('\%(Comment\|Todo\)$') >= 0
+    \ ->indexof({_, id -> synIDattr(id, 'name') =~ '\%(Comment\|Todo\)$'}) >= 0
       let min = 1
       let max = pline_len
       while min < max
 	let col = (min + max) / 2
         if synstack(plnum, col)
-        \ ->map({_, id -> id->synIDattr('name')})
-        \ ->match('\%(Comment\|Todo\)$') >= 0
+        \ ->indexof({_, id -> synIDattr(id, 'name') =~ '\%(Comment\|Todo\)$'}) >= 0
 	  let max = col
 	else
 	  let min = col + 1

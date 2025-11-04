@@ -334,7 +334,7 @@ timer_create(clockid_t clockid, struct sigevent *sevp, timer_t *timerid)
  *
  * The limitations and differences include:
  *
- * - The flags argument is ignored. The supplied new_value is therfore
+ * - The flags argument is ignored. The supplied new_value is therefore
  *   always treated as a relative time.
  * - The old_value argument is ignored.
  */
@@ -430,7 +430,7 @@ static NSMutableDictionary<NSNumber*, NSSound*> *sounds_list = nil;
 @end
 
     void
-process_cfrunloop()
+process_cfrunloop(void)
 {
     if (sounds_list != nil && [sounds_list count] > 0)
     {
@@ -493,7 +493,7 @@ sound_mch_stop(long sound_id)
 }
 
     void
-sound_mch_clear()
+sound_mch_clear(void)
 {
     if (sounds_list != nil)
     {
@@ -510,7 +510,7 @@ sound_mch_clear()
 }
 
     void
-sound_mch_free()
+sound_mch_free(void)
 {
     sound_mch_clear();
 }

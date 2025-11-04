@@ -221,25 +221,26 @@ set_context_in_cscope_cmd(
     expand_what = (cmdidx == CMD_scscope)
 			? EXP_SCSCOPE_SUBCMD : EXP_CSCOPE_SUBCMD;
 
+    if (*arg == NUL)
+	return;
+
     // (part of) subcommand already typed
-    if (*arg != NUL)
-    {
-	p = skiptowhite(arg);
-	if (*p != NUL)		    // past first word
-	{
-	    xp->xp_pattern = skipwhite(p);
-	    if (*skiptowhite(xp->xp_pattern) != NUL)
-		xp->xp_context = EXPAND_NOTHING;
-	    else if (STRNICMP(arg, "add", p - arg) == 0)
-		xp->xp_context = EXPAND_FILES;
-	    else if (STRNICMP(arg, "kill", p - arg) == 0)
-		expand_what = EXP_CSCOPE_KILL;
-	    else if (STRNICMP(arg, "find", p - arg) == 0)
-		expand_what = EXP_CSCOPE_FIND;
-	    else
-		xp->xp_context = EXPAND_NOTHING;
-	}
-    }
+    p = skiptowhite(arg);
+    if (*p == NUL)
+	return;
+
+    // past first word
+    xp->xp_pattern = skipwhite(p);
+    if (*skiptowhite(xp->xp_pattern) != NUL)
+	xp->xp_context = EXPAND_NOTHING;
+    else if (STRNICMP(arg, "add", p - arg) == 0)
+	xp->xp_context = EXPAND_FILES;
+    else if (STRNICMP(arg, "kill", p - arg) == 0)
+	expand_what = EXP_CSCOPE_KILL;
+    else if (STRNICMP(arg, "find", p - arg) == 0)
+	expand_what = EXP_CSCOPE_FIND;
+    else
+	xp->xp_context = EXPAND_NOTHING;
 }
 
 /*
@@ -539,16 +540,15 @@ cs_add_common(
     char	*fname2 = NULL;
     char	*ppath = NULL;
     int		i;
-    int		len;
-    int		usedlen = 0;
+    size_t	len;
+    size_t	usedlen = 0;
     char_u	*fbuf = NULL;
 
     // get the filename (arg1), expand it, and try to stat it
     if ((fname = alloc(MAXPATHL + 1)) == NULL)
 	goto add_err;
 
-    expand_env((char_u *)arg1, (char_u *)fname, MAXPATHL);
-    len = (int)STRLEN(fname);
+    len = expand_env((char_u *)arg1, (char_u *)fname, MAXPATHL);
     fbuf = (char_u *)fname;
     (void)modify_fname((char_u *)":p", FALSE, &usedlen,
 					      (char_u **)&fname, &fbuf, &len);
@@ -828,6 +828,7 @@ cs_create_connection(int i)
     int		cmdlen;
     int		len;
     char	*prog, *cmd, *ppath = NULL;
+    size_t	proglen;
 #ifdef MSWIN
     int		fd;
     SECURITY_ATTRIBUTES sa;
@@ -915,10 +916,10 @@ err_closing:
 	    goto err_closing;
 #endif
 	}
-	expand_env(p_csprg, (char_u *)prog, MAXPATHL);
+	proglen = expand_env(p_csprg, (char_u *)prog, MAXPATHL);
 
 	// alloc space to hold the cscope command
-	cmdlen = (int)(strlen(prog) + strlen(csinfo[i].fname) + 32);
+	cmdlen = (int)(proglen + strlen(csinfo[i].fname) + 32);
 	if (csinfo[i].ppath)
 	{
 	    // expand the prepend path for env var's
@@ -932,9 +933,7 @@ err_closing:
 		goto err_closing;
 #endif
 	    }
-	    expand_env((char_u *)csinfo[i].ppath, (char_u *)ppath, MAXPATHL);
-
-	    cmdlen += (int)strlen(ppath);
+	    cmdlen += (int)expand_env((char_u *)csinfo[i].ppath, (char_u *)ppath, MAXPATHL);
 	}
 
 	if (csinfo[i].flags)
@@ -1462,7 +1461,8 @@ cs_insert_filelist(
 	    return -1;
 	}
 	(void)strcpy(csinfo[i].ppath, (const char *)ppath);
-    } else
+    }
+    else
 	csinfo[i].ppath = NULL;
 
     if (flags != NULL)
@@ -1474,7 +1474,8 @@ cs_insert_filelist(
 	    return -1;
 	}
 	(void)strcpy(csinfo[i].flags, (const char *)flags);
-    } else
+    }
+    else
 	csinfo[i].flags = NULL;
 
 #if defined(UNIX)
@@ -1720,7 +1721,7 @@ cs_manage_matches(
 	cs_print_tags_priv(mp, cp, cnt);
 	break;
     default:	// should not reach here
-	iemsg(_(e_fatal_error_in_cs_manage_matches));
+	iemsg(e_fatal_error_in_cs_manage_matches);
 	return NULL;
     }
 
@@ -1939,12 +1940,18 @@ cs_pathcomponents(char *path)
 
     s = path + strlen(path) - 1;
     for (i = 0; i < p_cspc; ++i)
-	while (s > path && *--s != '/'
+    {
+	while (s > path)
+	{
+	   s--;
+	   if (*s == '/'
 #ifdef MSWIN
-		&& *--s != '\\'
+		|| *s == '\\'
 #endif
 		)
-	    ;
+	      break;
+	}
+    }
     if ((s > path && *s == '/')
 #ifdef MSWIN
 	|| (s > path && *s == '\\')
@@ -2111,14 +2118,13 @@ cs_read_prompt(int i)
     int		ch;
     char	*buf = NULL; // buffer for possible error message from cscope
     int		bufpos = 0;
-    char	*cs_emsg;
     int		maxlen;
     static char *eprompt = "Press the RETURN key to continue:";
     int		epromptlen = (int)strlen(eprompt);
     int		n;
 
-    cs_emsg = _(e_cscope_error_str);
     // compute maximum allowed len for Cscope error message
+    char *cs_emsg = _(e_cscope_error_str);
     maxlen = (int)(IOSIZE - strlen(cs_emsg));
 
     for (;;)

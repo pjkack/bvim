@@ -1,9 +1,5 @@
 " Tests for the swap feature
 
-source check.vim
-source shared.vim
-source term_util.vim
-
 func s:swapname()
   return trim(execute('swapname'))
 endfunc
@@ -110,8 +106,19 @@ func Test_swapinfo()
   w
   let fname = s:swapname()
   call assert_match('Xswapinfo', fname)
-  let info = fname->swapinfo()
 
+  " Check the tail appears in the list from swapfilelist().  The path depends
+  " on the system.
+  let tail = fnamemodify(fname, ":t")->fnameescape()
+  let nr = 0
+  for name in swapfilelist()
+    if name =~ tail .. '$'
+      let nr += 1
+    endif
+  endfor
+  call assert_equal(1, nr, 'not found in ' .. string(swapfilelist()))
+
+  let info = fname->swapinfo()
   let ver = printf('VIM %d.%d', v:version / 100, v:version % 100)
   call assert_equal(ver, info.version)
 
@@ -409,7 +416,7 @@ func s:get_unused_pid(base)
   if has('job')
     " Execute 'echo' as a temporary job, and return its pid as an unused pid.
     if has('win32')
-      let cmd = 'cmd /c echo'
+      let cmd = 'cmd /D /c echo'
     else
       let cmd = 'echo'
     endif

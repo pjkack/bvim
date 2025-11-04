@@ -43,6 +43,50 @@ lookup_local(char_u *name, size_t len, lvar_T *lvar, cctx_T *cctx)
     if (len == 0)
 	return FAIL;
 
+    if (((len == 4 && STRNCMP(name, "this", 4) == 0)
+		|| (len == 5 && STRNCMP(name, "super", 5) == 0))
+	    && cctx->ctx_ufunc != NULL
+	    && (cctx->ctx_ufunc->uf_flags & (FC_OBJECT|FC_NEW)))
+    {
+	int is_super = *name == 's';
+	if (is_super)
+	{
+	    if (name[5] != '.')
+	    {
+		emsg(_(e_super_must_be_followed_by_dot));
+		return FAIL;
+	    }
+	    if (cctx->ctx_ufunc->uf_class != NULL
+		    && cctx->ctx_ufunc->uf_class->class_extends == NULL)
+	    {
+		emsg(_(e_using_super_not_in_child_class));
+		return FAIL;
+	    }
+	}
+	if (lvar != NULL)
+	{
+	    CLEAR_POINTER(lvar);
+	    lvar->lv_loop_depth = -1;
+	    lvar->lv_name = (char_u *)(is_super ? "super" : "this");
+	    if (cctx->ctx_ufunc->uf_class != NULL)
+	    {
+		lvar->lv_type = &cctx->ctx_ufunc->uf_class->class_object_type;
+		if (is_super)
+		{
+		    type_T *type = get_type_ptr(cctx->ctx_type_list);
+
+		    if (type != NULL)
+		    {
+			*type = *lvar->lv_type;
+			lvar->lv_type = type;
+			type->tt_flags |= TTFLAG_SUPER;
+		    }
+		}
+	    }
+	}
+	return OK;
+    }
+
     // Find local in current function scope.
     for (idx = 0; idx < cctx->ctx_locals.ga_len; ++idx)
     {
@@ -244,15 +288,6 @@ update_script_var_block_id(char_u *name, int block_id)
 }
 
 /*
- * Return TRUE if the script context is Vim9 script.
- */
-    int
-script_is_vim9()
-{
-    return SCRIPT_ITEM(current_sctx.sc_sid)->sn_version == SCRIPT_VERSION_VIM9;
-}
-
-/*
  * Lookup a variable (without s: prefix) in the current script.
  * "cctx" is NULL at the script level, "cstack" is NULL in a function.
  * Returns OK or FAIL.
@@ -262,7 +297,7 @@ script_var_exists(char_u *name, size_t len, cctx_T *cctx, cstack_T *cstack)
 {
     if (current_sctx.sc_sid <= 0)
 	return FAIL;
-    if (script_is_vim9())
+    if (current_script_is_vim9())
     {
 	// Check script variables that were visible where the function was
 	// defined.
@@ -288,16 +323,97 @@ script_var_exists(char_u *name, size_t len, cctx_T *cctx, cstack_T *cstack)
 }
 
 /*
+ * Returns the index of a class method or class variable with name "name"
+ * accessible in the currently compiled function.
+ * If "cl_ret" is not NULL set it to the class.
+ * Otherwise return -1.
+ */
+    static int
+cctx_class_midx(
+    cctx_T  *cctx,
+    int	    is_method,
+    char_u  *name,
+    size_t  len,
+    class_T **cl_ret)
+{
+    if (cctx == NULL || cctx->ctx_ufunc == NULL
+	    || cctx->ctx_ufunc->uf_class == NULL
+	    || cctx->ctx_ufunc->uf_defclass == NULL)
+	return -1;
+
+    // Search for the class method or variable in the class where the calling
+    // function is defined.
+    class_T *cl = cctx->ctx_ufunc->uf_defclass;
+    int m_idx = is_method ? class_method_idx(cl, name, len)
+					: class_member_idx(cl, name, len);
+    if (m_idx < 0)
+    {
+	cl = cl->class_extends;
+	while (cl != NULL)
+	{
+	    m_idx = is_method ? class_method_idx(cl, name, len)
+					: class_member_idx(cl, name, len);
+	    if (m_idx >= 0)
+		break;
+	    cl = cl->class_extends;
+	}
+    }
+
+    if (m_idx >= 0)
+    {
+	if (cl_ret != NULL)
+	    *cl_ret = cl;
+    }
+
+    return m_idx;
+}
+
+/*
+ * Returns the index of a class method with name "name" accessible in the
+ * currently compiled function.  Returns -1 if not found.  The class where the
+ * method is defined is returned in "cl_ret".
+ */
+    int
+cctx_class_method_idx(
+    cctx_T  *cctx,
+    char_u  *name,
+    size_t  len,
+    class_T **cl_ret)
+{
+    return cctx_class_midx(cctx, TRUE, name, len, cl_ret);
+}
+
+/*
+ * Returns the index of a class variable with name "name" accessible in the
+ * currently compiled function.  Returns -1 if not found.  The class where the
+ * variable is defined is returned in "cl_ret".
+ */
+    int
+cctx_class_member_idx(
+    cctx_T  *cctx,
+    char_u  *name,
+    size_t  len,
+    class_T **cl_ret)
+{
+    return cctx_class_midx(cctx, FALSE, name, len, cl_ret);
+}
+
+/*
  * Return TRUE if "name" is a local variable, argument, script variable or
- * imported.
+ * imported.  Also if "name" is "this" and in a class method.
  */
     static int
 variable_exists(char_u *name, size_t len, cctx_T *cctx)
 {
     return (cctx != NULL
 		&& (lookup_local(name, len, NULL, cctx) == OK
-		    || arg_exists(name, len, NULL, NULL, NULL, cctx) == OK))
+		    || arg_exists(name, len, NULL, NULL, NULL, cctx) == OK
+		    || (len == 4
+			&& cctx->ctx_ufunc != NULL
+			&& (cctx->ctx_ufunc->uf_flags & (FC_OBJECT|FC_NEW))
+			&& STRNCMP(name, "this", 4) == 0)))
 	    || script_var_exists(name, len, cctx, NULL) == OK
+	    || cctx_class_member_idx(cctx, name, len, NULL) >= 0
 	    || find_imported(name, len, FALSE) != NULL;
 }
 
@@ -341,6 +457,15 @@ check_defined(
 	    semsg(_(e_argument_already_declared_in_script_str), p);
 	else
 	    semsg(_(e_variable_already_declared_in_script_str), p);
+	return FAIL;
+    }
+
+    if (cctx_class_member_idx(cctx, p, len, NULL) >= 0)
+    {
+	if (is_arg)
+	    semsg(_(e_argument_already_declared_in_class_str), p);
+	else
+	    semsg(_(e_variable_already_declared_in_class_str), p);
 	return FAIL;
     }
 
@@ -388,8 +513,12 @@ use_typecheck(type_T *actual, type_T *expected)
 		    (actual->tt_member == &t_void)
 					 == (expected->tt_member == &t_void))))
 	return TRUE;
-    if ((actual->tt_type == VAR_LIST || actual->tt_type == VAR_DICT)
-				       && actual->tt_type == expected->tt_type)
+    if (actual->tt_type == VAR_OBJECT && expected->tt_type == VAR_OBJECT)
+	return TRUE;
+    if ((actual->tt_type == VAR_LIST
+		|| actual->tt_type == VAR_TUPLE
+		|| actual->tt_type == VAR_DICT)
+	    && actual->tt_type == expected->tt_type)
 	// This takes care of a nested list or dict.
 	return use_typecheck(actual->tt_member, expected->tt_member);
     return FALSE;
@@ -407,6 +536,7 @@ use_typecheck(type_T *actual, type_T *expected)
 need_type_where(
 	type_T	*actual,
 	type_T	*expected,
+	int	number_ok,	// expect VAR_FLOAT but VAR_NUMBER is OK
 	int	offset,
 	where_T	where,
 	cctx_T	*cctx,
@@ -414,6 +544,12 @@ need_type_where(
 	int	actual_is_const)
 {
     int ret;
+
+    if (expected->tt_type != VAR_CLASS && expected->tt_type != VAR_TYPEALIAS)
+    {
+	if (check_type_is_value(actual) == FAIL)
+	    return FAIL;
+    }
 
     if (expected == &t_bool && actual != &t_bool
 					&& (actual->tt_flags & TTFLAG_BOOL_OK))
@@ -436,8 +572,8 @@ need_type_where(
     // If the actual type can be the expected type add a runtime check.
     if (!actual_is_const && ret == MAYBE && use_typecheck(actual, expected))
     {
-	generate_TYPECHECK(cctx, expected, offset,
-					    where.wt_variable, where.wt_index);
+	generate_TYPECHECK(cctx, expected, number_ok, offset,
+		where.wt_kind == WT_VARIABLE, where.wt_index);
 	return OK;
     }
 
@@ -450,6 +586,7 @@ need_type_where(
 need_type(
 	type_T	*actual,
 	type_T	*expected,
+	int	number_ok,  // when expected is float number is also OK
 	int	offset,
 	int	arg_idx,
 	cctx_T	*cctx,
@@ -458,8 +595,12 @@ need_type(
 {
     where_T where = WHERE_INIT;
 
-    where.wt_index = arg_idx;
-    return need_type_where(actual, expected, offset, where,
+    if (arg_idx > 0)
+    {
+	where.wt_index = arg_idx;
+	where.wt_kind = WT_ARGUMENT;
+    }
+    return need_type_where(actual, expected, number_ok, offset, where,
 						cctx, silent, actual_is_const);
 }
 
@@ -656,12 +797,14 @@ find_imported_in_script(char_u *name, size_t len, int sid)
     imported_T *
 find_imported(char_u *name, size_t len, int load)
 {
-    imported_T	    *ret;
-
     if (!SCRIPT_ID_VALID(current_sctx.sc_sid))
 	return NULL;
 
-    ret = find_imported_in_script(name, len, current_sctx.sc_sid);
+    // Skip over "s:" before "s:something" to find the import name.
+    int off = name[0] == 's' && name[1] == ':' ? 2 : 0;
+
+    imported_T *ret = find_imported_in_script(name + off, len - off,
+							  current_sctx.sc_sid);
     if (ret != NULL && load && (ret->imp_flags & IMP_FLAGS_AUTOLOAD))
     {
 	scid_T	actual_sid = 0;
@@ -829,7 +972,7 @@ exarg_getline(
     void
 fill_exarg_from_cctx(exarg_T *eap, cctx_T *cctx)
 {
-    eap->getline = exarg_getline;
+    eap->ea_getline = exarg_getline;
     eap->cookie = cctx;
     eap->skip = cctx->ctx_skip == SKIP_YES;
 }
@@ -883,16 +1026,18 @@ compile_nested_function(exarg_T *eap, cctx_T *cctx, garray_T *lines_to_free)
     char_u	*name_end = to_name_end(eap->arg, TRUE);
     int		off;
     char_u	*func_name;
-    char_u	*lambda_name;
+    string_T	lambda_name;
     ufunc_T	*ufunc;
     int		r = FAIL;
     compiletype_T   compile_type;
-    isn_T	*funcref_isn = NULL;
+    int		funcref_isn_idx = -1;
     lvar_T	*lvar = NULL;
+    char_u	*bracket_start = NULL;
 
     if (eap->forceit)
     {
-	emsg(_(e_cannot_use_bang_with_nested_def));
+	semsg(_(e_cannot_use_bang_with_nested_def_str),
+		eap->cmdidx == CMD_def ? ":def" : ":function");
 	return NULL;
     }
 
@@ -903,6 +1048,14 @@ compile_nested_function(exarg_T *eap, cctx_T *cctx, garray_T *lines_to_free)
 	    ++name_end;
 	set_nextcmd(eap, name_end);
     }
+
+    if (*name_end == '<')
+    {
+	bracket_start = name_end;
+	if (skip_generic_func_type_args(&name_end) == FAIL)
+	    return NULL;
+    }
+
     if (name_end == name_start || *skipwhite(name_end) != '(')
     {
 	if (!ends_excmd2(name_start, name_end))
@@ -920,6 +1073,11 @@ compile_nested_function(exarg_T *eap, cctx_T *cctx, garray_T *lines_to_free)
 	    return NULL;
 	return eap->nextcmd == NULL ? (char_u *)"" : eap->nextcmd;
     }
+
+    if (bracket_start != NULL)
+	// generic function.  The function name ends before the list of types
+	// (opening angle bracket).
+	name_end = bracket_start;
 
     // Only g:Func() can use a namespace.
     if (name_start[1] == ':' && !is_global)
@@ -942,8 +1100,9 @@ compile_nested_function(exarg_T *eap, cctx_T *cctx, garray_T *lines_to_free)
 
     eap->forceit = FALSE;
     // We use the special <Lamba>99 name, but it's not really a lambda.
-    lambda_name = vim_strsave(get_lambda_name());
-    if (lambda_name == NULL)
+    lambda_name = get_lambda_name();
+    lambda_name.string = vim_strnsave(lambda_name.string, lambda_name.length);
+    if (lambda_name.string == NULL)
 	return NULL;
 
     // This may free the current line, make a copy of the name.
@@ -955,7 +1114,15 @@ compile_nested_function(exarg_T *eap, cctx_T *cctx, garray_T *lines_to_free)
 	goto theend;
     }
 
-    ufunc = define_function(eap, lambda_name, lines_to_free);
+    // Make sure "KeyTyped" is not set, it may cause indent to be written.
+    int save_KeyTyped = KeyTyped;
+    KeyTyped = FALSE;
+
+    ufunc = define_function(eap, lambda_name.string, lines_to_free, 0, NULL, 0,
+									cctx);
+
+    KeyTyped = save_KeyTyped;
+
     if (ufunc == NULL)
     {
 	r = eap->skip ? OK : FAIL;
@@ -988,9 +1155,10 @@ compile_nested_function(exarg_T *eap, cctx_T *cctx, garray_T *lines_to_free)
     // recursive call.
     if (is_global)
     {
-	r = generate_NEWFUNC(cctx, lambda_name, func_name);
+	r = generate_NEWFUNC(cctx, lambda_name.string, func_name);
 	func_name = NULL;
-	lambda_name = NULL;
+	lambda_name.string = NULL;
+	lambda_name.length = 0;
     }
     else
     {
@@ -999,7 +1167,7 @@ compile_nested_function(exarg_T *eap, cctx_T *cctx, garray_T *lines_to_free)
 					    ASSIGN_CONST, ufunc->uf_func_type);
 	if (lvar == NULL)
 	    goto theend;
-	if (generate_FUNCREF(cctx, ufunc, &funcref_isn) == FAIL)
+	if (generate_FUNCREF(cctx, ufunc, NULL, FALSE, 0, &funcref_isn_idx) == FAIL)
 	    goto theend;
 	r = generate_STORE(cctx, ISN_STORE, lvar->lv_idx, NULL);
     }
@@ -1029,11 +1197,15 @@ compile_nested_function(exarg_T *eap, cctx_T *cctx, garray_T *lines_to_free)
 #endif
 
     // If a FUNCREF instruction was generated, set the index after compiling.
-    if (funcref_isn != NULL && ufunc->uf_def_status == UF_COMPILED)
+    if (funcref_isn_idx != -1 && ufunc->uf_def_status == UF_COMPILED)
+    {
+	isn_T	*funcref_isn = ((isn_T *)cctx->ctx_instr.ga_data) +
+							funcref_isn_idx;
 	funcref_isn->isn_arg.funcref.fr_dfunc_idx = ufunc->uf_dfunc_idx;
+    }
 
 theend:
-    vim_free(lambda_name);
+    vim_free(lambda_name.string);
     vim_free(func_name);
     return r == FAIL ? NULL : (char_u *)"";
 }
@@ -1063,7 +1235,7 @@ compile_one_expr_in_str(char_u *p, cctx_T *cctx)
     }
     if (compile_expr0(&block_start, cctx) == FAIL)
 	return NULL;
-    may_generate_2STRING(-1, TRUE, cctx);
+    may_generate_2STRING(-1, TOSTRING_INTERPOLATE, cctx);
 
     return block_end + 1;
 }
@@ -1174,15 +1346,14 @@ assignment_len(char_u *p, int *heredoc)
 /*
  * Generate the load instruction for "name".
  */
-    static void
-generate_loadvar(
-	cctx_T		*cctx,
-	assign_dest_T	dest,
-	char_u		*name,
-	lvar_T		*lvar,
-	type_T		*type)
+    static int
+generate_loadvar(cctx_T *cctx, lhs_T *lhs)
 {
-    switch (dest)
+    char_u	*name = lhs->lhs_name;
+    type_T	*type = lhs->lhs_type;
+    int		res = OK;
+
+    switch (lhs->lhs_dest)
     {
 	case dest_option:
 	case dest_func_option:
@@ -1209,8 +1380,9 @@ generate_loadvar(
 	    generate_LOAD(cctx, ISN_LOADT, 0, name + 2, type);
 	    break;
 	case dest_script:
-	    compile_load_scriptvar(cctx,
-				  name + (name[1] == ':' ? 2 : 0), NULL, NULL);
+	case dest_script_v9:
+	    res = compile_load_scriptvar(cctx,
+			    name + (name[1] == ':' ? 2 : 0), NULL, NULL, NULL);
 	    break;
 	case dest_env:
 	    // Include $ in the name here
@@ -1225,6 +1397,7 @@ generate_loadvar(
 	case dest_local:
 	    if (cctx->ctx_skip != SKIP_YES)
 	    {
+		lvar_T	*lvar = lhs->lhs_lvar;
 		if (lvar->lv_from_outer > 0)
 		    generate_LOADOUTER(cctx, lvar->lv_idx, lvar->lv_from_outer,
 				 lvar->lv_loop_depth, lvar->lv_loop_idx, type);
@@ -1232,10 +1405,16 @@ generate_loadvar(
 		    generate_LOAD(cctx, ISN_LOAD, lvar->lv_idx, NULL, type);
 	    }
 	    break;
+	case dest_class_member:
+	    generate_CLASSMEMBER(cctx, TRUE, lhs->lhs_class,
+						     lhs->lhs_classmember_idx);
+	    break;
 	case dest_expr:
 	    // list or dict value should already be on the stack.
 	    break;
     }
+
+    return res;
 }
 
 /*
@@ -1272,15 +1451,15 @@ vim9_declare_error(char_u *name)
 	case 'w': scope = _("window"); break;
 	case 't': scope = _("tab"); break;
 	case 'v': scope = "v:"; break;
-	case '$': semsg(_(e_cannot_declare_an_environment_variable), name);
+	case '$': semsg(_(e_cannot_declare_an_environment_variable_str), name);
 		  return;
-	case '&': semsg(_(e_cannot_declare_an_option), name);
+	case '&': semsg(_(e_cannot_declare_an_option_str), name);
 		  return;
 	case '@': semsg(_(e_cannot_declare_a_register_str), name);
 		  return;
 	default: return;
     }
-    semsg(_(e_cannot_declare_a_scope_variable), scope, name);
+    semsg(_(e_cannot_declare_a_scope_variable_str), scope, name);
 }
 
 /*
@@ -1427,29 +1606,80 @@ is_decl_command(cmdidx_T cmdidx)
 }
 
 /*
- * Figure out the LHS type and other properties for an assignment or one item
- * of ":unlet" with an index.
- * Returns OK or FAIL.
+ * Returns TRUE if the class or object variable in "lhs" is modifiable.
+ * "var_start" points to the start of the variable name and "lhs->lhs_varlen"
+ * has the total length.  Note that the "lhs" can be nested an object reference
+ * (e.g.  a.b.c.d.var).
  */
-    int
-compile_lhs(
-	char_u	    *var_start,
-	lhs_T	    *lhs,
-	cmdidx_T    cmdidx,
-	int	    heredoc,
-	int	    has_cmd,	    // "var" before "var_start"
-	int	    oplen,
-	cctx_T	    *cctx)
+    static int
+lhs_class_member_modifiable(lhs_T *lhs, char_u	*var_start, cctx_T *cctx)
 {
-    char_u	*var_end;
-    int		is_decl = is_decl_command(cmdidx);
+    size_t	varlen = lhs->lhs_varlen;
+    class_T	*cl = lhs->lhs_type->tt_class;
+    int		is_object = lhs->lhs_type->tt_type == VAR_OBJECT;
+    char_u	*name = var_start + varlen + 1;
+    size_t	namelen = lhs->lhs_end - var_start - varlen - 1;
+    ocmember_T	*m;
 
+    m = member_lookup(cl, lhs->lhs_type->tt_type, name, namelen, NULL);
+    if (m == NULL)
+    {
+	member_not_found_msg(cl, lhs->lhs_type->tt_type, name, namelen);
+	return FALSE;
+    }
+
+    if (IS_ENUM(cl))
+    {
+	semsg(_(e_enumvalue_str_cannot_be_modified), cl->class_name,
+		m->ocm_name);
+	return FALSE;
+    }
+
+    // If it is private member variable, then accessing it outside the
+    // class is not allowed.
+    // If it is a read only class variable, then it can be modified
+    // only inside the class where it is defined.
+    if ((m->ocm_access != VIM_ACCESS_ALL) &&
+	    ((is_object && !inside_class(cctx, cl))
+	     || (!is_object && cctx->ctx_ufunc->uf_class != cl)))
+    {
+	char *msg = (m->ocm_access == VIM_ACCESS_PRIVATE)
+				? e_cannot_access_protected_variable_str
+				: e_variable_is_not_writable_str;
+	emsg_var_cl_define(msg, m->ocm_name, 0, cl);
+	return FALSE;
+    }
+
+    return TRUE;
+}
+
+/*
+ * Initialize "lhs" with default values
+ */
+    static void
+lhs_init_defaults(lhs_T *lhs)
+{
     CLEAR_POINTER(lhs);
     lhs->lhs_dest = dest_local;
     lhs->lhs_vimvaridx = -1;
     lhs->lhs_scriptvar_idx = -1;
+    lhs->lhs_member_idx = -1;
+}
 
-    // "dest_end" is the end of the destination, including "[expr]" or
+/*
+ * When compiling a LHS variable name, find the end of the destination and the
+ * end of the variable name.
+ */
+    static int
+lhs_find_var_end(
+    lhs_T	*lhs,
+    char_u	*var_start,
+    int		is_decl,
+    char_u	**var_endp)
+{
+    char_u  *var_end = *var_endp;
+
+    // "lhs_dest_end" is the end of the destination, including "[expr]" or
     // ".name".
     // "var_end" is the end of the variable/option/etc. name.
     lhs->lhs_dest_end = skip_var_one(var_start, FALSE);
@@ -1468,11 +1698,35 @@ compile_lhs(
 
     // "a: type" is declaring variable "a" with a type, not dict "a:".
     if (is_decl && lhs->lhs_dest_end == var_start + 2
-					       && lhs->lhs_dest_end[-1] == ':')
+					&& lhs->lhs_dest_end[-1] == ':')
 	--lhs->lhs_dest_end;
     if (is_decl && var_end == var_start + 2 && var_end[-1] == ':')
 	--var_end;
+
     lhs->lhs_end = lhs->lhs_dest_end;
+    *var_endp = var_end;
+
+    return OK;
+}
+
+/*
+ * Set various fields in "lhs"
+ */
+    static int
+lhs_init(
+    lhs_T	*lhs,
+    char_u	*var_start,
+    int		is_decl,
+    int		heredoc,
+    char_u	**var_endp)
+{
+    char_u *var_end = *var_endp;
+
+    lhs_init_defaults(lhs);
+
+    // Find the end of the variable and the destination
+    if (lhs_find_var_end(lhs, var_start, is_decl, &var_end) == FAIL)
+	return FAIL;
 
     // compute the length of the destination without "[expr]" or ".name"
     lhs->lhs_varlen = var_end - var_start;
@@ -1485,166 +1739,571 @@ compile_lhs(
 	// Something follows after the variable: "var[idx]" or "var.key".
 	lhs->lhs_has_index = TRUE;
 
-    if (heredoc)
-	lhs->lhs_type = &t_list_string;
-    else
-	lhs->lhs_type = &t_any;
+    lhs->lhs_type = heredoc ? &t_list_string : &t_any;
 
-    if (cctx->ctx_skip != SKIP_YES)
+    *var_endp = var_end;
+
+    return OK;
+}
+
+/*
+ * Compile a LHS class variable name.
+ */
+    static int
+compile_lhs_class_variable(
+    cctx_T	*cctx,
+    lhs_T	*lhs,
+    class_T	*defcl,
+    int		is_decl)
+{
+    if (cctx->ctx_ufunc->uf_defclass != defcl)
     {
-	int	    declare_error = FALSE;
+	// A class variable can be accessed without the class name
+	// only inside a class.
+	semsg(_(e_class_variable_str_accessible_only_inside_class_str),
+		lhs->lhs_name, defcl->class_name);
+	return FAIL;
+    }
 
-	if (get_var_dest(lhs->lhs_name, &lhs->lhs_dest, cmdidx,
-				      &lhs->lhs_opt_flags, &lhs->lhs_vimvaridx,
-						 &lhs->lhs_type, cctx) == FAIL)
-	    return FAIL;
-	if (lhs->lhs_dest != dest_local
-				 && cmdidx != CMD_const && cmdidx != CMD_final)
+    if (is_decl)
+    {
+	semsg(_(e_variable_already_declared_in_class_str), lhs->lhs_name);
+	return FAIL;
+    }
+
+    ocmember_T	*m = &defcl->class_class_members[lhs->lhs_classmember_idx];
+    if (oc_var_check_ro(defcl, m))
+	return FAIL;
+
+    lhs->lhs_dest = dest_class_member;
+    // The class variable is defined either in the current class or
+    // in one of the parent class in the hierarchy.
+    lhs->lhs_class = defcl;
+    lhs->lhs_type = oc_member_type_by_idx(defcl, FALSE,
+						lhs->lhs_classmember_idx);
+
+    return OK;
+}
+
+/*
+ * Compile an imported LHS variable
+ */
+    static int
+compile_lhs_import_var(
+    lhs_T	*lhs,
+    imported_T	*import,
+    char_u	*var_start,
+    char_u	**var_endp,
+    char_u	**rawnamep)
+{
+    char_u	*var_end = *var_endp;
+    char_u	*dot = vim_strchr(var_start, '.');
+    char_u	*p;
+
+    // for an import the name is what comes after the dot
+    if (dot == NULL)
+    {
+	semsg(_(e_no_dot_after_imported_name_str), var_start);
+	return FAIL;
+    }
+
+    p = skipwhite(dot + 1);
+    var_end = to_name_end(p, TRUE);
+    if (var_end == p)
+    {
+	semsg(_(e_missing_name_after_imported_name_str), var_start);
+	return FAIL;
+    }
+
+    vim_free(lhs->lhs_name);
+    lhs->lhs_varlen = var_end - p;
+    lhs->lhs_name = vim_strnsave(p, lhs->lhs_varlen);
+    if (lhs->lhs_name == NULL)
+	return FAIL;
+    *rawnamep = lhs->lhs_name;
+    lhs->lhs_scriptvar_sid = import->imp_sid;
+
+    // TODO: where do we check this name is exported?
+
+    // Check if something follows: "exp.var[idx]" or
+    // "exp.var.key".
+    lhs->lhs_has_index = lhs->lhs_dest_end > skipwhite(var_end);
+
+    *var_endp = var_end;
+
+    return OK;
+}
+
+/*
+ * Process a script-local variable when compiling a LHS variable name.
+ */
+    static int
+compile_lhs_script_var(
+    cctx_T	*cctx,
+    lhs_T	*lhs,
+    char_u	*var_start,
+    char_u	*var_end,
+    int		is_decl)
+{
+    int		script_namespace = FALSE;
+    int		script_var = FALSE;
+    imported_T	*import;
+    char_u	*var_name;
+    size_t	var_name_len;
+
+    if (lhs->lhs_varlen > 1 && STRNCMP(var_start, "s:", 2) == 0)
+	script_namespace = TRUE;
+
+    if (script_namespace)
+    {
+	var_name = var_start + 2;
+	var_name_len = lhs->lhs_varlen - 2;
+    }
+    else
+    {
+	var_name = var_start;
+	var_name_len = lhs->lhs_varlen;
+    }
+
+    if (script_var_exists(var_name, var_name_len, cctx, NULL) == OK)
+	script_var = TRUE;
+
+    import = find_imported(var_start, lhs->lhs_varlen, FALSE);
+
+    if (script_namespace || script_var || import != NULL)
+    {
+	char_u *rawname = lhs->lhs_name + (lhs->lhs_name[1] == ':' ? 2 : 0);
+
+	if (script_namespace && current_script_is_vim9())
 	{
-	    // Specific kind of variable recognized.
-	    declare_error = is_decl;
+	    semsg(_(e_cannot_use_s_colon_in_vim9_script_str), var_start);
+	    return FAIL;
+	}
+
+	if (is_decl)
+	{
+	    if (script_namespace)
+		semsg(_(e_cannot_declare_script_variable_in_function_str),
+			lhs->lhs_name);
+	    else
+		semsg(_(e_variable_already_declared_in_script_str),
+			lhs->lhs_name);
+	    return FAIL;
+	}
+	else if (cctx->ctx_ufunc->uf_script_ctx_version == SCRIPT_VERSION_VIM9
+		&& script_namespace
+		&& !script_var && import == NULL)
+	{
+	    semsg(_(e_unknown_variable_str), lhs->lhs_name);
+	    return FAIL;
+	}
+
+	lhs->lhs_dest = current_script_is_vim9() ? dest_script_v9 :
+								dest_script;
+
+	// existing script-local variables should have a type
+	lhs->lhs_scriptvar_sid = current_sctx.sc_sid;
+	if (import != NULL)
+	{
+	    if (compile_lhs_import_var(lhs, import, var_start, &var_end,
+							&rawname) == FAIL)
+		return FAIL;
+	}
+
+	if (SCRIPT_ID_VALID(lhs->lhs_scriptvar_sid))
+	{
+	    // Check writable only when no index follows.
+	    lhs->lhs_scriptvar_idx = get_script_item_idx(
+					lhs->lhs_scriptvar_sid, rawname,
+					lhs->lhs_has_index ?  ASSIGN_FINAL :
+					ASSIGN_CONST, cctx, NULL);
+	    if (lhs->lhs_scriptvar_idx >= 0)
+	    {
+		scriptitem_T *si = SCRIPT_ITEM(lhs->lhs_scriptvar_sid);
+		svar_T	 *sv = ((svar_T *)si->sn_var_vals.ga_data)
+						+ lhs->lhs_scriptvar_idx;
+
+		lhs->lhs_type = sv->sv_type;
+	    }
+	}
+
+	return OK;
+    }
+
+    return check_defined(var_start, lhs->lhs_varlen, cctx, NULL, FALSE);
+}
+
+/*
+ * Compile the LHS destination.
+ */
+    static int
+compile_lhs_var_dest(
+    cctx_T	*cctx,
+    lhs_T	*lhs,
+    int		cmdidx,
+    char_u	*var_start,
+    char_u	*var_end,
+    int		is_decl)
+{
+    int	    declare_error = FALSE;
+
+    if (get_var_dest(lhs->lhs_name, &lhs->lhs_dest, cmdidx,
+				&lhs->lhs_opt_flags, &lhs->lhs_vimvaridx,
+				&lhs->lhs_type, cctx) == FAIL)
+	return FAIL;
+
+    if (lhs->lhs_dest != dest_local && cmdidx != CMD_const
+						&& cmdidx != CMD_final)
+    {
+	// Specific kind of variable recognized.
+	declare_error = is_decl;
+    }
+    else
+    {
+	class_T	*defcl;
+
+	// No specific kind of variable recognized, just a name.
+	if (check_reserved_name(lhs->lhs_name, lhs->lhs_has_index
+						&& *var_end == '.') == FAIL)
+	    return FAIL;
+
+	if (lookup_local(var_start, lhs->lhs_varlen, &lhs->lhs_local_lvar,
+								cctx) == OK)
+	{
+	    lhs->lhs_lvar = &lhs->lhs_local_lvar;
 	}
 	else
 	{
-	    // No specific kind of variable recognized, just a name.
-	    if (check_reserved_name(lhs->lhs_name) == FAIL)
-		return FAIL;
-
-	    if (lookup_local(var_start, lhs->lhs_varlen,
-					     &lhs->lhs_local_lvar, cctx) == OK)
-		lhs->lhs_lvar = &lhs->lhs_local_lvar;
-	    else
-	    {
-		CLEAR_FIELD(lhs->lhs_arg_lvar);
-		if (arg_exists(var_start, lhs->lhs_varlen,
-			 &lhs->lhs_arg_lvar.lv_idx, &lhs->lhs_arg_lvar.lv_type,
-			    &lhs->lhs_arg_lvar.lv_from_outer, cctx) == OK)
-		{
-		    if (is_decl)
-		    {
-			semsg(_(e_str_is_used_as_argument), lhs->lhs_name);
-			return FAIL;
-		    }
-		    lhs->lhs_lvar = &lhs->lhs_arg_lvar;
-		}
-	    }
-	    if (lhs->lhs_lvar != NULL)
+	    CLEAR_FIELD(lhs->lhs_arg_lvar);
+	    if (arg_exists(var_start, lhs->lhs_varlen,
+			&lhs->lhs_arg_lvar.lv_idx, &lhs->lhs_arg_lvar.lv_type,
+			&lhs->lhs_arg_lvar.lv_from_outer, cctx) == OK)
 	    {
 		if (is_decl)
 		{
-		    semsg(_(e_variable_already_declared), lhs->lhs_name);
+		    semsg(_(e_str_is_used_as_argument), lhs->lhs_name);
 		    return FAIL;
 		}
-	    }
-	    else
-	    {
-		int script_namespace = lhs->lhs_varlen > 1
-				       && STRNCMP(var_start, "s:", 2) == 0;
-		int script_var = (script_namespace
-			? script_var_exists(var_start + 2, lhs->lhs_varlen - 2,
-								    cctx, NULL)
-			  : script_var_exists(var_start, lhs->lhs_varlen,
-							    cctx, NULL)) == OK;
-		imported_T  *import =
-			      find_imported(var_start, lhs->lhs_varlen, FALSE);
-
-		if (script_namespace || script_var || import != NULL)
-		{
-		    char_u	*rawname = lhs->lhs_name
-					   + (lhs->lhs_name[1] == ':' ? 2 : 0);
-
-		    if (script_namespace && current_script_is_vim9())
-		    {
-			semsg(_(e_cannot_use_s_colon_in_vim9_script_str),
-								    var_start);
-			return FAIL;
-		    }
-		    if (is_decl)
-		    {
-			if (script_namespace)
-			    semsg(_(e_cannot_declare_script_variable_in_function_str),
-								lhs->lhs_name);
-			else
-			    semsg(_(e_variable_already_declared_in_script_str),
-								lhs->lhs_name);
-			return FAIL;
-		    }
-		    else if (cctx->ctx_ufunc->uf_script_ctx_version
-							 == SCRIPT_VERSION_VIM9
-				    && script_namespace
-				    && !script_var && import == NULL)
-		    {
-			semsg(_(e_unknown_variable_str), lhs->lhs_name);
-			return FAIL;
-		    }
-
-		    lhs->lhs_dest = dest_script;
-
-		    // existing script-local variables should have a type
-		    lhs->lhs_scriptvar_sid = current_sctx.sc_sid;
-		    if (import != NULL)
-		    {
-			char_u	*dot = vim_strchr(var_start, '.');
-			char_u	*p;
-
-			// for an import the name is what comes after the dot
-			if (dot == NULL)
-			{
-			    semsg(_(e_no_dot_after_imported_name_str),
-								    var_start);
-			    return FAIL;
-			}
-			p = skipwhite(dot + 1);
-			var_end = to_name_end(p, TRUE);
-			if (var_end == p)
-			{
-			    semsg(_(e_missing_name_after_imported_name_str),
-								    var_start);
-			    return FAIL;
-			}
-			vim_free(lhs->lhs_name);
-			lhs->lhs_varlen = var_end - p;
-			lhs->lhs_name = vim_strnsave(p, lhs->lhs_varlen);
-			if (lhs->lhs_name == NULL)
-			    return FAIL;
-			rawname = lhs->lhs_name;
-			lhs->lhs_scriptvar_sid = import->imp_sid;
-			// TODO: where do we check this name is exported?
-
-			// Check if something follows: "exp.var[idx]" or
-			// "exp.var.key".
-			lhs->lhs_has_index = lhs->lhs_dest_end
-							  > skipwhite(var_end);
-		    }
-		    if (SCRIPT_ID_VALID(lhs->lhs_scriptvar_sid))
-		    {
-			// Check writable only when no index follows.
-			lhs->lhs_scriptvar_idx = get_script_item_idx(
-					       lhs->lhs_scriptvar_sid, rawname,
-			      lhs->lhs_has_index ? ASSIGN_FINAL : ASSIGN_CONST,
-								   cctx, NULL);
-			if (lhs->lhs_scriptvar_idx >= 0)
-			{
-			    scriptitem_T *si = SCRIPT_ITEM(
-						       lhs->lhs_scriptvar_sid);
-			    svar_T	 *sv =
-					    ((svar_T *)si->sn_var_vals.ga_data)
-						      + lhs->lhs_scriptvar_idx;
-			    lhs->lhs_type = sv->sv_type;
-			}
-		    }
-		}
-		else if (check_defined(var_start, lhs->lhs_varlen, cctx,
-							  NULL, FALSE) == FAIL)
-		    return FAIL;
+		lhs->lhs_lvar = &lhs->lhs_arg_lvar;
 	    }
 	}
 
-	if (declare_error)
+	if (lhs->lhs_lvar != NULL)
 	{
-	    vim9_declare_error(lhs->lhs_name);
+	    if (is_decl)
+	    {
+		// if we come here with what looks like an assignment like
+		// .= but which has been rejected by assignment_len() from
+		// may_compile_assignment give a better error message
+		char_u *p = skipwhite(lhs->lhs_end);
+		if (p[0] == '.' && p[1] == '=')
+		    emsg(_(e_dot_equal_not_supported_with_script_version_two));
+		else if (p[0] == ':')
+		    // type specified in a non-var assignment
+		    semsg(_(e_trailing_characters_str), p);
+		else
+		    semsg(_(e_variable_already_declared_str), lhs->lhs_name);
+		return FAIL;
+	    }
+	}
+	else if ((lhs->lhs_classmember_idx = cctx_class_member_idx(
+			cctx, var_start, lhs->lhs_varlen, &defcl)) >= 0)
+	{
+	    if (compile_lhs_class_variable(cctx, lhs, defcl, is_decl)
+		    == FAIL)
+		return FAIL;
+	}
+	else
+	{
+	    if (compile_lhs_script_var(cctx, lhs, var_start, var_end,
+			is_decl) == FAIL)
+		return FAIL;
+	}
+    }
+
+    if (declare_error)
+    {
+	vim9_declare_error(lhs->lhs_name);
+	return FAIL;
+    }
+
+    return OK;
+}
+
+/*
+ * When compiling a LHS variable name, for a class or an object, set the LHS
+ * member type.
+ */
+    static int
+compile_lhs_set_oc_member_type(
+    cctx_T	*cctx,
+    lhs_T	*lhs,
+    char_u	*var_start)
+{
+    class_T	*cl = lhs->lhs_type->tt_class;
+    int		is_object = lhs->lhs_type->tt_type == VAR_OBJECT;
+    char_u	*name = var_start + lhs->lhs_varlen + 1;
+    size_t	namelen = lhs->lhs_end - var_start - lhs->lhs_varlen - 1;
+
+    ocmember_T	*m = member_lookup(cl, lhs->lhs_type->tt_type,
+	    name, namelen, &lhs->lhs_member_idx);
+    if (m == NULL)
+    {
+	member_not_found_msg(cl, lhs->lhs_type->tt_type, name, namelen);
+	return FAIL;
+    }
+
+    if (IS_ENUM(cl))
+    {
+	if (!inside_class(cctx, cl))
+	{
+	    semsg(_(e_enumvalue_str_cannot_be_modified),
+		    cl->class_name, m->ocm_name);
 	    return FAIL;
 	}
+	if (lhs->lhs_type->tt_type == VAR_OBJECT &&
+		lhs->lhs_member_idx < 2)
+	{
+	    char *msg = lhs->lhs_member_idx == 0 ?
+		e_enum_str_name_cannot_be_modified :
+		e_enum_str_ordinal_cannot_be_modified;
+	    semsg(_(msg), cl->class_name);
+	    return FAIL;
+	}
+    }
+
+    // If it is private member variable, then accessing it outside the
+    // class is not allowed.
+    // If it is a read only class variable, then it can be modified
+    // only inside the class where it is defined.
+    if ((m->ocm_access != VIM_ACCESS_ALL) &&
+	    ((is_object && !inside_class(cctx, cl))
+	     || (!is_object && cctx->ctx_ufunc->uf_class != cl)))
+    {
+	char *msg = (m->ocm_access == VIM_ACCESS_PRIVATE)
+	    ? e_cannot_access_protected_variable_str
+	    : e_variable_is_not_writable_str;
+	emsg_var_cl_define(msg, m->ocm_name, 0, cl);
+	return FAIL;
+    }
+
+    if (!IS_CONSTRUCTOR_METHOD(cctx->ctx_ufunc)
+	    && oc_var_check_ro(cl, m))
+	return FAIL;
+
+    lhs->lhs_member_type = m->ocm_type;
+
+    return OK;
+}
+
+/*
+ * When compiling a LHS variable, set the LHS variable type.
+ */
+    static int
+compile_lhs_set_type(cctx_T *cctx, lhs_T *lhs, char_u *var_end, int is_decl)
+{
+    if (is_decl && *skipwhite(var_end) == ':')
+    {
+	char_u *p;
+
+	// parse optional type: "let var: type = expr"
+	if (VIM_ISWHITE(*var_end))
+	{
+	    semsg(_(e_no_white_space_allowed_before_colon_str), var_end);
+	    return FAIL;
+	}
+
+	if (!VIM_ISWHITE(var_end[1]))
+	{
+	    semsg(_(e_white_space_required_after_str_str), ":", var_end);
+	    return FAIL;
+	}
+
+	p = skipwhite(var_end + 1);
+	lhs->lhs_type = parse_type(&p, cctx->ctx_type_list, cctx->ctx_ufunc, cctx, TRUE);
+	if (lhs->lhs_type == NULL)
+	    return FAIL;
+
+	lhs->lhs_has_type = TRUE;
+	lhs->lhs_end = p;
+    }
+    else if (lhs->lhs_lvar != NULL)
+	lhs->lhs_type = lhs->lhs_lvar->lv_type;
+
+    return OK;
+}
+
+/*
+ * Returns TRUE if "lhs" is a concatenable string.
+ */
+    static int
+lhs_concatenable(lhs_T *lhs)
+{
+    return lhs->lhs_dest == dest_global
+		|| lhs->lhs_has_index
+		|| lhs->lhs_type->tt_type == VAR_STRING
+		|| lhs->lhs_type->tt_type == VAR_ANY;
+}
+
+/*
+ * Create a new local variable when compiling a LHS variable.
+ */
+    static int
+compile_lhs_new_local_var(
+    cctx_T	*cctx,
+    lhs_T	*lhs,
+    char_u	*var_start,
+    int		cmdidx,
+    int		oplen,
+    int		is_decl,
+    int		has_cmd,
+    int		heredoc)
+{
+    if (oplen > 1 && !heredoc)
+    {
+	// +=, /=, etc. require an existing variable
+	semsg(_(e_cannot_use_operator_on_new_variable_str), lhs->lhs_name);
+	return FAIL;
+    }
+
+    if (!is_decl || (lhs->lhs_has_index && !has_cmd
+					&& cctx->ctx_skip != SKIP_YES))
+    {
+	semsg(_(e_unknown_variable_str), lhs->lhs_name);
+	return FAIL;
+    }
+
+    // Check the name is valid for a funcref.
+    if (lhs->lhs_type->tt_type == VAR_FUNC
+				|| lhs->lhs_type->tt_type == VAR_PARTIAL)
+    {
+	if (var_wrong_func_name(lhs->lhs_name, TRUE))
+	    return FAIL;
+    }
+
+    // New local variable.
+    int assign;
+    switch (cmdidx)
+    {
+	case CMD_final:
+	    assign = ASSIGN_FINAL; break;
+	case CMD_const:
+	    assign = ASSIGN_CONST; break;
+	default:
+	    assign = ASSIGN_VAR; break;
+    }
+
+    lhs->lhs_lvar = reserve_local(cctx, var_start, lhs->lhs_varlen, assign,
+							lhs->lhs_type);
+    if (lhs->lhs_lvar == NULL)
+	return FAIL;
+
+    lhs->lhs_new_local = TRUE;
+
+    return OK;
+}
+
+/*
+ * When compiling a LHS variable name, set the LHS member type.
+ */
+    static int
+compile_lhs_set_member_type(
+    cctx_T	*cctx,
+    lhs_T	*lhs,
+    char_u	*var_start,
+    int		is_decl,
+    int		has_cmd)
+{
+    lhs->lhs_member_type = lhs->lhs_type;
+
+    if (!lhs->lhs_has_index)
+	return OK;
+
+    char_u	*after = var_start + lhs->lhs_varlen;
+    char_u	*p;
+
+    // Something follows after the variable: "var[idx]" or "var.key".
+    if (is_decl && cctx->ctx_skip != SKIP_YES)
+    {
+	if (has_cmd)
+	    emsg(_(e_cannot_use_index_when_declaring_variable));
+	else
+	    semsg(_(e_unknown_variable_str), lhs->lhs_name);
+	return FAIL;
+    }
+
+    // Now: var_start[lhs->lhs_varlen] is '[' or '.'
+    // Only the last index is used below, if there are others
+    // before it generate code for the expression.  Thus for
+    // "ll[1][2]" the expression is "ll[1]" and "[2]" is the index.
+    for (;;)
+    {
+	p = skip_index(after);
+	if (*p != '[' && *p != '.')
+	{
+	    lhs->lhs_varlen_total = p - var_start;
+	    break;
+	}
+	after = p;
+    }
+    if (after > var_start + lhs->lhs_varlen)
+    {
+	lhs->lhs_varlen = after - var_start;
+	lhs->lhs_dest = dest_expr;
+	// We don't know the type before evaluating the expression,
+	// use "any" until then.
+	lhs->lhs_type = &t_any;
+    }
+
+    int use_class = lhs->lhs_type != NULL
+	&& (lhs->lhs_type->tt_type == VAR_CLASS
+		|| lhs->lhs_type->tt_type == VAR_OBJECT);
+
+    if (lhs->lhs_type == NULL
+	    || (use_class ? lhs->lhs_type->tt_class == NULL
+		: lhs->lhs_type->tt_member == NULL))
+    {
+	lhs->lhs_member_type = &t_any;
+    }
+    else if (use_class)
+    {
+	// for an object or class member get the type of the member
+	if (compile_lhs_set_oc_member_type(cctx, lhs, var_start) == FAIL)
+	    return FAIL;
+    }
+    else
+	lhs->lhs_member_type = lhs->lhs_type->tt_member;
+
+    return OK;
+}
+
+/*
+ * Figure out the LHS type and other properties for an assignment or one item
+ * of ":unlet" with an index.
+ * Returns OK or FAIL.
+ */
+    int
+compile_lhs(
+	char_u	    *var_start,
+	lhs_T	    *lhs,
+	cmdidx_T    cmdidx,
+	int	    heredoc,
+	int	    has_cmd,	    // "var" before "var_start"
+	int	    oplen,
+	cctx_T	    *cctx)
+{
+    char_u	*var_end = NULL;
+    int		is_decl = is_decl_command(cmdidx);
+
+    if (lhs_init(lhs, var_start, is_decl, heredoc, &var_end) == FAIL)
+	return FAIL;
+
+    if (cctx->ctx_skip != SKIP_YES)
+    {
+	// compile the LHS destination
+	if (compile_lhs_var_dest(cctx, lhs, cmdidx, var_start, var_end,
+							is_decl) == FAIL)
+	    return FAIL;
     }
 
     // handle "a:name" as a name, not index "name" in "a"
@@ -1653,113 +2312,29 @@ compile_lhs(
 
     if (lhs->lhs_dest != dest_option && lhs->lhs_dest != dest_func_option)
     {
-	if (is_decl && *var_end == ':')
-	{
-	    char_u *p;
-
-	    // parse optional type: "let var: type = expr"
-	    if (!VIM_ISWHITE(var_end[1]))
-	    {
-		semsg(_(e_white_space_required_after_str_str), ":", var_end);
-		return FAIL;
-	    }
-	    p = skipwhite(var_end + 1);
-	    lhs->lhs_type = parse_type(&p, cctx->ctx_type_list, TRUE);
-	    if (lhs->lhs_type == NULL)
-		return FAIL;
-	    lhs->lhs_has_type = TRUE;
-	    lhs->lhs_end = p;
-	}
-	else if (lhs->lhs_lvar != NULL)
-	    lhs->lhs_type = lhs->lhs_lvar->lv_type;
+	// set the LHS variable type
+	if (compile_lhs_set_type(cctx, lhs, var_end, is_decl) == FAIL)
+	    return FAIL;
     }
 
-    if (oplen == 3 && !heredoc
-		   && lhs->lhs_dest != dest_global
-		   && !lhs->lhs_has_index
-		   && lhs->lhs_type->tt_type != VAR_STRING
-		   && lhs->lhs_type->tt_type != VAR_ANY)
+    if (oplen == 3 && !heredoc && !lhs_concatenable(lhs))
     {
 	emsg(_(e_can_only_concatenate_to_string));
 	return FAIL;
     }
 
     if (lhs->lhs_lvar == NULL && lhs->lhs_dest == dest_local
-						 && cctx->ctx_skip != SKIP_YES)
+						&& cctx->ctx_skip != SKIP_YES)
     {
-	if (oplen > 1 && !heredoc)
-	{
-	    // +=, /=, etc. require an existing variable
-	    semsg(_(e_cannot_use_operator_on_new_variable), lhs->lhs_name);
+	if (compile_lhs_new_local_var(cctx, lhs, var_start, cmdidx, oplen,
+					is_decl, has_cmd, heredoc) == FAIL)
 	    return FAIL;
-	}
-	if (!is_decl || (lhs->lhs_has_index && !has_cmd
-						&& cctx->ctx_skip != SKIP_YES))
-	{
-	    semsg(_(e_unknown_variable_str), lhs->lhs_name);
-	    return FAIL;
-	}
-
-	// Check the name is valid for a funcref.
-	if ((lhs->lhs_type->tt_type == VAR_FUNC
-				      || lhs->lhs_type->tt_type == VAR_PARTIAL)
-		&& var_wrong_func_name(lhs->lhs_name, TRUE))
-	    return FAIL;
-
-	// New local variable.
-	int assign = cmdidx == CMD_final ? ASSIGN_FINAL
-			     : cmdidx == CMD_const ? ASSIGN_CONST : ASSIGN_VAR;
-	lhs->lhs_lvar = reserve_local(cctx, var_start, lhs->lhs_varlen,
-							assign, lhs->lhs_type);
-	if (lhs->lhs_lvar == NULL)
-	    return FAIL;
-	lhs->lhs_new_local = TRUE;
     }
 
-    lhs->lhs_member_type = lhs->lhs_type;
-    if (lhs->lhs_has_index)
-    {
-	char_u	*after = var_start + lhs->lhs_varlen;
-	char_u	*p;
+    if (compile_lhs_set_member_type(cctx, lhs, var_start, is_decl, has_cmd)
+								== FAIL)
+	return FAIL;
 
-	// Something follows after the variable: "var[idx]" or "var.key".
-	if (is_decl && cctx->ctx_skip != SKIP_YES)
-	{
-	    if (has_cmd)
-		emsg(_(e_cannot_use_index_when_declaring_variable));
-	    else
-		semsg(_(e_unknown_variable_str), lhs->lhs_name);
-	    return FAIL;
-	}
-
-	// Now: var_start[lhs->lhs_varlen] is '[' or '.'
-	// Only the last index is used below, if there are others
-	// before it generate code for the expression.  Thus for
-	// "ll[1][2]" the expression is "ll[1]" and "[2]" is the index.
-	for (;;)
-	{
-	    p = skip_index(after);
-	    if (*p != '[' && *p != '.')
-	    {
-		lhs->lhs_varlen_total = p - var_start;
-		break;
-	    }
-	    after = p;
-	}
-	if (after > var_start + lhs->lhs_varlen)
-	{
-	    lhs->lhs_varlen = after - var_start;
-	    lhs->lhs_dest = dest_expr;
-	    // We don't know the type before evaluating the expression,
-	    // use "any" until then.
-	    lhs->lhs_type = &t_any;
-	}
-
-	if (lhs->lhs_type->tt_member == NULL)
-	    lhs->lhs_member_type = &t_any;
-	else
-	    lhs->lhs_member_type = lhs->lhs_type->tt_member;
-    }
     return OK;
 }
 
@@ -1783,14 +2358,14 @@ compile_assign_lhs(
 
     if (!lhs->lhs_has_index && lhs->lhs_lvar == &lhs->lhs_arg_lvar)
     {
-	semsg(_(e_cannot_assign_to_argument), lhs->lhs_name);
+	semsg(_(e_cannot_assign_to_argument_str), lhs->lhs_name);
 	return FAIL;
     }
     if (!is_decl && lhs->lhs_lvar != NULL
 			   && lhs->lhs_lvar->lv_const != ASSIGN_VAR
 			   && !lhs->lhs_has_index)
     {
-	semsg(_(e_cannot_assign_to_constant), lhs->lhs_name);
+	semsg(_(e_cannot_assign_to_constant_str), lhs->lhs_name);
 	return FAIL;
     }
     return OK;
@@ -1878,6 +2453,11 @@ compile_assign_index(
 	    r = FAIL;
 	}
     }
+    else if (lhs->lhs_member_idx >= 0)
+    {
+	// object member index
+	r = generate_PUSHNR(cctx, lhs->lhs_member_idx);
+    }
     else // if (*p == '.')
     {
 	char_u *key_end = to_name_end(p + 1, TRUE);
@@ -1903,13 +2483,13 @@ compile_load_lhs(
 	size_t	    varlen = lhs->lhs_varlen;
 	int	    c = var_start[varlen];
 	int	    lines_len = cctx->ctx_ufunc->uf_lines.ga_len;
-	char_u	    *p = var_start;
 	int	    res;
 
 	// Evaluate "ll[expr]" of "ll[expr][idx]".  End the line with a NUL and
 	// limit the lines array length to avoid skipping to a following line.
 	var_start[varlen] = NUL;
 	cctx->ctx_ufunc->uf_lines.ga_len = cctx->ctx_lnum + 1;
+	char_u *p = var_start;
 	res = compile_expr0(&p, cctx);
 	var_start[varlen] = c;
 	cctx->ctx_ufunc->uf_lines.ga_len = lines_len;
@@ -1923,17 +2503,34 @@ compile_load_lhs(
 
 	lhs->lhs_type = cctx->ctx_type_stack.ga_len == 0 ? &t_void
 						  : get_type_on_stack(cctx, 0);
-	// now we can properly check the type
-	if (rhs_type != NULL && lhs->lhs_type->tt_member != NULL
+
+	if (lhs->lhs_type->tt_type == VAR_CLASS
+		|| (lhs->lhs_type->tt_type == VAR_OBJECT
+		    && lhs->lhs_type != &t_object_any))
+	{
+	    // Check whether the class or object variable is modifiable
+	    if (!lhs_class_member_modifiable(lhs, var_start, cctx))
+		return FAIL;
+	}
+
+	// Now we can properly check the type.  The variable is indexed, thus
+	// we need the member type.  For a class or object we don't know the
+	// type yet, it depends on what member is used.
+	// The top item in the stack is the Dict, followed by the key and then
+	// the type of the value.
+	vartype_T vartype = lhs->lhs_type->tt_type;
+	type_T *member_type = lhs->lhs_type->tt_member;
+	if (rhs_type != NULL && member_type != NULL
+		&& vartype != VAR_OBJECT && vartype != VAR_CLASS
 		&& rhs_type != &t_void
-		&& need_type(rhs_type, lhs->lhs_type->tt_member, -2, 0, cctx,
-							 FALSE, FALSE) == FAIL)
+		&& need_type(rhs_type, member_type, FALSE,
+					    -3, 0, cctx, FALSE, FALSE) == FAIL)
 	    return FAIL;
+
+	return OK;
     }
-    else
-	generate_loadvar(cctx, lhs->lhs_dest, lhs->lhs_name,
-						 lhs->lhs_lvar, lhs->lhs_type);
-    return OK;
+
+    return generate_loadvar(cctx, lhs);
 }
 
 /*
@@ -1943,7 +2540,72 @@ compile_load_lhs(
     int
 compile_load_lhs_with_index(lhs_T *lhs, char_u *var_start, cctx_T *cctx)
 {
-    compile_load_lhs(lhs, var_start, NULL, cctx);
+    if (lhs->lhs_type->tt_type == VAR_OBJECT)
+    {
+	// "this.value": load "this" object and get the value at index for an
+	// object or class member get the type of the member.
+	// Also for "obj.value".
+	char_u *dot = vim_strchr(var_start, '.');
+	if (dot == NULL)
+	{
+	    semsg(_(e_missing_dot_after_object_str), lhs->lhs_name);
+	    return FAIL;
+	}
+
+	class_T	*cl = lhs->lhs_type->tt_class;
+	type_T	*type = oc_member_type(cl, TRUE, dot + 1,
+					  lhs->lhs_end, &lhs->lhs_member_idx);
+	if (lhs->lhs_member_idx < 0)
+	    return FAIL;
+
+	if (dot - var_start == 4 && STRNCMP(var_start, "this", 4) == 0)
+	{
+	    // load "this"
+	    lvar_T  *lvar = lhs->lhs_lvar;
+	    int	    rc;
+
+	    if (lvar->lv_from_outer > 0)
+		rc = generate_LOADOUTER(cctx, lvar->lv_idx,
+			lvar->lv_from_outer, lvar->lv_loop_depth,
+			lvar->lv_loop_idx, type);
+	    else
+		rc = generate_LOAD(cctx, ISN_LOAD, lvar->lv_idx, NULL, type);
+
+	    if (rc == FAIL)
+		return FAIL;
+	}
+	else
+	{
+	    // load object variable or argument
+	    if (compile_load_lhs(lhs, var_start, lhs->lhs_type, cctx) == FAIL)
+		return FAIL;
+	}
+	if (IS_INTERFACE(cl))
+	    return generate_GET_ITF_MEMBER(cctx, cl, lhs->lhs_member_idx, type);
+	return generate_GET_OBJ_MEMBER(cctx, lhs->lhs_member_idx, type);
+    }
+    else if (lhs->lhs_type->tt_type == VAR_CLASS)
+    {
+	// "<classname>.value": load class variable "classname.value"
+	char_u *dot = vim_strchr(var_start, '.');
+	if (dot == NULL)
+	{
+	    check_type_is_value(lhs->lhs_type);
+	    return FAIL;
+	}
+
+	class_T	*cl = lhs->lhs_type->tt_class;
+	ocmember_T *m = class_member_lookup(cl, dot + 1,
+						lhs->lhs_end - dot - 1,
+						&lhs->lhs_member_idx);
+	if (m == NULL)
+	    return FAIL;
+
+	return generate_CLASSMEMBER(cctx, TRUE, cl, lhs->lhs_member_idx);
+    }
+
+    if (compile_load_lhs(lhs, var_start, NULL, cctx) == FAIL)
+	return FAIL;
 
     if (lhs->lhs_has_index)
     {
@@ -1974,11 +2636,11 @@ compile_load_lhs_with_index(lhs_T *lhs, char_u *var_start, cctx_T *cctx)
  */
     int
 compile_assign_unlet(
-	char_u	*var_start,
-	lhs_T	*lhs,
-	int	is_assign,
-	type_T	*rhs_type,
-	cctx_T	*cctx)
+    char_u	*var_start,
+    lhs_T	*lhs,
+    int		is_assign,
+    type_T	*rhs_type,
+    cctx_T	*cctx)
 {
     vartype_T	dest_type;
     int		range = FALSE;
@@ -1990,11 +2652,14 @@ compile_assign_unlet(
 	    && lhs->lhs_type != &t_blob
 	    && lhs->lhs_type != &t_any)
     {
-	semsg(_(e_cannot_use_range_with_assignment_str), var_start);
+	if (lhs->lhs_type->tt_type == VAR_TUPLE)
+	    emsg(_(e_cannot_slice_tuple));
+	else
+	    semsg(_(e_cannot_use_range_with_assignment_str), var_start);
 	return FAIL;
     }
 
-    if (lhs->lhs_type == &t_any)
+    if (lhs->lhs_type == NULL || lhs->lhs_type == &t_any)
     {
 	// Index on variable of unknown type: check at runtime.
 	dest_type = VAR_ANY;
@@ -2004,11 +2669,11 @@ compile_assign_unlet(
 	dest_type = lhs->lhs_type->tt_type;
 	if (dest_type == VAR_DICT && range)
 	{
-	    emsg(e_cannot_use_range_with_dictionary);
+	    emsg(_(e_cannot_use_range_with_dictionary));
 	    return FAIL;
 	}
 	if (dest_type == VAR_DICT
-			      && may_generate_2STRING(-1, FALSE, cctx) == FAIL)
+		&& may_generate_2STRING(-1, TOSTRING_NONE, cctx) == FAIL)
 	    return FAIL;
 	if (dest_type == VAR_LIST || dest_type == VAR_BLOB)
 	{
@@ -2017,13 +2682,13 @@ compile_assign_unlet(
 	    if (range)
 	    {
 		type = get_type_on_stack(cctx, 1);
-		if (need_type(type, &t_number,
+		if (need_type(type, &t_number, FALSE,
 					    -2, 0, cctx, FALSE, FALSE) == FAIL)
 		return FAIL;
 	    }
 	    type = get_type_on_stack(cctx, 0);
 	    if ((dest_type != VAR_BLOB && type->tt_type != VAR_SPECIAL)
-		    && need_type(type, &t_number,
+		    && need_type(type, &t_number, FALSE,
 					    -1, 0, cctx, FALSE, FALSE) == FAIL)
 		return FAIL;
 	}
@@ -2032,7 +2697,7 @@ compile_assign_unlet(
     if (cctx->ctx_skip == SKIP_YES)
 	return OK;
 
-    // Load the dict or list.  On the stack we then have:
+    // Load the dict, list or object.  On the stack we then have:
     // - value (for assignment, not for :unlet)
     // - index
     // - for [a : b] second index
@@ -2040,8 +2705,12 @@ compile_assign_unlet(
     if (compile_load_lhs(lhs, var_start, rhs_type, cctx) == FAIL)
 	return FAIL;
 
-    if (dest_type == VAR_LIST || dest_type == VAR_DICT
-			      || dest_type == VAR_BLOB || dest_type == VAR_ANY)
+    if (dest_type == VAR_LIST
+	    || dest_type == VAR_DICT
+	    || dest_type == VAR_BLOB
+	    || dest_type == VAR_CLASS
+	    || dest_type == VAR_OBJECT
+	    || dest_type == VAR_ANY)
     {
 	if (is_assign)
 	{
@@ -2056,7 +2725,22 @@ compile_assign_unlet(
 
 		if (isn == NULL)
 		    return FAIL;
-		isn->isn_arg.vartype = dest_type;
+		isn->isn_arg.storeindex.si_vartype = dest_type;
+		isn->isn_arg.storeindex.si_class = NULL;
+
+		if (dest_type == VAR_OBJECT)
+		{
+		    class_T *cl = lhs->lhs_type->tt_class;
+
+		    if (IS_INTERFACE(cl))
+		    {
+			// "this.value": load "this" object and get the value
+			// at index for an object or class member get the type
+			// of the member
+			isn->isn_arg.storeindex.si_class = cl;
+			++cl->class_refcount;
+		    }
+		}
 	    }
 	}
 	else if (range)
@@ -2072,8 +2756,909 @@ compile_assign_unlet(
     }
     else
     {
-	emsg(_(e_indexable_type_required));
+	if (dest_type == VAR_TUPLE)
+	    emsg(_(e_tuple_is_immutable));
+	else
+	    emsg(_(e_indexable_type_required));
 	return FAIL;
+    }
+
+    return OK;
+}
+
+/*
+ * Generate an instruction to push the default value for "vartype".
+ * if "dest_local" is TRUE then for some types no instruction is generated.
+ * "skip_store" is set to TRUE if no PUSH instruction is generated.
+ * Returns OK or FAIL.
+ */
+    static int
+push_default_value(
+	cctx_T	    *cctx,
+	vartype_T   vartype,
+	int	    dest_is_local,
+	int	    *skip_store)
+{
+    int r = OK;
+
+    switch (vartype)
+    {
+	case VAR_BOOL:
+	    r = generate_PUSHBOOL(cctx, VVAL_FALSE);
+	    break;
+	case VAR_FLOAT:
+	    r = generate_PUSHF(cctx, 0.0);
+	    break;
+	case VAR_STRING:
+	    r = generate_PUSHS(cctx, NULL);
+	    break;
+	case VAR_BLOB:
+	    r = generate_PUSHBLOB(cctx, blob_alloc());
+	    break;
+	case VAR_FUNC:
+	    r = generate_PUSHFUNC(cctx, NULL, &t_func_void, TRUE);
+	    break;
+	case VAR_LIST:
+	    r = generate_NEWLIST(cctx, 0, FALSE);
+	    break;
+	case VAR_TUPLE:
+	    r = generate_NEWTUPLE(cctx, 0, FALSE);
+	    break;
+	case VAR_DICT:
+	    r = generate_NEWDICT(cctx, 0, FALSE);
+	    break;
+	case VAR_JOB:
+	    r = generate_PUSHJOB(cctx);
+	    break;
+	case VAR_CHANNEL:
+	    r = generate_PUSHCHANNEL(cctx);
+	    break;
+	case VAR_OBJECT:
+	    r = generate_PUSHOBJ(cctx);
+	    break;
+	case VAR_NUMBER:
+	case VAR_UNKNOWN:
+	case VAR_ANY:
+	case VAR_PARTIAL:
+	case VAR_VOID:
+	case VAR_INSTR:
+	case VAR_CLASS:
+	case VAR_TYPEALIAS:
+	case VAR_SPECIAL:  // cannot happen
+	    // This is skipped for local variables, they are always
+	    // initialized to zero.  But in a "for" or "while" loop
+	    // the value may have been changed.
+	    if (dest_is_local && !inside_loop_scope(cctx))
+		*skip_store = TRUE;
+	    else
+		r = generate_PUSHNR(cctx, 0);
+	    break;
+    }
+    return r;
+}
+
+/*
+ * Compile assignment context.  Used when compiling an assignment statement.
+ */
+typedef struct cac_S cac_T;
+struct cac_S
+{
+    cmdidx_T	cac_cmdidx;		// assignment command
+    char_u	*cac_nextc;		// next character to parse
+    lhs_T	cac_lhs;		// lhs of the assignment
+    type_T	*cac_rhs_type;		// rhs type of an assignment
+    char_u	*cac_op;		// assignment operator
+    int		cac_oplen;		// assignment operator length
+    char_u	*cac_var_start;		// start of the variable names
+    char_u	*cac_var_end;		// end of the variable names
+    int		cac_var_count;		// number of variables in assignment
+    int		cac_var_idx;		// variable index in a list
+    int		cac_semicolon;		// semicolon in [var1, var2; var3]
+    garray_T	*cac_instr;
+    int		cac_instr_count;
+    int		cac_incdec;
+    int		cac_did_generate_slice;
+    int		cac_is_decl;
+    int		cac_is_const;
+    int		cac_start_lnum;
+    type_T	*cac_inferred_type;
+    int		cac_skip_store;
+};
+
+/*
+ * Initialize the compile assignment context.
+ */
+    static void
+compile_assign_context_init(cac_T *cac, cctx_T *cctx, int cmdidx, char_u *arg)
+{
+    CLEAR_FIELD(*cac);
+    cac->cac_cmdidx = cmdidx;
+    cac->cac_instr = &cctx->ctx_instr;
+    cac->cac_rhs_type = &t_any;
+    cac->cac_is_decl = is_decl_command(cmdidx);
+    cac->cac_start_lnum = SOURCING_LNUM;
+    cac->cac_instr_count = -1;
+    cac->cac_var_end = arg;
+}
+
+/*
+ * Compile an object member variable assignment in the arguments passed to a
+ * class new() method.
+ *
+ * Instruction format:
+ *
+ *	ifargisset <n> this.<varname> = <value>
+ *
+ * where <n> is the index of the default argument.
+ *
+ * Generates the ISN_JUMP_IF_ARG_NOT_SET instruction to skip the assignment if
+ * the value is passed as an argument to the new() method call.
+ *
+ * Returns OK on success.
+ */
+    static int
+compile_assign_obj_new_arg(char_u **argp, cctx_T *cctx)
+{
+    char_u *arg = *argp;
+
+    arg += 11;	    // skip "ifargisset"
+    int def_arg_idx = getdigits(&arg);
+    arg = skipwhite(arg);
+
+    // Use a JUMP_IF_ARG_NOT_SET instruction to skip if the value was not
+    // given and the default value is "v:none".
+    int stack_offset = STACK_FRAME_SIZE +
+				(cctx->ctx_ufunc->uf_va_name != NULL ? 1 : 0);
+    int def_arg_count = cctx->ctx_ufunc->uf_def_args.ga_len;
+    int arg_offset = def_arg_idx - def_arg_count - stack_offset;
+
+    if (generate_JUMP_IF_ARG(cctx, ISN_JUMP_IF_ARG_NOT_SET,
+			     arg_offset) == FAIL)
+	return FAIL;
+
+    *argp = arg;
+    return OK;
+}
+
+/*
+ * Translate the increment (++) and decrement (--) operators to the
+ * corresponding compound operators (+= or -=).
+ *
+ * Returns OK on success and FAIL on syntax error.
+ */
+    static int
+translate_incdec_op(exarg_T *eap, cac_T *cac)
+{
+    if (VIM_ISWHITE(eap->cmd[2]))
+    {
+	semsg(_(e_no_white_space_allowed_after_str_str),
+		eap->cmdidx == CMD_increment ? "++" : "--", eap->cmd);
+	return FAIL;
+    }
+    cac->cac_op = (char_u *)(eap->cmdidx == CMD_increment ? "+=" : "-=");
+    cac->cac_oplen = 2;
+    cac->cac_incdec = TRUE;
+
+    return OK;
+}
+
+/*
+ * Process the operator in an assignment statement.
+ */
+    static int
+compile_assign_process_operator(
+    exarg_T	*eap,
+    char_u	*arg,
+    cac_T	*cac,
+    int		*heredoc,
+    char_u	**retstr)
+{
+    *retstr = NULL;
+
+    if (eap->cmdidx == CMD_increment || eap->cmdidx == CMD_decrement)
+	// Change an unary operator to a compound operator
+	return translate_incdec_op(eap, cac);
+
+    char_u *sp = cac->cac_nextc;
+    cac->cac_nextc = skipwhite(cac->cac_nextc);
+    cac->cac_op = cac->cac_nextc;
+    cac->cac_oplen = assignment_len(cac->cac_nextc, heredoc);
+
+    if (cac->cac_var_count > 0 && cac->cac_oplen == 0)
+    {
+	// can be something like "[1, 2]->func()"
+	*retstr = arg;
+	return FAIL;
+    }
+
+    // need white space before and after the operator
+    if (cac->cac_oplen > 0 && (!VIM_ISWHITE(*sp)
+		|| !IS_WHITE_OR_NUL(cac->cac_op[cac->cac_oplen])))
+    {
+	error_white_both(cac->cac_op, cac->cac_oplen);
+	return FAIL;
+    }
+
+    return OK;
+}
+
+/*
+ * Find the start of an assignment statement.
+ */
+    static char_u *
+compile_assign_compute_start(char_u *arg, int var_count)
+{
+    if (var_count > 0)
+	// [var1, var2] = [val1, val2]
+	// skip over the "["
+	return skipwhite(arg + 1);
+
+    return arg;
+}
+
+/*
+ * Parse a heredoc assignment starting at "p".  Returns a pointer to the
+ * beginning of the heredoc content.
+ */
+    static char_u *
+parse_heredoc_assignment(exarg_T *eap, cctx_T *cctx, cac_T *cac)
+{
+    // [let] varname =<< [trim] {end}
+    eap->ea_getline = exarg_getline;
+    eap->cookie = cctx;
+
+    list_T *l = heredoc_get(eap, cac->cac_nextc + 3, FALSE, TRUE);
+    if (l == NULL)
+	return NULL;
+
+    list_free(l);
+    cac->cac_nextc += STRLEN(cac->cac_nextc);
+
+    return cac->cac_nextc;
+}
+
+/*
+ * Check the type of a RHS expression in a list assignment statement.
+ * The RHS expression is already compiled.  So the type is on the stack.
+ */
+    static int
+compile_assign_list_check_rhs_type(cctx_T *cctx, cac_T *cac)
+{
+    type_T	*stacktype;
+
+    stacktype = cctx->ctx_type_stack.ga_len == 0 ? &t_void
+						: get_type_on_stack(cctx, 0);
+    if (stacktype->tt_type == VAR_VOID)
+    {
+	emsg(_(e_cannot_use_void_value));
+	return FAIL;
+    }
+
+    if (stacktype->tt_type != VAR_LIST && stacktype->tt_type != VAR_TUPLE
+					&& stacktype->tt_type != VAR_ANY)
+    {
+	emsg(_(e_list_or_tuple_required));
+	return FAIL;
+    }
+
+    if (need_type(stacktype,
+		  stacktype->tt_type == VAR_TUPLE ? &t_tuple_any : &t_list_any,
+		  FALSE, -1, 0, cctx, FALSE, FALSE) == FAIL)
+	return FAIL;
+
+    if (stacktype->tt_type == VAR_TUPLE)
+    {
+	if (stacktype->tt_argcount != 1)
+	    cac->cac_rhs_type = &t_any;
+	else
+	{
+	    if (stacktype->tt_flags & TTFLAG_VARARGS)
+		cac->cac_rhs_type = stacktype->tt_args[0]->tt_member;
+	    else
+		cac->cac_rhs_type = stacktype->tt_args[0];
+	}
+    }
+    else if (stacktype->tt_member != NULL)
+	cac->cac_rhs_type = stacktype->tt_member;
+
+    return OK;
+}
+
+/*
+ * In a list assignment statement, if a constant list was used, check the
+ * length.  Returns OK if the length check succeeds.  Returns FAIL otherwise.
+ */
+    static int
+compile_assign_list_check_length(cctx_T *cctx, cac_T *cac)
+{
+    int	needed_list_len;
+    int	did_check = FALSE;
+
+    needed_list_len = cac->cac_semicolon
+				? cac->cac_var_count - 1
+				: cac->cac_var_count;
+    if (cac->cac_instr->ga_len > 0)
+    {
+	isn_T	*isn = ((isn_T *)cac->cac_instr->ga_data) +
+						cac->cac_instr->ga_len - 1;
+
+	if (isn->isn_type == ISN_NEWLIST || isn->isn_type == ISN_NEWTUPLE)
+	{
+	    did_check = TRUE;
+	    if (cac->cac_semicolon ?
+			isn->isn_arg.number < needed_list_len
+			: isn->isn_arg.number != needed_list_len)
+	    {
+		semsg(_(e_expected_nr_items_but_got_nr),
+			needed_list_len, (int)isn->isn_arg.number);
+		return FAIL;
+	    }
+	}
+    }
+
+    if (!did_check)
+	generate_CHECKLEN(cctx, needed_list_len, cac->cac_semicolon);
+
+    return OK;
+}
+
+/*
+ * Evaluate the expression for "[var, var] = expr" assignment.
+ * A line break may follow the assignment operator "=".
+ */
+    static char_u *
+compile_assign_list_expr(cctx_T *cctx, cac_T *cac)
+{
+    char_u *whitep;
+
+    whitep = cac->cac_op + cac->cac_oplen;
+
+    if (may_get_next_line_error(whitep, &cac->cac_nextc, cctx) == FAIL)
+	return NULL;
+
+    // compile RHS expression
+    if (compile_expr0(&cac->cac_nextc, cctx) == FAIL)
+	return NULL;
+
+    if (cctx->ctx_skip == SKIP_YES)
+	// no need to parse more when skipping
+	return cac->cac_nextc;
+
+    if (compile_assign_list_check_rhs_type(cctx, cac) == FAIL)
+	return NULL;
+
+    // If a constant list was used we can check the length right here.
+    if (compile_assign_list_check_length(cctx, cac) == FAIL)
+	return FAIL;
+
+    return cac->cac_nextc;
+}
+
+/*
+ * Find and return the end of a heredoc or a list of variables assignment
+ * statement.  For a single variable assignment statement, returns the current
+ * end.
+ * Returns NULL on failure.
+ */
+    static char_u *
+compile_assign_compute_end(
+    exarg_T	*eap,
+    cctx_T	*cctx,
+    cac_T	*cac,
+    int		heredoc)
+{
+    if (heredoc)
+    {
+	cac->cac_nextc = parse_heredoc_assignment(eap, cctx, cac);
+	return cac->cac_nextc;
+    }
+
+    if (cac->cac_var_count > 0)
+    {
+	// for "[var, var] = expr" evaluate the expression. The list of
+	// variables are processed later.
+	// A line break may follow the "=".
+	cac->cac_nextc = compile_assign_list_expr(cctx, cac);
+	return cac->cac_nextc;
+    }
+
+    return cac->cac_var_end;
+}
+
+/*
+ * For "var = expr" evaluate the expression.
+ */
+    static int
+compile_assign_single_eval_expr(cctx_T *cctx, cac_T *cac)
+{
+    int		ret = OK;
+    char_u	*whitep;
+    lhs_T	*lhs = &cac->cac_lhs;
+
+    // Compile the expression.
+    if (cac->cac_incdec)
+	return generate_PUSHNR(cctx, 1);
+
+    // Temporarily hide the new local variable here, it is
+    // not available to this expression.
+    if (lhs->lhs_new_local)
+	--cctx->ctx_locals.ga_len;
+    whitep = cac->cac_op + cac->cac_oplen;
+
+    if (may_get_next_line_error(whitep, &cac->cac_nextc, cctx) == FAIL)
+    {
+	if (lhs->lhs_new_local)
+	    ++cctx->ctx_locals.ga_len;
+	return FAIL;
+    }
+
+    ret = compile_expr0_ext(&cac->cac_nextc, cctx, &cac->cac_is_const);
+    if (lhs->lhs_new_local)
+	++cctx->ctx_locals.ga_len;
+
+    return ret;
+}
+
+/*
+ * When compiling an assignment, set the LHS type to the RHS type.
+ */
+    static int
+compile_assign_set_lhs_type_from_rhs(
+    cctx_T	*cctx,
+    cac_T	*cac,
+    lhs_T	*lhs,
+    type_T	*rhs_type)
+{
+    if (rhs_type->tt_type == VAR_VOID)
+    {
+	emsg(_(e_cannot_use_void_value));
+	return FAIL;
+    }
+
+    type_T *type;
+
+    // An empty list or dict has a &t_unknown member, for a variable that
+    // implies &t_any.
+    if (rhs_type == &t_list_empty)
+	type = &t_list_any;
+    else if (rhs_type == &t_dict_empty)
+	type = &t_dict_any;
+    else if (rhs_type == &t_unknown)
+	type = &t_any;
+    else
+    {
+	type = rhs_type;
+	cac->cac_inferred_type = rhs_type;
+    }
+
+    set_var_type(lhs->lhs_lvar, type, cctx);
+
+    return OK;
+}
+
+/*
+ * Returns TRUE if the "rhs_type" can be assigned to the "lhs" variable.
+ * Used when compiling an assignment statement.
+ */
+    static int
+compile_assign_valid_rhs_type(
+    cctx_T	*cctx,
+    cac_T	*cac,
+    lhs_T	*lhs,
+    type_T	*rhs_type)
+{
+    type_T	*use_type = lhs->lhs_lvar->lv_type;
+    where_T	where = WHERE_INIT;
+
+    // Without operator check type here, otherwise below.
+    // Use the line number of the assignment.
+    SOURCING_LNUM = cac->cac_start_lnum;
+    if (cac->cac_var_count > 0)
+    {
+	where.wt_index = cac->cac_var_idx + 1;
+	where.wt_kind = WT_VARIABLE;
+    }
+
+    // If assigning to a list or dict member, use the member type.
+    // Not for "list[:] =".
+    if (lhs->lhs_has_index &&
+	    !has_list_index(cac->cac_var_start + lhs->lhs_varlen, cctx))
+	use_type = lhs->lhs_member_type;
+
+    if (need_type_where(rhs_type, use_type, FALSE, -1, where, cctx, FALSE,
+						cac->cac_is_const) == FAIL)
+	return FALSE;
+
+    return TRUE;
+}
+
+/*
+ * Compare the LHS type with the RHS type in an assignment.
+ */
+    static int
+compile_assign_check_type(cctx_T *cctx, cac_T *cac)
+{
+    lhs_T	*lhs = &cac->cac_lhs;
+    type_T	*rhs_type;
+
+    rhs_type = cctx->ctx_type_stack.ga_len == 0
+					? &t_void
+					: get_type_on_stack(cctx, 0);
+    cac->cac_rhs_type = rhs_type;
+
+    if (check_type_is_value(rhs_type) == FAIL)
+	return FAIL;
+
+    if (lhs->lhs_lvar != NULL && (cac->cac_is_decl || !lhs->lhs_has_type))
+    {
+	if (rhs_type->tt_type == VAR_FUNC
+					|| rhs_type->tt_type == VAR_PARTIAL)
+	{
+	    // Make sure the variable name can be used as a funcref
+	    if (!lhs->lhs_has_index
+				&& var_wrong_func_name(lhs->lhs_name, TRUE))
+		return FAIL;
+	}
+
+	if (lhs->lhs_new_local && !lhs->lhs_has_type)
+	{
+	    // The LHS variable doesn't have a type.  Set it to the RHS type.
+	    if (compile_assign_set_lhs_type_from_rhs(cctx, cac, lhs, rhs_type)
+								== FAIL)
+		return FAIL;
+	}
+	else if (*cac->cac_op == '=')
+	{
+	    if (!compile_assign_valid_rhs_type(cctx, cac, lhs, rhs_type))
+		return FAIL;
+	}
+    }
+    else
+    {
+	// Assigning to a register using @r = "abc"
+
+	type_T *lhs_type = lhs->lhs_member_type;
+
+	// Special case: assigning to @# can use a number or a string.
+	// Also: can assign a number to a float.
+	if ((lhs_type == &t_number_or_string || lhs_type == &t_float)
+					&& rhs_type->tt_type == VAR_NUMBER)
+	    lhs_type = &t_number;
+
+	if (*cac->cac_nextc != '=')
+	{
+	    if (need_type(rhs_type, lhs_type, FALSE, -1, 0, cctx, FALSE,
+							FALSE) == FAIL)
+		return FAIL;
+	}
+    }
+
+    return OK;
+}
+
+/*
+ * Compile the RHS expression in an assignment statement and generate the
+ * instructions.
+ */
+    static int
+compile_assign_rhs_expr(cctx_T *cctx, cac_T *cac)
+{
+    cac->cac_is_const = FALSE;
+
+    // for "+=", "*=", "..=" etc. first load the current value
+    if (*cac->cac_op != '='
+	    && compile_load_lhs_with_index(&cac->cac_lhs, cac->cac_var_start,
+								cctx) == FAIL)
+	return FAIL;
+
+    // For "var = expr" evaluate the expression.
+    if (cac->cac_var_count == 0)
+    {
+	int	ret;
+
+	// Compile the expression.
+	cac->cac_instr_count = cac->cac_instr->ga_len;
+	ret = compile_assign_single_eval_expr(cctx, cac);
+	if (ret == FAIL)
+	    return FAIL;
+    }
+    else if (cac->cac_semicolon && cac->cac_var_idx == cac->cac_var_count - 1)
+    {
+	// For "[var; var] = expr" get the rest of the list
+	cac->cac_did_generate_slice = TRUE;
+	if (generate_SLICE(cctx, cac->cac_var_count - 1) == FAIL)
+	    return FAIL;
+    }
+    else
+    {
+	// For "[var, var] = expr" get the "var_idx" item from the
+	// list.
+	int with_op = *cac->cac_op != '=';
+	if (generate_GETITEM(cctx, cac->cac_var_idx, with_op) == FAIL)
+	    return FAIL;
+    }
+
+    if (compile_assign_check_type(cctx, cac) == FAIL)
+	return FAIL;
+
+    return OK;
+}
+
+/*
+ * Compile the RHS expression in an assignment
+ */
+    static int
+compile_assign_rhs(cctx_T *cctx, cac_T *cac)
+{
+    lhs_T	*lhs = &cac->cac_lhs;
+
+    if (cctx->ctx_skip == SKIP_YES)
+    {
+	if (cac->cac_oplen > 0 && cac->cac_var_count == 0)
+	{
+	    // skip over the "=" and the expression
+	    cac->cac_nextc = skipwhite(cac->cac_op + cac->cac_oplen);
+	    (void)compile_expr0(&cac->cac_nextc, cctx);
+	}
+	return OK;
+    }
+
+    // If RHS is specified, then generate instructions for RHS expression
+    if (cac->cac_oplen > 0)
+	return compile_assign_rhs_expr(cctx, cac);
+
+    if (cac->cac_cmdidx == CMD_final)
+    {
+	emsg(_(e_final_requires_a_value));
+	return FAIL;
+    }
+
+    if (cac->cac_cmdidx == CMD_const)
+    {
+	emsg(_(e_const_requires_a_value));
+	return FAIL;
+    }
+
+    if (!lhs->lhs_has_type || lhs->lhs_dest == dest_option
+					|| lhs->lhs_dest == dest_func_option)
+    {
+	emsg(_(e_type_or_initialization_required));
+	return FAIL;
+    }
+
+    // variables are always initialized
+    if (GA_GROW_FAILS(cac->cac_instr, 1))
+	return FAIL;
+
+    cac->cac_instr_count = cac->cac_instr->ga_len;
+
+    return push_default_value(cctx, lhs->lhs_member_type->tt_type,
+			      lhs->lhs_dest == dest_local,
+			      &cac->cac_skip_store);
+}
+
+/*
+ * Compile a compound op assignment statement (+=, -=, *=, %=, etc.)
+ */
+    static int
+compile_assign_compound_op(cctx_T *cctx, cac_T *cac)
+{
+    lhs_T	    *lhs = &cac->cac_lhs;
+    type_T	    *expected;
+    type_T	    *stacktype = NULL;
+
+    if (cac->cac_lhs.lhs_type->tt_type == VAR_TUPLE)
+    {
+	// compound operators are not supported with a tuple
+	char_u	op[2];
+
+	op[0] = *cac->cac_op;
+	op[1] = NUL;
+	semsg(_(e_wrong_variable_type_for_str_equal), op);
+	return FAIL;
+    }
+
+    if (*cac->cac_op == '.')
+    {
+	expected = lhs->lhs_member_type;
+	stacktype = get_type_on_stack(cctx, 0);
+	if (expected != &t_string
+		&& need_type(stacktype, expected, FALSE, -1, 0, cctx,
+					FALSE, FALSE) == FAIL)
+	    return FAIL;
+	else if (may_generate_2STRING(-1, TOSTRING_NONE, cctx) == FAIL)
+	    return FAIL;
+    }
+    else
+    {
+	expected = lhs->lhs_member_type;
+	stacktype = get_type_on_stack(cctx, 0);
+	if (
+		// If variable is float operation with number is OK.
+		!(expected == &t_float && (stacktype == &t_number
+					|| stacktype == &t_number_bool))
+		&& need_type(stacktype, expected, TRUE, -1, 0, cctx,
+					FALSE, FALSE) == FAIL)
+	    return FAIL;
+    }
+
+    if (*cac->cac_op == '.')
+    {
+	if (generate_CONCAT(cctx, 2) == FAIL)
+	    return FAIL;
+    }
+    else if (*cac->cac_op == '+')
+    {
+	if (generate_add_instr(cctx,
+		    operator_type(lhs->lhs_member_type, stacktype),
+		    lhs->lhs_member_type, stacktype,
+		    EXPR_APPEND) == FAIL)
+	    return FAIL;
+    }
+    else if (generate_two_op(cctx, cac->cac_op) == FAIL)
+	return FAIL;
+
+    return OK;
+}
+
+/*
+ * Generate the STORE and SETTYPE instructions for an assignment statement.
+ */
+    static int
+compile_assign_generate_store(cctx_T *cctx, cac_T *cac)
+{
+    lhs_T	*lhs = &cac->cac_lhs;
+    int		save_lnum;
+
+    // Use the line number of the assignment for store instruction.
+    save_lnum = cctx->ctx_lnum;
+    cctx->ctx_lnum = cac->cac_start_lnum - 1;
+
+    if (lhs->lhs_has_index)
+    {
+	// Use the info in "lhs" to store the value at the index in the
+	// list, dict or object.
+	if (compile_assign_unlet(cac->cac_var_start, &cac->cac_lhs,
+				 TRUE, cac->cac_rhs_type, cctx) == FAIL)
+	{
+	    cctx->ctx_lnum = save_lnum;
+	    return FAIL;
+	}
+    }
+    else
+    {
+	if (cac->cac_is_decl && cac->cac_cmdidx == CMD_const &&
+			(lhs->lhs_dest == dest_script
+			 || lhs->lhs_dest == dest_script_v9
+			 || lhs->lhs_dest == dest_global
+			 || lhs->lhs_dest == dest_local))
+	    // ":const var": lock the value, but not referenced variables
+	    generate_LOCKCONST(cctx);
+
+	type_T	*inferred_type = cac->cac_inferred_type;
+
+	if ((lhs->lhs_type->tt_type == VAR_DICT
+		    || lhs->lhs_type->tt_type == VAR_LIST)
+		&& lhs->lhs_type->tt_member != NULL
+		&& lhs->lhs_type->tt_member != &t_any
+		&& lhs->lhs_type->tt_member != &t_unknown)
+	    // Set the type in the list or dict, so that it can be
+	    // checked, also in legacy script.
+	    generate_SETTYPE(cctx, lhs->lhs_type);
+	else if (lhs->lhs_type->tt_type == VAR_TUPLE
+					&& lhs->lhs_type->tt_argcount != 0)
+	    generate_SETTYPE(cctx, lhs->lhs_type);
+	else if (inferred_type != NULL
+		&& (inferred_type->tt_type == VAR_DICT
+		    || inferred_type->tt_type == VAR_LIST)
+		&& inferred_type->tt_member != NULL
+		&& inferred_type->tt_member != &t_unknown
+		&& inferred_type->tt_member != &t_any)
+	    // Set the type in the list or dict, so that it can be
+	    // checked, also in legacy script.
+	    generate_SETTYPE(cctx, inferred_type);
+	else if (inferred_type != NULL
+				&& inferred_type->tt_type == VAR_TUPLE
+				&& inferred_type->tt_argcount > 0)
+	    generate_SETTYPE(cctx, inferred_type);
+
+	if (!cac->cac_skip_store &&
+		generate_store_lhs(cctx, &cac->cac_lhs,
+				   cac->cac_instr_count,
+				   cac->cac_is_decl) == FAIL)
+	{
+	    cctx->ctx_lnum = save_lnum;
+	    return FAIL;
+	}
+    }
+
+    cctx->ctx_lnum = save_lnum;
+
+    return OK;
+}
+
+/*
+ * Process the variable(s) in an assignment statement
+ */
+    static int
+compile_assign_process_variables(
+    cctx_T	*cctx,
+    cac_T	*cac,
+    int		cmdidx,
+    int		heredoc,
+    int		has_cmd,
+    int		has_argisset_prefix,
+    int		jump_instr_idx)
+{
+    /*
+     * Loop over variables in "[var, var] = expr".
+     * For "name = expr" and "var name: type" this is done only once.
+     */
+    for (cac->cac_var_idx = 0; cac->cac_var_idx == 0 ||
+	    cac->cac_var_idx < cac->cac_var_count; cac->cac_var_idx++)
+    {
+	if (cac->cac_var_start[0] == '_'
+				&& !eval_isnamec(cac->cac_var_start[1]))
+	{
+	    // Ignore underscore in "[a, _, b] = list".
+	    if (cac->cac_var_count > 0)
+	    {
+		cac->cac_var_start = skipwhite(cac->cac_var_start + 2);
+		continue;
+	    }
+	    emsg(_(e_cannot_use_underscore_here));
+	    return FAIL;
+	}
+	vim_free(cac->cac_lhs.lhs_name);
+
+	/*
+	 * Figure out the LHS type and other properties.
+	 */
+	if (compile_assign_lhs(cac->cac_var_start, &cac->cac_lhs, cmdidx,
+		    cac->cac_is_decl, heredoc, has_cmd,
+		    cac->cac_oplen, cctx) == FAIL)
+	    return FAIL;
+
+	// Compile the RHS expression
+	if (heredoc)
+	{
+	    SOURCING_LNUM = cac->cac_start_lnum;
+	    if (cac->cac_lhs.lhs_has_type
+		    && need_type(&t_list_string, cac->cac_lhs.lhs_type,
+			FALSE, -1, 0, cctx, FALSE, FALSE) == FAIL)
+		return FAIL;
+	}
+	else
+	{
+	    if (compile_assign_rhs(cctx, cac) == FAIL)
+		return FAIL;
+	    if (cac->cac_var_count == 0)
+		cac->cac_var_end = cac->cac_nextc;
+	}
+
+	// no need to parse more when skipping
+	if (cctx->ctx_skip == SKIP_YES)
+	    break;
+
+	if (cac->cac_oplen > 0 && *cac->cac_op != '=')
+	{
+	    if (compile_assign_compound_op(cctx, cac) == FAIL)
+		return FAIL;
+	}
+
+	// generate the store instructions
+	if (compile_assign_generate_store(cctx, cac) == FAIL)
+	    return FAIL;
+
+	if (cac->cac_var_idx + 1 < cac->cac_var_count)
+	    cac->cac_var_start = skipwhite(cac->cac_lhs.lhs_end + 1);
+
+	if (has_argisset_prefix)
+	{
+	    // set instruction index in JUMP_IF_ARG_SET to here
+	    isn_T *isn = ((isn_T *)cac->cac_instr->ga_data) + jump_instr_idx;
+	    isn->isn_arg.jumparg.jump_where = cac->cac_instr->ga_len;
+	}
     }
 
     return OK;
@@ -2092,510 +3677,68 @@ compile_assign_unlet(
  * Return "arg" if it does not look like a variable list.
  */
     static char_u *
-compile_assignment(char_u *arg, exarg_T *eap, cmdidx_T cmdidx, cctx_T *cctx)
+compile_assignment(
+    char_u	*arg_start,
+    exarg_T	*eap,
+    cmdidx_T	cmdidx,
+    cctx_T	*cctx)
 {
-    char_u	*var_start;
-    char_u	*p;
-    char_u	*end = arg;
-    char_u	*ret = NULL;
-    int		var_count = 0;
-    int		var_idx;
-    int		semicolon = 0;
-    int		did_generate_slice = FALSE;
-    garray_T	*instr = &cctx->ctx_instr;
-    char_u	*op;
-    int		oplen = 0;
+    cac_T	cac;
+    char_u	*arg = arg_start;
+    char_u	*retstr = NULL;
     int		heredoc = FALSE;
-    int		incdec = FALSE;
-    type_T	*rhs_type = &t_any;
-    char_u	*sp;
-    int		is_decl = is_decl_command(cmdidx);
-    lhs_T	lhs;
-    long	start_lnum = SOURCING_LNUM;
+    int		jump_instr_idx;
+
+    compile_assign_context_init(&cac, cctx, cmdidx, arg);
+
+    jump_instr_idx = cac.cac_instr->ga_len;
+
+    // process object variable initialization in a new() constructor method
+    int	has_argisset_prefix = STRNCMP(arg, "ifargisset ", 11) == 0;
+    if (has_argisset_prefix &&
+			compile_assign_obj_new_arg(&arg, cctx) == FAIL)
+	goto theend;
 
     // Skip over the "varname" or "[varname, varname]" to get to any "=".
-    p = skip_var_list(arg, TRUE, &var_count, &semicolon, TRUE);
-    if (p == NULL)
+    cac.cac_nextc = skip_var_list(arg, TRUE, &cac.cac_var_count,
+						&cac.cac_semicolon, TRUE);
+    if (cac.cac_nextc == NULL)
 	return *arg == '[' ? arg : NULL;
 
-    lhs.lhs_name = NULL;
+    if (compile_assign_process_operator(eap, arg, &cac, &heredoc,
+							&retstr) == FAIL)
+	return retstr;
 
-    if (eap->cmdidx == CMD_increment || eap->cmdidx == CMD_decrement)
-    {
-	if (VIM_ISWHITE(eap->cmd[2]))
-	{
-	    semsg(_(e_no_white_space_allowed_after_str_str),
-			 eap->cmdidx == CMD_increment ? "++" : "--", eap->cmd);
-	    return NULL;
-	}
-	op = (char_u *)(eap->cmdidx == CMD_increment ? "+=" : "-=");
-	oplen = 2;
-	incdec = TRUE;
-    }
-    else
-    {
-	sp = p;
-	p = skipwhite(p);
-	op = p;
-	oplen = assignment_len(p, &heredoc);
+    // Compute the start of the assignment
+    cac.cac_var_start = compile_assign_compute_start(arg, cac.cac_var_count);
 
-	if (var_count > 0 && oplen == 0)
-	    // can be something like "[1, 2]->func()"
-	    return arg;
+    // Compute the end of the assignment
+    cac.cac_var_end = compile_assign_compute_end(eap, cctx, &cac, heredoc);
+    if (cac.cac_var_end == NULL)
+	return NULL;
 
-	if (oplen > 0 && (!VIM_ISWHITE(*sp) || !IS_WHITE_OR_NUL(op[oplen])))
-	{
-	    error_white_both(op, oplen);
-	    return NULL;
-	}
-    }
+    int has_cmd = cac.cac_var_start > eap->cmd;
 
-    if (heredoc)
-    {
-	list_T	   *l;
-
-	// [let] varname =<< [trim] {end}
-	eap->getline = exarg_getline;
-	eap->cookie = cctx;
-	l = heredoc_get(eap, op + 3, FALSE, TRUE);
-	if (l == NULL)
-	    return NULL;
-
-	list_free(l);
-	p += STRLEN(p);
-	end = p;
-    }
-    else if (var_count > 0)
-    {
-	char_u *wp;
-
-	// for "[var, var] = expr" evaluate the expression here, loop over the
-	// list of variables below.
-	// A line break may follow the "=".
-
-	wp = op + oplen;
-	if (may_get_next_line_error(wp, &p, cctx) == FAIL)
-	    return FAIL;
-	if (compile_expr0(&p, cctx) == FAIL)
-	    return NULL;
-	end = p;
-
-	if (cctx->ctx_skip != SKIP_YES)
-	{
-	    type_T	*stacktype;
-	    int		needed_list_len;
-	    int		did_check = FALSE;
-
-	    stacktype = cctx->ctx_type_stack.ga_len == 0 ? &t_void
-						  : get_type_on_stack(cctx, 0);
-	    if (stacktype->tt_type == VAR_VOID)
-	    {
-		emsg(_(e_cannot_use_void_value));
-		goto theend;
-	    }
-	    if (need_type(stacktype, &t_list_any, -1, 0, cctx,
-							 FALSE, FALSE) == FAIL)
-		goto theend;
-	    // If a constant list was used we can check the length right here.
-	    needed_list_len = semicolon ? var_count - 1 : var_count;
-	    if (instr->ga_len > 0)
-	    {
-		isn_T	*isn = ((isn_T *)instr->ga_data) + instr->ga_len - 1;
-
-		if (isn->isn_type == ISN_NEWLIST)
-		{
-		    did_check = TRUE;
-		    if (semicolon ? isn->isn_arg.number < needed_list_len
-			    : isn->isn_arg.number != needed_list_len)
-		    {
-			semsg(_(e_expected_nr_items_but_got_nr),
-				    needed_list_len, (int)isn->isn_arg.number);
-			goto theend;
-		    }
-		}
-	    }
-	    if (!did_check)
-		generate_CHECKLEN(cctx, needed_list_len, semicolon);
-	    if (stacktype->tt_member != NULL)
-		rhs_type = stacktype->tt_member;
-	}
-    }
-
-    /*
-     * Loop over variables in "[var, var] = expr".
-     * For "var = expr" and "let var: type" this is done only once.
-     */
-    if (var_count > 0)
-	var_start = skipwhite(arg + 1);  // skip over the "["
-    else
-	var_start = arg;
-    for (var_idx = 0; var_idx == 0 || var_idx < var_count; var_idx++)
-    {
-	int	instr_count = -1;
-	int	save_lnum;
-	int	skip_store = FALSE;
-	type_T	*inferred_type = NULL;
-
-	if (var_start[0] == '_' && !eval_isnamec(var_start[1]))
-	{
-	    // Ignore underscore in "[a, _, b] = list".
-	    if (var_count > 0)
-	    {
-		var_start = skipwhite(var_start + 2);
-		continue;
-	    }
-	    emsg(_(e_cannot_use_underscore_here));
-	    goto theend;
-	}
-	vim_free(lhs.lhs_name);
-
-	/*
-	 * Figure out the LHS type and other properties.
-	 */
-	if (compile_assign_lhs(var_start, &lhs, cmdidx,
-				is_decl, heredoc, var_start > eap->cmd,
-				oplen, cctx) == FAIL)
-	    goto theend;
-	if (heredoc)
-	{
-	    SOURCING_LNUM = start_lnum;
-	    if (lhs.lhs_has_type
-		    && need_type(&t_list_string, lhs.lhs_type,
-					    -1, 0, cctx, FALSE, FALSE) == FAIL)
-		goto theend;
-	}
-	else
-	{
-	    if (cctx->ctx_skip == SKIP_YES)
-	    {
-		if (oplen > 0 && var_count == 0)
-		{
-		    // skip over the "=" and the expression
-		    p = skipwhite(op + oplen);
-		    (void)compile_expr0(&p, cctx);
-		}
-	    }
-	    else if (oplen > 0)
-	    {
-		int	is_const = FALSE;
-		char_u	*wp;
-
-		// for "+=", "*=", "..=" etc. first load the current value
-		if (*op != '='
-			&& compile_load_lhs_with_index(&lhs, var_start,
-								 cctx) == FAIL)
-		    goto theend;
-
-		// For "var = expr" evaluate the expression.
-		if (var_count == 0)
-		{
-		    int	r;
-
-		    // Compile the expression.
-		    instr_count = instr->ga_len;
-		    if (incdec)
-		    {
-			r = generate_PUSHNR(cctx, 1);
-		    }
-		    else
-		    {
-			// Temporarily hide the new local variable here, it is
-			// not available to this expression.
-			if (lhs.lhs_new_local)
-			    --cctx->ctx_locals.ga_len;
-			wp = op + oplen;
-			if (may_get_next_line_error(wp, &p, cctx) == FAIL)
-			{
-			    if (lhs.lhs_new_local)
-				++cctx->ctx_locals.ga_len;
-			    goto theend;
-			}
-			r = compile_expr0_ext(&p, cctx, &is_const);
-			if (lhs.lhs_new_local)
-			    ++cctx->ctx_locals.ga_len;
-		    }
-		    if (r == FAIL)
-			goto theend;
-		}
-		else if (semicolon && var_idx == var_count - 1)
-		{
-		    // For "[var; var] = expr" get the rest of the list
-		    did_generate_slice = TRUE;
-		    if (generate_SLICE(cctx, var_count - 1) == FAIL)
-			goto theend;
-		}
-		else
-		{
-		    // For "[var, var] = expr" get the "var_idx" item from the
-		    // list.
-		    if (generate_GETITEM(cctx, var_idx, *op != '=') == FAIL)
-			goto theend;
-		}
-
-		rhs_type = cctx->ctx_type_stack.ga_len == 0 ? &t_void
-						  : get_type_on_stack(cctx, 0);
-		if (lhs.lhs_lvar != NULL && (is_decl || !lhs.lhs_has_type))
-		{
-		    if ((rhs_type->tt_type == VAR_FUNC
-				|| rhs_type->tt_type == VAR_PARTIAL)
-			    && !lhs.lhs_has_index
-			    && var_wrong_func_name(lhs.lhs_name, TRUE))
-			goto theend;
-
-		    if (lhs.lhs_new_local && !lhs.lhs_has_type)
-		    {
-			if (rhs_type->tt_type == VAR_VOID)
-			{
-			    emsg(_(e_cannot_use_void_value));
-			    goto theend;
-			}
-			else
-			{
-			    type_T *type;
-
-			    // An empty list or dict has a &t_unknown member,
-			    // for a variable that implies &t_any.
-			    if (rhs_type == &t_list_empty)
-				type = &t_list_any;
-			    else if (rhs_type == &t_dict_empty)
-				type = &t_dict_any;
-			    else if (rhs_type == &t_unknown)
-				type = &t_any;
-			    else
-			    {
-				type = rhs_type;
-				inferred_type = rhs_type;
-			    }
-			    set_var_type(lhs.lhs_lvar, type, cctx);
-			}
-		    }
-		    else if (*op == '=')
-		    {
-			type_T *use_type = lhs.lhs_lvar->lv_type;
-			where_T where = WHERE_INIT;
-
-			// Without operator check type here, otherwise below.
-			// Use the line number of the assignment.
-			SOURCING_LNUM = start_lnum;
-			where.wt_index = var_count > 0 ? var_idx + 1 : 0;
-			where.wt_variable = var_count > 0;
-			// If assigning to a list or dict member, use the
-			// member type.  Not for "list[:] =".
-			if (lhs.lhs_has_index
-				&& !has_list_index(var_start + lhs.lhs_varlen,
-									 cctx))
-			    use_type = lhs.lhs_member_type;
-			if (need_type_where(rhs_type, use_type, -1, where,
-						cctx, FALSE, is_const) == FAIL)
-			    goto theend;
-		    }
-		}
-		else
-		{
-		    type_T *lhs_type = lhs.lhs_member_type;
-
-		    // Special case: assigning to @# can use a number or a
-		    // string.
-		    // Also: can assign a number to a float.
-		    if ((lhs_type == &t_number_or_string
-				|| lhs_type == &t_float)
-			    && rhs_type->tt_type == VAR_NUMBER)
-			lhs_type = &t_number;
-		    if (*p != '=' && need_type(rhs_type, lhs_type,
-					    -1, 0, cctx, FALSE, FALSE) == FAIL)
-		    goto theend;
-		}
-	    }
-	    else if (cmdidx == CMD_final)
-	    {
-		emsg(_(e_final_requires_a_value));
-		goto theend;
-	    }
-	    else if (cmdidx == CMD_const)
-	    {
-		emsg(_(e_const_requires_a_value));
-		goto theend;
-	    }
-	    else if (!lhs.lhs_has_type || lhs.lhs_dest == dest_option
-					   || lhs.lhs_dest == dest_func_option)
-	    {
-		emsg(_(e_type_or_initialization_required));
-		goto theend;
-	    }
-	    else
-	    {
-		int r = OK;
-
-		// variables are always initialized
-		if (GA_GROW_FAILS(instr, 1))
-		    goto theend;
-		switch (lhs.lhs_member_type->tt_type)
-		{
-		    case VAR_BOOL:
-			r = generate_PUSHBOOL(cctx, VVAL_FALSE);
-			break;
-		    case VAR_FLOAT:
-			r = generate_PUSHF(cctx, 0.0);
-			break;
-		    case VAR_STRING:
-			r = generate_PUSHS(cctx, NULL);
-			break;
-		    case VAR_BLOB:
-			r = generate_PUSHBLOB(cctx, blob_alloc());
-			break;
-		    case VAR_FUNC:
-			r = generate_PUSHFUNC(cctx, NULL, &t_func_void, TRUE);
-			break;
-		    case VAR_LIST:
-			r = generate_NEWLIST(cctx, 0, FALSE);
-			break;
-		    case VAR_DICT:
-			r = generate_NEWDICT(cctx, 0, FALSE);
-			break;
-		    case VAR_JOB:
-			r = generate_PUSHJOB(cctx);
-			break;
-		    case VAR_CHANNEL:
-			r = generate_PUSHCHANNEL(cctx);
-			break;
-		    case VAR_NUMBER:
-		    case VAR_UNKNOWN:
-		    case VAR_ANY:
-		    case VAR_PARTIAL:
-		    case VAR_VOID:
-		    case VAR_INSTR:
-		    case VAR_SPECIAL:  // cannot happen
-			// This is skipped for local variables, they are always
-			// initialized to zero.  But in a "for" or "while" loop
-			// the value may have been changed.
-			if (lhs.lhs_dest == dest_local
-						   && !inside_loop_scope(cctx))
-			    skip_store = TRUE;
-			else
-			{
-			    instr_count = instr->ga_len;
-			    r = generate_PUSHNR(cctx, 0);
-			}
-			break;
-		}
-		if (r == FAIL)
-		    goto theend;
-	    }
-	    if (var_count == 0)
-		end = p;
-	}
-
-	// no need to parse more when skipping
-	if (cctx->ctx_skip == SKIP_YES)
-	    break;
-
-	if (oplen > 0 && *op != '=')
-	{
-	    type_T	    *expected;
-	    type_T	    *stacktype = NULL;
-
-	    if (*op == '.')
-	    {
-		if (may_generate_2STRING(-1, FALSE, cctx) == FAIL)
-		    goto theend;
-	    }
-	    else
-	    {
-		expected = lhs.lhs_member_type;
-		stacktype = get_type_on_stack(cctx, 0);
-		if (
-		    // If variable is float operation with number is OK.
-		    !(expected == &t_float && (stacktype == &t_number
-			    || stacktype == &t_number_bool)) &&
-		    need_type(stacktype, expected, -1, 0, cctx,
-							 FALSE, FALSE) == FAIL)
-		    goto theend;
-	    }
-
-	    if (*op == '.')
-	    {
-		if (generate_CONCAT(cctx, 2) == FAIL)
-		    goto theend;
-	    }
-	    else if (*op == '+')
-	    {
-		if (generate_add_instr(cctx,
-			    operator_type(lhs.lhs_member_type, stacktype),
-				       lhs.lhs_member_type, stacktype,
-							  EXPR_APPEND) == FAIL)
-		    goto theend;
-	    }
-	    else if (generate_two_op(cctx, op) == FAIL)
-		goto theend;
-	}
-
-	// Use the line number of the assignment for store instruction.
-	save_lnum = cctx->ctx_lnum;
-	cctx->ctx_lnum = start_lnum - 1;
-
-	if (lhs.lhs_has_index)
-	{
-	    // Use the info in "lhs" to store the value at the index in the
-	    // list or dict.
-	    if (compile_assign_unlet(var_start, &lhs, TRUE, rhs_type, cctx)
-								       == FAIL)
-	    {
-		cctx->ctx_lnum = save_lnum;
-		goto theend;
-	    }
-	}
-	else
-	{
-	    if (is_decl && cmdidx == CMD_const && (lhs.lhs_dest == dest_script
-						|| lhs.lhs_dest == dest_global
-						|| lhs.lhs_dest == dest_local))
-		// ":const var": lock the value, but not referenced variables
-		generate_LOCKCONST(cctx);
-
-	    if ((lhs.lhs_type->tt_type == VAR_DICT
-					  || lhs.lhs_type->tt_type == VAR_LIST)
-		    && lhs.lhs_type->tt_member != NULL
-		    && lhs.lhs_type->tt_member != &t_any
-		    && lhs.lhs_type->tt_member != &t_unknown)
-		// Set the type in the list or dict, so that it can be checked,
-		// also in legacy script.
-		generate_SETTYPE(cctx, lhs.lhs_type);
-	    else if (inferred_type != NULL
-		    && (inferred_type->tt_type == VAR_DICT
-					|| inferred_type->tt_type == VAR_LIST)
-		    && inferred_type->tt_member != NULL
-		    && inferred_type->tt_member != &t_unknown
-		    && inferred_type->tt_member != &t_any)
-		// Set the type in the list or dict, so that it can be checked,
-		// also in legacy script.
-		generate_SETTYPE(cctx, inferred_type);
-
-	    if (!skip_store && generate_store_lhs(cctx, &lhs,
-						 instr_count, is_decl) == FAIL)
-	    {
-		cctx->ctx_lnum = save_lnum;
-		goto theend;
-	    }
-	}
-	cctx->ctx_lnum = save_lnum;
-
-	if (var_idx + 1 < var_count)
-	    var_start = skipwhite(lhs.lhs_end + 1);
-    }
+    /* process the variable(s) */
+    if (compile_assign_process_variables(cctx, &cac, cmdidx, heredoc,
+					 has_cmd, has_argisset_prefix,
+					 jump_instr_idx) == FAIL)
+	goto theend;
 
     // For "[var, var] = expr" drop the "expr" value.
     // Also for "[var, var; _] = expr".
-    if (var_count > 0 && (!semicolon || !did_generate_slice))
+    if (cctx->ctx_skip != SKIP_YES && cac.cac_var_count > 0 &&
+	    (!cac.cac_semicolon || !cac.cac_did_generate_slice))
     {
 	if (generate_instr_drop(cctx, ISN_DROP, 1) == NULL)
 	    goto theend;
     }
 
-    ret = skipwhite(end);
+    retstr = skipwhite(cac.cac_var_end);
 
 theend:
-    vim_free(lhs.lhs_name);
-    return ret;
+    vim_free(cac.cac_lhs.lhs_name);
+    return retstr;
 }
 
 /*
@@ -2656,9 +3799,9 @@ may_compile_assignment(exarg_T *eap, char_u **line, cctx_T *cctx)
 	}
     }
 
-    if (*eap->cmd == '[')
+    // might be "[var, var] = expr" or "ifargisset this.member = expr"
+    if (*eap->cmd == '[' || STRNCMP(eap->cmd, "ifargisset ", 11) == 0)
     {
-	// might be "[var, var] = expr"
 	*line = compile_assignment(eap->cmd, eap, CMD_SIZE, cctx);
 	if (*line == NULL)
 	    return FAIL;
@@ -2710,7 +3853,7 @@ get_cmd_count(char_u *line, exarg_T *eap)
     // skip over colons and white space
     for (p = line; *p == ':' || VIM_ISWHITE(*p); ++p)
 	;
-    if (!isdigit(*p))
+    if (!SAFE_isdigit(*p))
     {
 	// The command or modifiers must be following.  Assume a lower case
 	// character means there is a modifier.
@@ -2740,7 +3883,8 @@ get_compile_type(ufunc_T *ufunc)
 #ifdef FEAT_PROFILE
     if (do_profiling == PROF_YES)
     {
-	if (!ufunc->uf_profiling && has_profiling(FALSE, ufunc->uf_name, NULL))
+	if (!ufunc->uf_profiling && has_profiling(FALSE, ufunc->uf_name, NULL,
+							    &ufunc->uf_hash))
 	    func_do_profile(ufunc);
 	if (ufunc->uf_profiling)
 	    return CT_PROFILE;
@@ -2749,6 +3893,36 @@ get_compile_type(ufunc_T *ufunc)
     return CT_NONE;
 }
 
+/*
+ * Free the compiled instructions saved for a def function.  This is used when
+ * compiling a def function and the function was compiled before.
+ * The index is reused.
+ */
+    static void
+clear_def_function(ufunc_T *ufunc, compiletype_T compile_type)
+{
+    isn_T	*instr_dest = NULL;
+    dfunc_T	*dfunc;
+
+    dfunc = ((dfunc_T *)def_functions.ga_data) + ufunc->uf_dfunc_idx;
+
+    switch (compile_type)
+    {
+	case CT_PROFILE:
+#ifdef FEAT_PROFILE
+	    instr_dest = dfunc->df_instr_prof; break;
+#endif
+	case CT_NONE:   instr_dest = dfunc->df_instr; break;
+	case CT_DEBUG:  instr_dest = dfunc->df_instr_debug; break;
+    }
+
+    if (instr_dest != NULL)
+	// Was compiled in this mode before: Free old instructions.
+	delete_def_function_contents(dfunc, FALSE);
+
+    ga_clear_strings(&dfunc->df_var_names);
+    dfunc->df_defer_var_idx = 0;
+}
 
 /*
  * Add a function to the list of :def functions.
@@ -2776,188 +3950,283 @@ add_def_function(ufunc_T *ufunc)
     dfunc->df_idx = def_functions.ga_len;
     ufunc->uf_dfunc_idx = dfunc->df_idx;
     dfunc->df_ufunc = ufunc;
-    dfunc->df_name = vim_strsave(ufunc->uf_name);
+    dfunc->df_name = vim_strnsave(ufunc->uf_name, ufunc->uf_namelen);
     ga_init2(&dfunc->df_var_names, sizeof(char_u *), 10);
     ++dfunc->df_refcount;
     ++def_functions.ga_len;
     return OK;
 }
 
-/*
- * After ex_function() has collected all the function lines: parse and compile
- * the lines into instructions.
- * Adds the function to "def_functions".
- * When "check_return_type" is set then set ufunc->uf_ret_type to the type of
- * the return statement (used for lambda).  When uf_ret_type is already set
- * then check that it matches.
- * When "profiling" is true add ISN_PROF_START instructions.
- * "outer_cctx" is set for a nested function.
- * This can be used recursively through compile_lambda(), which may reallocate
- * "def_functions".
- * Returns OK or FAIL.
- */
-    int
-compile_def_function(
-	ufunc_T		*ufunc,
-	int		check_return_type,
-	compiletype_T   compile_type,
-	cctx_T		*outer_cctx)
+    static int
+compile_dfunc_ufunc_init(
+    ufunc_T		*ufunc,
+    cctx_T		*outer_cctx,
+    compiletype_T	compile_type,
+    int			*new_def_function)
 {
-    char_u	*line = NULL;
-    garray_T	lines_to_free;
-    char_u	*p;
-    char	*errormsg = NULL;	// error message
-    cctx_T	cctx;
-    garray_T	*instr;
-    int		did_emsg_before = did_emsg;
-    int		did_emsg_silent_before = did_emsg_silent;
-    int		ret = FAIL;
-    sctx_T	save_current_sctx = current_sctx;
-    int		save_estack_compiling = estack_compiling;
-    int		save_cmod_flags = cmdmod.cmod_flags;
-    int		do_estack_push;
-    int		new_def_function = FALSE;
-#ifdef FEAT_PROFILE
-    int		prof_lnum = -1;
-#endif
-    int		debug_lnum = -1;
-
-    // allocated lines are freed at the end
-    ga_init2(&lines_to_free, sizeof(char_u *), 50);
-
     // When using a function that was compiled before: Free old instructions.
     // The index is reused.  Otherwise add a new entry in "def_functions".
     if (ufunc->uf_dfunc_idx > 0)
-    {
-	dfunc_T *dfunc = ((dfunc_T *)def_functions.ga_data)
-							 + ufunc->uf_dfunc_idx;
-	isn_T	*instr_dest = NULL;
-
-	switch (compile_type)
-	{
-	    case CT_PROFILE:
-#ifdef FEAT_PROFILE
-			    instr_dest = dfunc->df_instr_prof; break;
-#endif
-	    case CT_NONE:   instr_dest = dfunc->df_instr; break;
-	    case CT_DEBUG:  instr_dest = dfunc->df_instr_debug; break;
-	}
-	if (instr_dest != NULL)
-	    // Was compiled in this mode before: Free old instructions.
-	    delete_def_function_contents(dfunc, FALSE);
-	ga_clear_strings(&dfunc->df_var_names);
-	dfunc->df_defer_var_idx = 0;
-    }
+	clear_def_function(ufunc, compile_type);
     else
     {
 	if (add_def_function(ufunc) == FAIL)
 	    return FAIL;
-	new_def_function = TRUE;
+
+	*new_def_function = TRUE;
     }
 
     if ((ufunc->uf_flags & FC_CLOSURE) && outer_cctx == NULL)
     {
 	semsg(_(e_compiling_closure_without_context_str),
-						   printable_func_name(ufunc));
+						printable_func_name(ufunc));
 	return FAIL;
     }
 
     ufunc->uf_def_status = UF_COMPILING;
 
-    CLEAR_FIELD(cctx);
+    return OK;
+}
 
-    cctx.ctx_compile_type = compile_type;
-    cctx.ctx_ufunc = ufunc;
-    cctx.ctx_lnum = -1;
-    cctx.ctx_outer = outer_cctx;
-    ga_init2(&cctx.ctx_locals, sizeof(lvar_T), 10);
+/*
+ * Initialize the compilation context for compiling a def function.
+ */
+    static void
+compile_dfunc_cctx_init(
+    cctx_T		*cctx,
+    cctx_T		*outer_cctx,
+    ufunc_T		*ufunc,
+    compiletype_T	compile_type)
+{
+    CLEAR_FIELD(*cctx);
+
+    cctx->ctx_compile_type = compile_type;
+    cctx->ctx_ufunc = ufunc;
+    cctx->ctx_lnum = -1;
+    cctx->ctx_outer = outer_cctx;
+    ga_init2(&cctx->ctx_locals, sizeof(lvar_T), 10);
     // Each entry on the type stack consists of two type pointers.
-    ga_init2(&cctx.ctx_type_stack, sizeof(type2_T), 50);
-    cctx.ctx_type_list = &ufunc->uf_type_list;
-    ga_init2(&cctx.ctx_instr, sizeof(isn_T), 50);
-    instr = &cctx.ctx_instr;
+    ga_init2(&cctx->ctx_type_stack, sizeof(type2_T), 50);
+    cctx->ctx_type_list = &ufunc->uf_type_list;
+    ga_init2(&cctx->ctx_instr, sizeof(isn_T), 50);
+}
 
-    // Set the context to the function, it may be compiled when called from
-    // another script.  Set the script version to the most modern one.
-    // The line number will be set in next_line_from_context().
-    current_sctx = ufunc->uf_script_ctx;
-    current_sctx.sc_version = SCRIPT_VERSION_VIM9;
+/*
+ * For an object constructor, generate instruction to setup "this" (the first
+ * local variable) and to initialize the object variables.
+ */
+    static int
+obj_constructor_prologue(ufunc_T *ufunc, cctx_T *cctx)
+{
+    generate_CONSTRUCT(cctx, ufunc->uf_class);
 
-    // Don't use the flag from ":legacy" here.
-    cmdmod.cmod_flags &= ~CMOD_LEGACY;
-
-    // Make sure error messages are OK.
-    do_estack_push = !estack_top_is_ufunc(ufunc, 1);
-    if (do_estack_push)
-	estack_push_ufunc(ufunc, 1);
-    estack_compiling = TRUE;
-
-    if (check_args_shadowing(ufunc, &cctx) == FAIL)
-	goto erret;
-
-    if (ufunc->uf_def_args.ga_len > 0)
+    for (int i = 0; i < ufunc->uf_class->class_obj_member_count; ++i)
     {
-	int	count = ufunc->uf_def_args.ga_len;
-	int	first_def_arg = ufunc->uf_args.ga_len - count;
-	int	i;
-	char_u	*arg;
-	int	off = STACK_FRAME_SIZE + (ufunc->uf_va_name != NULL ? 1 : 0);
-	int	did_set_arg_type = FALSE;
+	ocmember_T *m = &ufunc->uf_class->class_obj_members[i];
 
-	// Produce instructions for the default values of optional arguments.
-	SOURCING_LNUM = 0;  // line number unknown
-	for (i = 0; i < count; ++i)
+	if (i < 2 && IS_ENUM(ufunc->uf_class))
+	    // The first two object variables in an enum are the name
+	    // and the ordinal.  These are set by the ISN_CONSTRUCT
+	    // instruction.  So don't generate instructions to set
+	    // these variables.
+	    continue;
+
+	if (m->ocm_init != NULL)
 	{
-	    type_T	*val_type;
-	    int		arg_idx = first_def_arg + i;
-	    where_T	where = WHERE_INIT;
-	    int		r;
-	    int		jump_instr_idx = instr->ga_len;
-	    isn_T	*isn;
+	    char_u	*expr = m->ocm_init;
+	    sctx_T	save_current_sctx;
+	    int		change_sctx = FALSE;
 
-	    // Use a JUMP_IF_ARG_SET instruction to skip if the value was given.
-	    if (generate_JUMP_IF_ARG_SET(&cctx, i - count - off) == FAIL)
-		goto erret;
+	    // If the member variable initialization script context is
+	    // different from the current script context, then change it.
+	    if (current_sctx.sc_sid != m->ocm_init_sctx.sc_sid)
+		change_sctx = TRUE;
 
-	    // Make sure later arguments are not found.
-	    ufunc->uf_args_visible = arg_idx;
+	    if (change_sctx)
+	    {
+		// generate an instruction to change the script context to the
+		// member variable initialization script context.
+		save_current_sctx = current_sctx;
+		current_sctx = m->ocm_init_sctx;
+		generate_SCRIPTCTX_SET(cctx, current_sctx);
+	    }
 
-	    arg = ((char_u **)(ufunc->uf_def_args.ga_data))[i];
-	    r = compile_expr0(&arg, &cctx);
+	    int r = compile_expr0(&expr, cctx);
+
+	    if (change_sctx)
+	    {
+		// restore the previous script context
+		current_sctx = save_current_sctx;
+		generate_SCRIPTCTX_SET(cctx, current_sctx);
+	    }
 
 	    if (r == FAIL)
-		goto erret;
+		return FAIL;
 
-	    // If no type specified use the type of the default value.
-	    // Otherwise check that the default value type matches the
-	    // specified type.
-	    val_type = get_type_on_stack(&cctx, 0);
-	    where.wt_index = arg_idx + 1;
-	    if (ufunc->uf_arg_types[arg_idx] == &t_unknown)
+	    if (!ends_excmd2(m->ocm_init, expr))
 	    {
-		did_set_arg_type = TRUE;
-		ufunc->uf_arg_types[arg_idx] = val_type;
+		semsg(_(e_trailing_characters_str), expr);
+		return FAIL;
 	    }
-	    else if (need_type_where(val_type, ufunc->uf_arg_types[arg_idx],
-				       -1, where, &cctx, FALSE, FALSE) == FAIL)
-		goto erret;
 
-	    if (generate_STORE(&cctx, ISN_STORE, i - count - off, NULL) == FAIL)
-		goto erret;
-
-	    // set instruction index in JUMP_IF_ARG_SET to here
-	    isn = ((isn_T *)instr->ga_data) + jump_instr_idx;
-	    isn->isn_arg.jumparg.jump_where = instr->ga_len;
+	    type_T	*type = get_type_on_stack(cctx, 0);
+	    if (m->ocm_type->tt_type == VAR_ANY
+		    && !(m->ocm_flags & OCMFLAG_HAS_TYPE)
+		    && type->tt_type != VAR_SPECIAL)
+	    {
+		// If the member variable type is not yet set, then use
+		// the initialization expression type.
+		m->ocm_type = type;
+	    }
+	    else
+	    {
+		// The type of the member initialization expression is
+		// determined at run time.  Add a runtime type check.
+		where_T	where = WHERE_INIT;
+		where.wt_kind = WT_MEMBER;
+		where.wt_func_name = (char *)m->ocm_name;
+		if (need_type_where(type, m->ocm_type, FALSE, -1,
+					where, cctx, FALSE, FALSE) == FAIL)
+		    return FAIL;
+	    }
 	}
+	else
+	    push_default_value(cctx, m->ocm_type->tt_type, FALSE, NULL);
 
-	if (did_set_arg_type)
-	    set_function_type(ufunc);
+	if (((m->ocm_type->tt_type == VAR_DICT
+			|| m->ocm_type->tt_type == VAR_LIST)
+		    && m->ocm_type->tt_member != NULL
+		    && m->ocm_type->tt_member != &t_any
+		    && m->ocm_type->tt_member != &t_unknown)
+		|| (m->ocm_type->tt_type == VAR_TUPLE
+		    && m->ocm_type->tt_argcount > 0))
+	    // Set the type in the list, tuple or dict, so that it can be
+	    // checked, also in legacy script.
+	    generate_SETTYPE(cctx, m->ocm_type);
+
+	generate_STORE_THIS(cctx, i);
     }
-    ufunc->uf_args_visible = ufunc->uf_args.ga_len;
 
-    /*
-     * Loop over all the lines of the function and generate instructions.
-     */
+    return OK;
+}
+
+/*
+ * For an object method and an constructor, generate instruction to setup
+ * "this" (the first local variable).  For a constructor, generate instructions
+ * to initialize the object variables.
+ */
+    static int
+obj_method_prologue(ufunc_T *ufunc, cctx_T *cctx)
+{
+    dfunc_T *dfunc = ((dfunc_T *)def_functions.ga_data) + ufunc->uf_dfunc_idx;
+
+    if (GA_GROW_FAILS(&dfunc->df_var_names, 1))
+	return FAIL;
+
+    ((char_u **)dfunc->df_var_names.ga_data)[0] =
+						vim_strsave((char_u *)"this");
+    ++dfunc->df_var_names.ga_len;
+
+    // In the constructor allocate memory for the object and initialize the
+    // object members.
+    if (IS_CONSTRUCTOR_METHOD(ufunc))
+	return obj_constructor_prologue(ufunc, cctx);
+
+    return OK;
+}
+
+/*
+ * Produce instructions for the default values of optional arguments.
+ */
+    static int
+compile_def_function_default_args(
+    ufunc_T	*ufunc,
+    garray_T	*instr,
+    cctx_T	*cctx)
+{
+    int	count = ufunc->uf_def_args.ga_len;
+    int	first_def_arg = ufunc->uf_args.ga_len - count;
+    int	i;
+    int	off = STACK_FRAME_SIZE + (ufunc->uf_va_name != NULL ? 1 : 0);
+    int	did_set_arg_type = FALSE;
+
+    // Produce instructions for the default values of optional arguments.
+    SOURCING_LNUM = 0;  // line number unknown
+    for (i = 0; i < count; ++i)
+    {
+	char_u *arg = ((char_u **)(ufunc->uf_def_args.ga_data))[i];
+	if (STRCMP(arg, "v:none") == 0)
+	    // "arg = v:none" means the argument is optional without
+	    // setting a value when the argument is missing.
+	    continue;
+
+	type_T	*val_type;
+	int		arg_idx = first_def_arg + i;
+	where_T	where = WHERE_INIT;
+	int		jump_instr_idx = instr->ga_len;
+	isn_T	*isn;
+
+	// Use a JUMP_IF_ARG_SET instruction to skip if the value was given.
+	if (generate_JUMP_IF_ARG(cctx, ISN_JUMP_IF_ARG_SET,
+						i - count - off) == FAIL)
+	    return FAIL;
+
+	// Make sure later arguments are not found.
+	ufunc->uf_args_visible = arg_idx;
+
+	int r = compile_expr0(&arg, cctx);
+	if (r == FAIL)
+	    return FAIL;
+
+	// If no type specified use the type of the default value.
+	// Otherwise check that the default value type matches the
+	// specified type.
+	val_type = get_type_on_stack(cctx, 0);
+	where.wt_index = arg_idx + 1;
+	where.wt_kind = WT_ARGUMENT;
+	if (ufunc->uf_arg_types[arg_idx] == &t_unknown)
+	{
+	    did_set_arg_type = TRUE;
+	    ufunc->uf_arg_types[arg_idx] = val_type;
+	}
+	else if (need_type_where(val_type, ufunc->uf_arg_types[arg_idx],
+		    FALSE, -1, where, cctx, FALSE, FALSE) == FAIL)
+	    return FAIL;
+
+	if (generate_STORE(cctx, ISN_STORE, i - count - off, NULL) == FAIL)
+	    return FAIL;
+
+	// set instruction index in JUMP_IF_ARG_SET to here
+	isn = ((isn_T *)instr->ga_data) + jump_instr_idx;
+	isn->isn_arg.jumparg.jump_where = instr->ga_len;
+    }
+
+    if (did_set_arg_type)
+	set_function_type(ufunc);
+
+    return OK;
+}
+
+/*
+ * Compile def function body.  Loop over all the lines in the function and
+ * generate instructions.
+ */
+    static int
+compile_def_function_body(
+    int		last_func_lnum,
+    int		check_return_type,
+    garray_T	*lines_to_free,
+    char	**errormsg,
+    cctx_T	*cctx)
+{
+    char_u	*line = NULL;
+    char_u	*p;
+    int		did_emsg_before = did_emsg;
+#ifdef FEAT_PROFILE
+    int		prof_lnum = -1;
+#endif
+    int		debug_lnum = -1;
+
     for (;;)
     {
 	exarg_T	    ea;
@@ -2968,29 +4237,29 @@ compile_def_function(
 	// Bail out on the first error to avoid a flood of errors and report
 	// the right line number when inside try/catch.
 	if (did_emsg_before != did_emsg)
-	    goto erret;
+	    return FAIL;
 
 	if (line != NULL && *line == '|')
 	    // the line continues after a '|'
 	    ++line;
 	else if (line != NULL && *skipwhite(line) != NUL
-		&& !(*line == '#' && (line == cctx.ctx_line_start
+		&& !(*line == '#' && (line == cctx->ctx_line_start
 						    || VIM_ISWHITE(line[-1]))))
 	{
 	    semsg(_(e_trailing_characters_str), line);
-	    goto erret;
+	    return FAIL;
 	}
 	else if (line != NULL && vim9_bad_comment(skipwhite(line)))
-	    goto erret;
+	    return FAIL;
 	else
 	{
-	    line = next_line_from_context(&cctx, FALSE);
-	    if (cctx.ctx_lnum >= ufunc->uf_lines.ga_len)
+	    line = next_line_from_context(cctx, FALSE);
+	    if (cctx->ctx_lnum >= last_func_lnum)
 	    {
 		// beyond the last line
 #ifdef FEAT_PROFILE
-		if (cctx.ctx_skip != SKIP_YES)
-		    may_generate_prof_end(&cctx, prof_lnum);
+		if (cctx->ctx_skip != SKIP_YES)
+		    may_generate_prof_end(cctx, prof_lnum);
 #endif
 		break;
 	    }
@@ -2999,42 +4268,42 @@ compile_def_function(
 	    if (line != NULL)
 	    {
 		line = vim_strsave(line);
-		if (ga_add_string(&lines_to_free, line) == FAIL)
-		    goto erret;
+		if (ga_add_string(lines_to_free, line) == FAIL)
+		    return FAIL;
 	    }
 	}
 
 	CLEAR_FIELD(ea);
 	ea.cmdlinep = &line;
 	ea.cmd = skipwhite(line);
-	ea.skip = cctx.ctx_skip == SKIP_YES;
+	ea.skip = cctx->ctx_skip == SKIP_YES;
 
 	if (*ea.cmd == '#')
 	{
 	    // "#" starts a comment, but "#{" is an error
 	    if (vim9_bad_comment(ea.cmd))
-		goto erret;
+		return FAIL;
 	    line = (char_u *)"";
 	    continue;
 	}
 
 #ifdef FEAT_PROFILE
-	if (cctx.ctx_compile_type == CT_PROFILE && cctx.ctx_lnum != prof_lnum
-						  && cctx.ctx_skip != SKIP_YES)
+	if (cctx->ctx_compile_type == CT_PROFILE && cctx->ctx_lnum != prof_lnum
+						  && cctx->ctx_skip != SKIP_YES)
 	{
-	    may_generate_prof_end(&cctx, prof_lnum);
+	    may_generate_prof_end(cctx, prof_lnum);
 
-	    prof_lnum = cctx.ctx_lnum;
-	    generate_instr(&cctx, ISN_PROF_START);
+	    prof_lnum = cctx->ctx_lnum;
+	    generate_instr(cctx, ISN_PROF_START);
 	}
 #endif
-	if (cctx.ctx_compile_type == CT_DEBUG && cctx.ctx_lnum != debug_lnum
-						  && cctx.ctx_skip != SKIP_YES)
+	if (cctx->ctx_compile_type == CT_DEBUG && cctx->ctx_lnum != debug_lnum
+						  && cctx->ctx_skip != SKIP_YES)
 	{
-	    debug_lnum = cctx.ctx_lnum;
-	    generate_instr_debug(&cctx);
+	    debug_lnum = cctx->ctx_lnum;
+	    generate_instr_debug(cctx);
 	}
-	cctx.ctx_prev_lnum = cctx.ctx_lnum + 1;
+	cctx->ctx_prev_lnum = cctx->ctx_lnum + 1;
 
 	// Some things can be recognized by the first character.
 	switch (*ea.cmd)
@@ -3042,18 +4311,18 @@ compile_def_function(
 	    case '}':
 		{
 		    // "}" ends a block scope
-		    scopetype_T stype = cctx.ctx_scope == NULL
-					  ? NO_SCOPE : cctx.ctx_scope->se_type;
+		    scopetype_T stype = cctx->ctx_scope == NULL
+					  ? NO_SCOPE : cctx->ctx_scope->se_type;
 
 		    if (stype == BLOCK_SCOPE)
 		    {
-			compile_endblock(&cctx);
+			compile_endblock(cctx);
 			line = ea.cmd;
 		    }
 		    else
 		    {
 			emsg(_(e_using_rcurly_outside_if_block_scope));
-			goto erret;
+			return FAIL;
 		    }
 		    if (line != NULL)
 			line = skipwhite(ea.cmd + 1);
@@ -3065,7 +4334,7 @@ compile_def_function(
 		// "{'a': 1}->func() is something else
 		if (ends_excmd(*skipwhite(ea.cmd + 1)))
 		{
-		    line = compile_block(ea.cmd, &cctx);
+		    line = compile_block(ea.cmd, cctx);
 		    continue;
 		}
 		break;
@@ -3074,11 +4343,11 @@ compile_def_function(
 	/*
 	 * COMMAND MODIFIERS
 	 */
-	cctx.ctx_has_cmdmod = FALSE;
-	if (parse_command_modifiers(&ea, &errormsg, &local_cmdmod, FALSE)
+	cctx->ctx_has_cmdmod = FALSE;
+	if (parse_command_modifiers(&ea, errormsg, &local_cmdmod, FALSE)
 								       == FAIL)
-	    goto erret;
-	generate_cmdmods(&cctx, &local_cmdmod);
+	    return FAIL;
+	generate_cmdmods(cctx, &local_cmdmod);
 	undo_cmdmod(&local_cmdmod);
 
 	// Check if there was a colon after the last command modifier or before
@@ -3109,11 +4378,11 @@ compile_def_function(
 		int	    assign;
 
 		// Check for assignment after command modifiers.
-		assign = may_compile_assignment(&ea, &line, &cctx);
+		assign = may_compile_assignment(&ea, &line, cctx);
 		if (assign == OK)
 		    goto nextline;
 		if (assign == FAIL)
-		    goto erret;
+		    return FAIL;
 	    }
 	}
 
@@ -3141,13 +4410,13 @@ compile_def_function(
 				   && !(local_cmdmod.cmod_flags & CMOD_LEGACY))
 		{
 		    semsg(_(e_colon_required_before_range_str), cmd);
-		    goto erret;
+		    return FAIL;
 		}
 		ea.addr_count = 1;
 		if (ends_excmd2(line, ea.cmd))
 		{
 		    // A range without a command: jump to the line.
-		    generate_EXEC(&cctx, ISN_EXECRANGE,
+		    generate_EXEC(cctx, ISN_EXECRANGE,
 					      vim_strnsave(cmd, ea.cmd - cmd));
 		    line = ea.cmd;
 		    goto nextline;
@@ -3156,13 +4425,13 @@ compile_def_function(
 	}
 	p = find_ex_command(&ea, NULL,
 		starts_with_colon || (local_cmdmod.cmod_flags & CMOD_LEGACY)
-						  ? NULL : item_exists, &cctx);
+						  ? NULL : item_exists, cctx);
 
 	if (p == NULL)
 	{
-	    if (cctx.ctx_skip != SKIP_YES)
+	    if (cctx->ctx_skip != SKIP_YES)
 		semsg(_(e_ambiguous_use_of_user_defined_command_str), ea.cmd);
-	    goto erret;
+	    return FAIL;
 	}
 
 	// When using ":legacy cmd" always use compile_exec().
@@ -3187,7 +4456,7 @@ compile_def_function(
 		case CMD_finally:
 		case CMD_endtry:
 			semsg(_(e_cannot_use_legacy_with_command_str), ea.cmd);
-			goto erret;
+			return FAIL;
 		default: break;
 	    }
 
@@ -3204,7 +4473,7 @@ compile_def_function(
 	    // "p" is equal to "ea.cmd" for a valid command.
 	    if (ea.cmdidx == CMD_eval || ea.cmdidx == CMD_var)
 		;
-	    else if (cctx.ctx_skip == SKIP_YES)
+	    else if (cctx->ctx_skip == SKIP_YES)
 	    {
 		line += STRLEN(line);
 		goto nextline;
@@ -3212,11 +4481,11 @@ compile_def_function(
 	    else
 	    {
 		semsg(_(e_command_not_recognized_str), ea.cmd);
-		goto erret;
+		return FAIL;
 	    }
 	}
 
-	if (cctx.ctx_had_return
+	if ((cctx->ctx_had_return || cctx->ctx_had_throw)
 		&& ea.cmdidx != CMD_elseif
 		&& ea.cmdidx != CMD_else
 		&& ea.cmdidx != CMD_endif
@@ -3224,11 +4493,23 @@ compile_def_function(
 		&& ea.cmdidx != CMD_endwhile
 		&& ea.cmdidx != CMD_catch
 		&& ea.cmdidx != CMD_finally
-		&& ea.cmdidx != CMD_endtry)
+		&& ea.cmdidx != CMD_endtry
+		&& !ignore_unreachable_code_for_testing)
 	{
-	    emsg(_(e_unreachable_code_after_return));
-	    goto erret;
+	    semsg(_(e_unreachable_code_after_str),
+				     cctx->ctx_had_return ? "return" : "throw");
+	    return FAIL;
 	}
+
+	// When processing the end of an if-else block, don't clear the
+	// "ctx_had_throw" flag.  If an if-else block ends in a "throw"
+	// statement, then it is considered to end in a "return" statement.
+	// The "ctx_had_throw" is cleared immediately after processing the
+	// if-else block ending statement.
+	// Otherwise, clear the "had_throw" flag.
+	if (ea.cmdidx != CMD_else && ea.cmdidx != CMD_elseif
+						&& ea.cmdidx != CMD_endif)
+	    cctx->ctx_had_throw = FALSE;
 
 	p = skipwhite(p);
 	if (ea.cmdidx != CMD_SIZE
@@ -3244,7 +4525,7 @@ compile_def_function(
 	    if ((ea.argt & EX_RANGE) == 0 && ea.addr_count > 0)
 	    {
 		emsg(_(e_no_range_allowed));
-		goto erret;
+		return FAIL;
 	    }
 	}
 
@@ -3253,13 +4534,13 @@ compile_def_function(
 	    case CMD_def:
 	    case CMD_function:
 		    ea.arg = p;
-		    line = compile_nested_function(&ea, &cctx, &lines_to_free);
+		    line = compile_nested_function(&ea, cctx, lines_to_free);
 		    break;
 
 	    case CMD_return:
 		    line = compile_return(p, check_return_type,
-				 local_cmdmod.cmod_flags & CMOD_LEGACY, &cctx);
-		    cctx.ctx_had_return = TRUE;
+				 local_cmdmod.cmod_flags & CMOD_LEGACY, cctx);
+		    cctx->ctx_had_return = TRUE;
 		    break;
 
 	    case CMD_let:
@@ -3270,7 +4551,7 @@ compile_def_function(
 	    case CMD_const:
 	    case CMD_increment:
 	    case CMD_decrement:
-		    line = compile_assignment(p, &ea, ea.cmdidx, &cctx);
+		    line = compile_assignment(p, &ea, ea.cmdidx, cctx);
 		    if (line == p)
 		    {
 			emsg(_(e_invalid_assignment));
@@ -3281,7 +4562,7 @@ compile_def_function(
 	    case CMD_unlet:
 	    case CMD_unlockvar:
 	    case CMD_lockvar:
-		    line = compile_unletlock(p, &ea, &cctx);
+		    line = compile_unletlock(p, &ea, cctx);
 		    break;
 
 	    case CMD_import:
@@ -3290,66 +4571,70 @@ compile_def_function(
 		    break;
 
 	    case CMD_if:
-		    line = compile_if(p, &cctx);
+		    line = compile_if(p, cctx);
 		    break;
 	    case CMD_elseif:
-		    line = compile_elseif(p, &cctx);
-		    cctx.ctx_had_return = FALSE;
+		    line = compile_elseif(p, cctx);
+		    cctx->ctx_had_return = FALSE;
+		    cctx->ctx_had_throw = FALSE;
 		    break;
 	    case CMD_else:
-		    line = compile_else(p, &cctx);
-		    cctx.ctx_had_return = FALSE;
+		    line = compile_else(p, cctx);
+		    cctx->ctx_had_return = FALSE;
+		    cctx->ctx_had_throw = FALSE;
 		    break;
 	    case CMD_endif:
-		    line = compile_endif(p, &cctx);
+		    line = compile_endif(p, cctx);
+		    cctx->ctx_had_throw = FALSE;
 		    break;
 
 	    case CMD_while:
-		    line = compile_while(p, &cctx);
+		    line = compile_while(p, cctx);
 		    break;
 	    case CMD_endwhile:
-		    line = compile_endwhile(p, &cctx);
-		    cctx.ctx_had_return = FALSE;
+		    line = compile_endwhile(p, cctx);
+		    cctx->ctx_had_return = FALSE;
 		    break;
 
 	    case CMD_for:
-		    line = compile_for(p, &cctx);
+		    line = compile_for(p, cctx);
 		    break;
 	    case CMD_endfor:
-		    line = compile_endfor(p, &cctx);
-		    cctx.ctx_had_return = FALSE;
+		    line = compile_endfor(p, cctx);
+		    cctx->ctx_had_return = FALSE;
 		    break;
 	    case CMD_continue:
-		    line = compile_continue(p, &cctx);
+		    line = compile_continue(p, cctx);
 		    break;
 	    case CMD_break:
-		    line = compile_break(p, &cctx);
+		    line = compile_break(p, cctx);
 		    break;
 
 	    case CMD_try:
-		    line = compile_try(p, &cctx);
+		    line = compile_try(p, cctx);
 		    break;
 	    case CMD_catch:
-		    line = compile_catch(p, &cctx);
-		    cctx.ctx_had_return = FALSE;
+		    line = compile_catch(p, cctx);
+		    cctx->ctx_had_return = FALSE;
 		    break;
 	    case CMD_finally:
-		    line = compile_finally(p, &cctx);
-		    cctx.ctx_had_return = FALSE;
+		    line = compile_finally(p, cctx);
+		    cctx->ctx_had_return = FALSE;
 		    break;
 	    case CMD_endtry:
-		    line = compile_endtry(p, &cctx);
+		    line = compile_endtry(p, cctx);
 		    break;
 	    case CMD_throw:
-		    line = compile_throw(p, &cctx);
+		    line = compile_throw(p, cctx);
+		    cctx->ctx_had_throw = TRUE;
 		    break;
 
 	    case CMD_eval:
-		    line = compile_eval(p, &cctx);
+		    line = compile_eval(p, cctx);
 		    break;
 
 	    case CMD_defer:
-		    line = compile_defer(p, &cctx);
+		    line = compile_defer(p, cctx);
 		    break;
 
 #ifdef HAS_MESSAGE_WINDOW
@@ -3360,7 +4645,7 @@ compile_def_function(
 			    line = NULL;
 			else
 			    line = compile_mult_expr(p, ea.cmdidx,
-							     cmd_count, &cctx);
+							     cmd_count, cctx);
 		    }
 		    break;
 #endif
@@ -3370,29 +4655,34 @@ compile_def_function(
 	    case CMD_echoerr:
 	    case CMD_echomsg:
 	    case CMD_execute:
-		    line = compile_mult_expr(p, ea.cmdidx, 0, &cctx);
+		    line = compile_mult_expr(p, ea.cmdidx, 0, cctx);
 		    break;
 
 	    case CMD_put:
 		    ea.cmd = cmd;
-		    line = compile_put(p, &ea, &cctx);
+		    line = compile_put(p, &ea, cctx, FALSE);
+		    break;
+
+	    case CMD_iput:
+		    ea.cmd = cmd;
+		    line = compile_put(p, &ea, cctx, TRUE);
 		    break;
 
 	    case CMD_substitute:
 		    if (check_global_and_subst(ea.cmd, p) == FAIL)
-			goto erret;
-		    if (cctx.ctx_skip == SKIP_YES)
+			return FAIL;
+		    if (cctx->ctx_skip == SKIP_YES)
 			line = (char_u *)"";
 		    else
 		    {
 			ea.arg = p;
-			line = compile_substitute(line, &ea, &cctx);
+			line = compile_substitute(line, &ea, cctx);
 		    }
 		    break;
 
 	    case CMD_redir:
 		    ea.arg = p;
-		    line = compile_redir(line, &ea, &cctx);
+		    line = compile_redir(line, &ea, cctx);
 		    break;
 
 	    case CMD_cexpr:
@@ -3403,7 +4693,7 @@ compile_def_function(
 	    case CMD_lgetexpr:
 #ifdef FEAT_QUICKFIX
 		    ea.arg = p;
-		    line = compile_cexpr(line, &ea, &cctx);
+		    line = compile_cexpr(line, &ea, cctx);
 #else
 		    ex_ni(&ea);
 		    line = NULL;
@@ -3417,13 +4707,13 @@ compile_def_function(
 	    case CMD_t:
 	    case CMD_xit:
 		    not_in_vim9(&ea);
-		    goto erret;
+		    return FAIL;
 
 	    case CMD_SIZE:
-		    if (cctx.ctx_skip != SKIP_YES)
+		    if (cctx->ctx_skip != SKIP_YES)
 		    {
 			semsg(_(e_invalid_command_str), ea.cmd);
-			goto erret;
+			return FAIL;
 		    }
 		    // We don't check for a next command here.
 		    line = (char_u *)"";
@@ -3440,91 +4730,165 @@ compile_def_function(
 	    case CMD_tcl:
 		    ea.arg = p;
 		    if (vim_strchr(line, '\n') == NULL)
-			line = compile_exec(line, &ea, &cctx);
+			line = compile_exec(line, &ea, cctx);
 		    else
 			// heredoc lines have been concatenated with NL
 			// characters in get_function_body()
-			line = compile_script(line, &cctx);
+			line = compile_script(line, cctx);
 		    break;
 
 	    case CMD_vim9script:
-		    if (cctx.ctx_skip != SKIP_YES)
+		    if (cctx->ctx_skip != SKIP_YES)
 		    {
 			emsg(_(e_vim9script_can_only_be_used_in_script));
-			goto erret;
+			return FAIL;
 		    }
 		    line = (char_u *)"";
 		    break;
 
+	    case CMD_class:
+		    emsg(_(e_class_can_only_be_used_in_script));
+		    return FAIL;
+
+	    case CMD_enum:
+		    emsg(_(e_enum_can_only_be_used_in_script));
+		    return FAIL;
+
+	    case CMD_interface:
+		    emsg(_(e_interface_can_only_be_used_in_script));
+		    return FAIL;
+
+	    case CMD_type:
+		    emsg(_(e_type_can_only_be_used_in_script));
+		    return FAIL;
+
 	    case CMD_global:
 		    if (check_global_and_subst(ea.cmd, p) == FAIL)
-			goto erret;
+			return FAIL;
 		    // FALLTHROUGH
 	    default:
 		    // Not recognized, execute with do_cmdline_cmd().
 		    ea.arg = p;
-		    line = compile_exec(line, &ea, &cctx);
+		    line = compile_exec(line, &ea, cctx);
 		    break;
 	}
 nextline:
 	if (line == NULL)
-	    goto erret;
+	    return FAIL;
 	line = skipwhite(line);
 
 	// Undo any command modifiers.
-	generate_undo_cmdmods(&cctx);
+	generate_undo_cmdmods(cctx);
 
-	if (cctx.ctx_type_stack.ga_len < 0)
+	if (cctx->ctx_type_stack.ga_len < 0)
 	{
 	    iemsg("Type stack underflow");
-	    goto erret;
+	    return FAIL;
 	}
-    }
+    } // END of the loop over all the function body lines.
 
-    if (cctx.ctx_scope != NULL)
+    return OK;
+}
+
+/*
+ * Returns TRUE if the end of a scope (if, while, for, block) is missing.
+ * Called after compiling a def function body.
+ */
+    static int
+compile_dfunc_scope_end_missing(cctx_T *cctx)
+{
+    if (cctx->ctx_scope == NULL)
+	return FALSE;
+
+    switch (cctx->ctx_scope->se_type)
     {
-	if (cctx.ctx_scope->se_type == IF_SCOPE)
+	case IF_SCOPE:
 	    emsg(_(e_missing_endif));
-	else if (cctx.ctx_scope->se_type == WHILE_SCOPE)
+	    break;
+	case WHILE_SCOPE:
 	    emsg(_(e_missing_endwhile));
-	else if (cctx.ctx_scope->se_type == FOR_SCOPE)
+	    break;
+	case FOR_SCOPE:
 	    emsg(_(e_missing_endfor));
-	else
+	    break;
+	case TRY_SCOPE:
+	    emsg(_(e_missing_endtry));
+	    break;
+	case BLOCK_SCOPE:
+	    // end block scope from :try (maybe)
+	    compile_endblock(cctx);
+	    if (cctx->ctx_scope != NULL
+		    && cctx->ctx_scope->se_type == TRY_SCOPE)
+		emsg(_(e_missing_endtry));
+	    else
+		emsg(_(e_missing_rcurly));
+	    break;
+	default:
 	    emsg(_(e_missing_rcurly));
-	goto erret;
+    }
+    return TRUE;
+}
+
+/*
+ * When compiling a def function, if it doesn't have an explicit return
+ * statement, then generate a default return instruction.  For an object
+ * constructor, return the object.
+ */
+    static int
+compile_dfunc_generate_default_return(ufunc_T *ufunc, cctx_T *cctx)
+{
+    // TODO: if a function ends in "throw" but there was a return elsewhere we
+    // should not assume the return type is "void".
+    if (cctx->ctx_had_return || cctx->ctx_had_throw)
+	return OK;
+
+    if (ufunc->uf_ret_type->tt_type == VAR_UNKNOWN)
+	ufunc->uf_ret_type = &t_void;
+    else if (ufunc->uf_ret_type->tt_type != VAR_VOID
+					&& !IS_CONSTRUCTOR_METHOD(ufunc))
+    {
+	emsg(_(e_missing_return_statement));
+	return FAIL;
     }
 
-    if (!cctx.ctx_had_return)
+    // Return void if there is no return at the end.
+    // For a constructor return the object.
+    if (IS_CONSTRUCTOR_METHOD(ufunc))
     {
-	if (ufunc->uf_ret_type->tt_type == VAR_UNKNOWN)
-	    ufunc->uf_ret_type = &t_void;
-	else if (ufunc->uf_ret_type->tt_type != VAR_VOID)
-	{
-	    emsg(_(e_missing_return_statement));
-	    goto erret;
-	}
-
-	// Return void if there is no return at the end.
-	generate_instr(&cctx, ISN_RETURN_VOID);
+	generate_instr(cctx, ISN_RETURN_OBJECT);
+	ufunc->uf_ret_type = &ufunc->uf_class->class_object_type;
     }
+    else
+	generate_instr(cctx, ISN_RETURN_VOID);
 
-    // When compiled with ":silent!" and there was an error don't consider the
-    // function compiled.
-    if (emsg_silent == 0 || did_emsg_silent == did_emsg_silent_before)
-    {
-	dfunc_T	*dfunc = ((dfunc_T *)def_functions.ga_data)
-							 + ufunc->uf_dfunc_idx;
-	dfunc->df_deleted = FALSE;
-	dfunc->df_script_seq = current_sctx.sc_seq;
+    return OK;
+}
+
+/*
+ * Perform the chores after successfully compiling a def function.
+ */
+    static void
+compile_dfunc_epilogue(
+    cctx_T	*outer_cctx,
+    ufunc_T	*ufunc,
+    garray_T	*instr,
+    cctx_T	*cctx)
+{
+    dfunc_T	*dfunc;
+
+    dfunc = ((dfunc_T *)def_functions.ga_data) + ufunc->uf_dfunc_idx;
+    dfunc->df_deleted = FALSE;
+    dfunc->df_script_seq = current_sctx.sc_seq;
+
 #ifdef FEAT_PROFILE
-	if (cctx.ctx_compile_type == CT_PROFILE)
-	{
-	    dfunc->df_instr_prof = instr->ga_data;
-	    dfunc->df_instr_prof_count = instr->ga_len;
-	}
-	else
+    if (cctx->ctx_compile_type == CT_PROFILE)
+    {
+	dfunc->df_instr_prof = instr->ga_data;
+	dfunc->df_instr_prof_count = instr->ga_len;
+    }
+    else
 #endif
-	if (cctx.ctx_compile_type == CT_DEBUG)
+	if (cctx->ctx_compile_type == CT_DEBUG)
 	{
 	    dfunc->df_instr_debug = instr->ga_data;
 	    dfunc->df_instr_debug_count = instr->ga_len;
@@ -3534,49 +4898,168 @@ nextline:
 	    dfunc->df_instr = instr->ga_data;
 	    dfunc->df_instr_count = instr->ga_len;
 	}
-	dfunc->df_varcount = dfunc->df_var_names.ga_len;
-	dfunc->df_has_closure = cctx.ctx_has_closure;
+    dfunc->df_varcount = dfunc->df_var_names.ga_len;
+    dfunc->df_has_closure = cctx->ctx_has_closure;
 
-	if (cctx.ctx_outer_used)
-	{
-	    ufunc->uf_flags |= FC_CLOSURE;
-	    if (outer_cctx != NULL)
-		++outer_cctx->ctx_closure_count;
-	}
-
-	ufunc->uf_def_status = UF_COMPILED;
+    if (cctx->ctx_outer_used)
+    {
+	ufunc->uf_flags |= FC_CLOSURE;
+	if (outer_cctx != NULL)
+	    ++outer_cctx->ctx_closure_count;
     }
+
+    ufunc->uf_def_status = UF_COMPILED;
+}
+
+/*
+ * Perform the cleanup when a def function compilation fails.
+ */
+    static void
+compile_dfunc_ufunc_cleanup(
+    ufunc_T	*ufunc,
+    garray_T	*instr,
+    int		new_def_function,
+    char	*errormsg,
+    int		did_emsg_before,
+    cctx_T	*cctx)
+{
+    dfunc_T	*dfunc;
+
+    dfunc = ((dfunc_T *)def_functions.ga_data) + ufunc->uf_dfunc_idx;
+
+    // Compiling aborted, free the generated instructions.
+    clear_instr_ga(instr);
+    VIM_CLEAR(dfunc->df_name);
+    ga_clear_strings(&dfunc->df_var_names);
+
+    // If using the last entry in the table and it was added above, we
+    // might as well remove it.
+    if (!dfunc->df_deleted && new_def_function
+			&& ufunc->uf_dfunc_idx == def_functions.ga_len - 1)
+    {
+	--def_functions.ga_len;
+	ufunc->uf_dfunc_idx = 0;
+    }
+    ufunc->uf_def_status = UF_COMPILE_ERROR;
+
+    while (cctx->ctx_scope != NULL)
+	drop_scope(cctx);
+
+    if (errormsg != NULL)
+	emsg(errormsg);
+    else if (did_emsg == did_emsg_before)
+	emsg(_(e_compiling_def_function_failed));
+}
+
+/*
+ * After ex_function() has collected all the function lines: parse and compile
+ * the lines into instructions.
+ * Adds the function to "def_functions".
+ * When "check_return_type" is set then set ufunc->uf_ret_type to the type of
+ * the return statement (used for lambda).  When uf_ret_type is already set
+ * then check that it matches.
+ * When "profiling" is true add ISN_PROF_START instructions.
+ * "outer_cctx" is set for a nested function.
+ * This can be used recursively through compile_lambda(), which may reallocate
+ * "def_functions".
+ * Returns OK or FAIL.
+ */
+    int
+compile_def_function(
+	ufunc_T		*ufunc,
+	int		check_return_type,
+	compiletype_T   compile_type,
+	cctx_T		*outer_cctx)
+{
+    garray_T	lines_to_free;
+    char	*errormsg = NULL;	// error message
+    cctx_T	cctx;
+    garray_T	*instr;
+    int		did_emsg_before = did_emsg;
+    int		did_emsg_silent_before = did_emsg_silent;
+    int		ret = FAIL;
+    sctx_T	save_current_sctx = current_sctx;
+    int		save_estack_compiling = estack_compiling;
+    int		save_cmod_flags = cmdmod.cmod_flags;
+    int		do_estack_push;
+    int		new_def_function = FALSE;
+
+    // allocated lines are freed at the end
+    ga_init2(&lines_to_free, sizeof(char_u *), 50);
+
+    // Initialize the ufunc and the compilation context
+    if (compile_dfunc_ufunc_init(ufunc, outer_cctx, compile_type,
+						&new_def_function) == FAIL)
+	return FAIL;
+
+    compile_dfunc_cctx_init(&cctx, outer_cctx, ufunc, compile_type);
+
+    instr = &cctx.ctx_instr;
+
+    // Set the context to the function, it may be compiled when called from
+    // another script.  Set the script version to the most modern one.
+    // The line number will be set in next_line_from_context().
+    current_sctx = ufunc->uf_script_ctx;
+    current_sctx.sc_version = SCRIPT_VERSION_VIM9;
+
+    // Don't use the flag from ":legacy" here.
+    cmdmod.cmod_flags &= ~CMOD_LEGACY;
+
+    // Make sure error messages are OK.
+    do_estack_push = !estack_top_is_ufunc(ufunc, 1);
+    if (do_estack_push)
+	estack_push_ufunc(ufunc, 1);
+    estack_compiling = TRUE;
+
+    // Make sure arguments don't shadow variables in the context
+    if (check_args_shadowing(ufunc, &cctx) == FAIL)
+	goto erret;
+
+    // For an object method and a constructor generate instructions to
+    // initialize "this" and the object variables.
+    if (ufunc->uf_flags & (FC_OBJECT|FC_NEW))
+	if (obj_method_prologue(ufunc, &cctx) == FAIL)
+	    goto erret;
+
+    if (ufunc->uf_def_args.ga_len > 0)
+	if (compile_def_function_default_args(ufunc, instr, &cctx) == FAIL)
+	    goto erret;
+    ufunc->uf_args_visible = ufunc->uf_args.ga_len;
+
+    // Compiling an abstract method or a function in an interface is done to
+    // get the function type.  No code is actually compiled.
+    if (ufunc->uf_class != NULL && (IS_INTERFACE(ufunc->uf_class)
+						|| IS_ABSTRACT_METHOD(ufunc)))
+    {
+	ufunc->uf_def_status = UF_NOT_COMPILED;
+	ret = OK;
+	goto erret;
+    }
+
+    // compile the function body
+    if (compile_def_function_body(ufunc->uf_lines.ga_len, check_return_type,
+				&lines_to_free, &errormsg, &cctx) == FAIL)
+	goto erret;
+
+    if (compile_dfunc_scope_end_missing(&cctx))
+	goto erret;
+
+    if (compile_dfunc_generate_default_return(ufunc, &cctx) == FAIL)
+	goto erret;
+
+    // When compiled with ":silent!" and there was an error don't consider the
+    // function compiled.
+    if (emsg_silent == 0 || did_emsg_silent == did_emsg_silent_before)
+	compile_dfunc_epilogue(outer_cctx, ufunc, instr, &cctx);
 
     ret = OK;
 
 erret:
     if (ufunc->uf_def_status == UF_COMPILING)
     {
-	dfunc_T	*dfunc = ((dfunc_T *)def_functions.ga_data)
-							 + ufunc->uf_dfunc_idx;
-
-	// Compiling aborted, free the generated instructions.
-	clear_instr_ga(instr);
-	VIM_CLEAR(dfunc->df_name);
-	ga_clear_strings(&dfunc->df_var_names);
-
-	// If using the last entry in the table and it was added above, we
-	// might as well remove it.
-	if (!dfunc->df_deleted && new_def_function
-			    && ufunc->uf_dfunc_idx == def_functions.ga_len - 1)
-	{
-	    --def_functions.ga_len;
-	    ufunc->uf_dfunc_idx = 0;
-	}
-	ufunc->uf_def_status = UF_COMPILE_ERROR;
-
-	while (cctx.ctx_scope != NULL)
-	    drop_scope(&cctx);
-
-	if (errormsg != NULL)
-	    emsg(errormsg);
-	else if (did_emsg == did_emsg_before)
-	    emsg(_(e_compiling_def_function_failed));
+	// compilation failed. do cleanup.
+	compile_dfunc_ufunc_cleanup(ufunc, instr, new_def_function,
+				    errormsg, did_emsg_before, &cctx);
     }
 
     if (cctx.ctx_redir_lhs.lhs_name != NULL)
@@ -3658,6 +5141,13 @@ delete_def_function_contents(dfunc_T *dfunc, int mark_deleted)
 {
     int idx;
 
+    // In same cases the instructions may refer to a class in which the
+    // function is defined and unreferencing the class may call back here
+    // recursively.  Set the df_delete_busy to avoid problems.
+    if (dfunc->df_delete_busy)
+	return;
+    dfunc->df_delete_busy = TRUE;
+
     ga_clear(&dfunc->df_def_args_isn);
     ga_clear_strings(&dfunc->df_var_names);
 
@@ -3666,14 +5156,12 @@ delete_def_function_contents(dfunc_T *dfunc, int mark_deleted)
 	for (idx = 0; idx < dfunc->df_instr_count; ++idx)
 	    delete_instr(dfunc->df_instr + idx);
 	VIM_CLEAR(dfunc->df_instr);
-	dfunc->df_instr = NULL;
     }
     if (dfunc->df_instr_debug != NULL)
     {
 	for (idx = 0; idx < dfunc->df_instr_debug_count; ++idx)
 	    delete_instr(dfunc->df_instr_debug + idx);
 	VIM_CLEAR(dfunc->df_instr_debug);
-	dfunc->df_instr_debug = NULL;
     }
 #ifdef FEAT_PROFILE
     if (dfunc->df_instr_prof != NULL)
@@ -3681,7 +5169,6 @@ delete_def_function_contents(dfunc_T *dfunc, int mark_deleted)
 	for (idx = 0; idx < dfunc->df_instr_prof_count; ++idx)
 	    delete_instr(dfunc->df_instr_prof + idx);
 	VIM_CLEAR(dfunc->df_instr_prof);
-	dfunc->df_instr_prof = NULL;
     }
 #endif
 
@@ -3689,6 +5176,8 @@ delete_def_function_contents(dfunc_T *dfunc, int mark_deleted)
 	dfunc->df_deleted = TRUE;
     if (dfunc->df_ufunc != NULL)
 	dfunc->df_ufunc->uf_def_status = UF_NOT_COMPILED;
+
+    dfunc->df_delete_busy = FALSE;
 }
 
 /*
@@ -3699,18 +5188,18 @@ delete_def_function_contents(dfunc_T *dfunc, int mark_deleted)
     void
 unlink_def_function(ufunc_T *ufunc)
 {
-    if (ufunc->uf_dfunc_idx > 0)
-    {
-	dfunc_T *dfunc = ((dfunc_T *)def_functions.ga_data)
-							 + ufunc->uf_dfunc_idx;
+    if (ufunc->uf_dfunc_idx <= 0)
+	return;
 
-	if (--dfunc->df_refcount <= 0)
-	    delete_def_function_contents(dfunc, TRUE);
-	ufunc->uf_def_status = UF_NOT_COMPILED;
-	ufunc->uf_dfunc_idx = 0;
-	if (dfunc->df_ufunc == ufunc)
-	    dfunc->df_ufunc = NULL;
-    }
+    dfunc_T *dfunc = ((dfunc_T *)def_functions.ga_data)
+	+ ufunc->uf_dfunc_idx;
+
+    if (--dfunc->df_refcount <= 0)
+	delete_def_function_contents(dfunc, TRUE);
+    ufunc->uf_def_status = UF_NOT_COMPILED;
+    ufunc->uf_dfunc_idx = 0;
+    if (dfunc->df_ufunc == ufunc)
+	dfunc->df_ufunc = NULL;
 }
 
 /*
@@ -3719,13 +5208,13 @@ unlink_def_function(ufunc_T *ufunc)
     void
 link_def_function(ufunc_T *ufunc)
 {
-    if (ufunc->uf_dfunc_idx > 0)
-    {
-	dfunc_T *dfunc = ((dfunc_T *)def_functions.ga_data)
-							 + ufunc->uf_dfunc_idx;
+    if (ufunc->uf_dfunc_idx <= 0)
+	return;
 
-	++dfunc->df_refcount;
-    }
+    dfunc_T *dfunc = ((dfunc_T *)def_functions.ga_data)
+	+ ufunc->uf_dfunc_idx;
+
+    ++dfunc->df_refcount;
 }
 
 #if defined(EXITFREE) || defined(PROTO)

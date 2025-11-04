@@ -342,12 +342,13 @@ plines(linenr_T lnum)
 plines_win(
     win_T	*wp,
     linenr_T	lnum,
-    int		winheight)	// when TRUE limit to window height
+    int		limit_winheight)	// when TRUE limit to window height
 {
 #if defined(FEAT_DIFF) || defined(PROTO)
     // Check for filler lines above this buffer line.  When folded the result
     // is one line anyway.
-    return plines_win_nofill(wp, lnum, winheight) + diff_check_fill(wp, lnum);
+    return plines_win_nofill(wp, lnum, limit_winheight)
+						   + diff_check_fill(wp, lnum);
 }
 
 /*
@@ -364,7 +365,7 @@ plines_nofill(linenr_T lnum)
 plines_win_nofill(
     win_T	*wp,
     linenr_T	lnum,
-    int		winheight)	// when TRUE limit to window height
+    int		limit_winheight)	// when TRUE limit to window height
 {
 #endif
     int		lines;
@@ -389,7 +390,7 @@ plines_win_nofill(
     else
 	lines = plines_win_nofold(wp, lnum);
 
-    if (winheight > 0 && lines > wp->w_height)
+    if (limit_winheight && lines > wp->w_height)
 	return wp->w_height;
     return lines;
 }
@@ -496,12 +497,17 @@ plines_win_col(win_T *wp, linenr_T lnum, long column)
     return lines;
 }
 
+/*
+ * Return number of window lines the physical line range from "first" until
+ * "last" will occupy in window "wp". Takes into account folding, 'wrap',
+ * topfill and filler lines beyond the end of the buffer. Limit to "max" lines.
+ */
     int
-plines_m_win(win_T *wp, linenr_T first, linenr_T last)
+plines_m_win(win_T *wp, linenr_T first, linenr_T last, int max)
 {
     int		count = 0;
 
-    while (first <= last)
+    while (first <= last && count < max)
     {
 #ifdef FEAT_FOLDING
 	int	x;
@@ -519,25 +525,33 @@ plines_m_win(win_T *wp, linenr_T first, linenr_T last)
 	{
 #ifdef FEAT_DIFF
 	    if (first == wp->w_topline)
-		count += plines_win_nofill(wp, first, TRUE) + wp->w_topfill;
+		count += plines_win_nofill(wp, first, FALSE) + wp->w_topfill;
 	    else
 #endif
-		count += plines_win(wp, first, TRUE);
+		count += plines_win(wp, first, FALSE);
 	    ++first;
 	}
     }
-    return (count);
+#ifdef FEAT_DIFF
+    if (first == wp->w_buffer->b_ml.ml_line_count + 1)
+	count += diff_check_fill(wp, first);
+#endif
+    return MIN(max, count);
 }
 
     int
 gchar_pos(pos_T *pos)
 {
     char_u	*ptr;
+    int		ptrlen;
 
     // When searching columns is sometimes put at the end of a line.
     if (pos->col == MAXCOL)
 	return NUL;
+    ptrlen = ml_get_len(pos->lnum);
     ptr = ml_get_pos(pos);
+    if (pos->col > ptrlen)
+	return NUL;
     if (has_mbyte)
 	return (*mb_ptr2char)(ptr);
     return (int)*ptr;
@@ -549,6 +563,26 @@ gchar_cursor(void)
     if (has_mbyte)
 	return (*mb_ptr2char)(ml_get_cursor());
     return (int)*ml_get_cursor();
+}
+
+/*
+ * Return the character immediately before the cursor.
+ */
+    int
+char_before_cursor(void)
+{
+    if (curwin->w_cursor.col == 0)
+	return -1;
+
+    char_u *line = ml_get_curline();
+
+    if (has_mbyte)
+    {
+	char_u *p = line + curwin->w_cursor.col;
+	int prev_len = (*mb_head_off)(line, p - 1) + 1;
+	return mb_ptr2char(p - prev_len);
+    }
+    return line[curwin->w_cursor.col - 1];
 }
 
 /*
@@ -662,19 +696,12 @@ get_mode(char_u *buf)
     }
 #ifdef FEAT_TERMINAL
     else if (term_use_loop())
-	buf[i++] = 't';
-#endif
-    else if (VIsual_active)
     {
-	if (VIsual_select)
-	    buf[i++] = VIsual_mode + 's' - 'v';
-	else
-	{
-	    buf[i++] = VIsual_mode;
-	    if (restart_VIsual_select)
-		buf[i++] = 's';
-	}
+	if (State & MODE_CMDLINE)
+	    buf[i++] = 'c';
+	buf[i++] = 't';
     }
+#endif
     else if (State == MODE_HITRETURN || State == MODE_ASKMORE
 						      || State == MODE_SETWSIZE
 		|| State == MODE_CONFIRM)
@@ -714,6 +741,19 @@ get_mode(char_u *buf)
 	    buf[i++] = 'v';
 	else if (exmode_active == EXMODE_NORMAL)
 	    buf[i++] = 'e';
+	if ((State & MODE_CMDLINE) && cmdline_overstrike())
+	    buf[i++] = 'r';
+    }
+    else if (VIsual_active)
+    {
+	if (VIsual_select)
+	    buf[i++] = VIsual_mode + 's' - 'v';
+	else
+	{
+	    buf[i++] = VIsual_mode;
+	    if (restart_VIsual_select)
+		buf[i++] = 's';
+	}
     }
     else
     {
@@ -937,6 +977,17 @@ get_keystroke(void)
     return n;
 }
 
+// For overflow detection, add a digit safely to an int value.
+    static int
+vim_append_digit_int(int *value, int digit)
+{
+    int x = *value;
+    if (x > ((INT_MAX - digit) / 10))
+	return FAIL;
+    *value = x * 10 + digit;
+    return OK;
+}
+
 /*
  * Get a number from the user.
  * When "mouse_used" is not NULL allow using the mouse.
@@ -969,7 +1020,8 @@ get_number(
 	c = safe_vgetc();
 	if (VIM_ISDIGIT(c))
 	{
-	    n = n * 10 + c - '0';
+	    if (vim_append_digit_int(&n, c - '0') == FAIL)
+		return 0;
 	    msg_putchar(c);
 	    ++typed;
 	}
@@ -1119,59 +1171,59 @@ vim_beep(unsigned val)
     called_vim_beep = TRUE;
 #endif
 
-    if (emsg_silent == 0 && !in_assert_fails)
+    if (emsg_silent != 0 || in_assert_fails)
+	return;
+
+    if (!((bo_flags & val) || (bo_flags & BO_ALL)))
     {
-	if (!((bo_flags & val) || (bo_flags & BO_ALL)))
-	{
 #ifdef ELAPSED_FUNC
-	    static int		did_init = FALSE;
-	    static elapsed_T	start_tv;
+	static int		did_init = FALSE;
+	static elapsed_T	start_tv;
 
-	    // Only beep once per half a second, otherwise a sequence of beeps
-	    // would freeze Vim.
-	    if (!did_init || ELAPSED_FUNC(start_tv) > 500)
-	    {
-		did_init = TRUE;
-		ELAPSED_INIT(start_tv);
+	// Only beep once per half a second, otherwise a sequence of beeps
+	// would freeze Vim.
+	if (!did_init || ELAPSED_FUNC(start_tv) > 500)
+	{
+	    did_init = TRUE;
+	    ELAPSED_INIT(start_tv);
 #endif
-		if (p_vb
+	    if (p_vb
 #ifdef FEAT_GUI
-			// While the GUI is starting up the termcap is set for
-			// the GUI but the output still goes to a terminal.
-			&& !(gui.in_use && gui.starting)
+		    // While the GUI is starting up the termcap is set for
+		    // the GUI but the output still goes to a terminal.
+		    && !(gui.in_use && gui.starting)
 #endif
-			)
-		{
-		    out_str_cf(T_VB);
+	       )
+	    {
+		out_str_cf(T_VB);
 #ifdef FEAT_VTP
-		    // No restore color information, refresh the screen.
-		    if (has_vtp_working() != 0
+		// No restore color information, refresh the screen.
+		if (has_vtp_working() != 0
 # ifdef FEAT_TERMGUICOLORS
-			    && (p_tgc || (!p_tgc && t_colors >= 256))
+			&& (p_tgc || (!p_tgc && t_colors >= 256))
 # endif
-			)
-		    {
-			redraw_later(UPD_CLEAR);
-			update_screen(0);
-			redrawcmd();
-		    }
-#endif
+		   )
+		{
+		    redraw_later(UPD_CLEAR);
+		    update_screen(0);
+		    redrawcmd();
 		}
-		else
-		    out_char(BELL);
-#ifdef ELAPSED_FUNC
-	    }
 #endif
+	    }
+	    else
+		out_char(BELL);
+#ifdef ELAPSED_FUNC
 	}
+#endif
+    }
 
-	// When 'debug' contains "beep" produce a message.  If we are sourcing
-	// a script or executing a function give the user a hint where the beep
-	// comes from.
-	if (vim_strchr(p_debug, 'e') != NULL)
-	{
-	    msg_source(HL_ATTR(HLF_W));
-	    msg_attr(_("Beep!"), HL_ATTR(HLF_W));
-	}
+    // When 'debug' contains "beep" produce a message.  If we are sourcing
+    // a script or executing a function give the user a hint where the beep
+    // comes from.
+    if (vim_strchr(p_debug, 'e') != NULL)
+    {
+	msg_source(HL_ATTR(HLF_W));
+	msg_attr(_("Beep!"), HL_ATTR(HLF_W));
     }
 }
 
@@ -1311,6 +1363,32 @@ free_users(void)
 }
 #endif
 
+#if defined(MSWIN) || defined(PROTO)
+/*
+ * Initialize $VIM and $VIMRUNTIME when 'enc' is updated.
+ */
+    void
+init_vimdir(void)
+{
+    int	    mustfree;
+    char_u  *p;
+
+    mch_get_exe_name();
+
+    mustfree = FALSE;
+    didset_vim = FALSE;
+    p = vim_getenv((char_u *)"VIM", &mustfree);
+    if (mustfree)
+	vim_free(p);
+
+    mustfree = FALSE;
+    didset_vimruntime = FALSE;
+    p = vim_getenv((char_u *)"VIMRUNTIME", &mustfree);
+    if (mustfree)
+	vim_free(p);
+}
+#endif
+
 /*
  * Call expand_env() and store the result in an allocated string.
  * This is not very memory efficient, this expects the result to be freed
@@ -1343,16 +1421,16 @@ expand_env_save_opt(char_u *src, int one)
  * Skips over "\ ", "\~" and "\$" (not for Win32 though).
  * If anything fails no expansion is done and dst equals src.
  */
-    void
+    size_t
 expand_env(
     char_u	*src,		// input string e.g. "$HOME/vim.hlp"
     char_u	*dst,		// where to put the result
     int		dstlen)		// maximum length of the result
 {
-    expand_env_esc(src, dst, dstlen, FALSE, FALSE, NULL);
+    return expand_env_esc(src, dst, dstlen, FALSE, FALSE, NULL);
 }
 
-    void
+    size_t
 expand_env_esc(
     char_u	*srcp,		// input string e.g. "$HOME/vim.hlp"
     char_u	*dst,		// where to put the result
@@ -1369,9 +1447,7 @@ expand_env_esc(
     int		mustfree;	// var was allocated, need to free it later
     int		at_start = TRUE; // at start of a name
     int		startstr_len = 0;
-#if defined(BACKSLASH_IN_FILENAME) || defined(AMIGA)
-    char_u	*save_dst = dst;
-#endif
+    char_u	*dst_start = dst;
 
     if (startstr != NULL)
 	startstr_len = (int)STRLEN(startstr);
@@ -1522,6 +1598,7 @@ expand_env_esc(
 		 */
 		{
 		    char_u	test[MAXPATHL], paths[MAXPATHL];
+		    size_t	testlen;
 		    char_u	*path, *next_path, *ptr;
 		    stat_T	st;
 
@@ -1533,14 +1610,20 @@ expand_env_esc(
 				next_path++);
 			if (*next_path)
 			    *next_path++ = NUL;
-			STRCPY(test, path);
-			STRCAT(test, "/");
-			STRCAT(test, dst + 1);
+			testlen = vim_snprintf_safelen(
+			    (char *)test,
+			    sizeof(test),
+			    "%s/%s",
+			    path,
+			    dst + 1);
 			if (mch_stat(test, &st) == 0)
 			{
-			    var = alloc(STRLEN(test) + 1);
-			    STRCPY(var, test);
-			    mustfree = TRUE;
+			    var = alloc(testlen + 1);
+			    if (var != NULL)
+			    {
+				STRCPY(var, test);
+				mustfree = TRUE;
+			    }
 			    break;
 			}
 		    }
@@ -1586,23 +1669,26 @@ expand_env_esc(
 		}
 	    }
 
-	    if (var != NULL && *var != NUL
-		    && (STRLEN(var) + STRLEN(tail) + 1 < (unsigned)dstlen))
+	    if (var != NULL && *var != NUL)
 	    {
-		STRCPY(dst, var);
-		dstlen -= (int)STRLEN(var);
 		c = (int)STRLEN(var);
-		// if var[] ends in a path separator and tail[] starts
-		// with it, skip a character
-		if (after_pathsep(dst, dst + c)
+
+		if (c + STRLEN(tail) + 1 < (unsigned)dstlen)
+		{
+		    STRCPY(dst, var);
+		    dstlen -= c;
+		    // if var[] ends in a path separator and tail[] starts
+		    // with it, skip a character
+		    if (after_pathsep(dst, dst + c)
 #if defined(BACKSLASH_IN_FILENAME) || defined(AMIGA)
-			&& (dst == save_dst || dst[-1] != ':')
+			    && dst[c - 1] != ':'
 #endif
-			&& vim_ispathsep(*tail))
-		    ++tail;
-		dst += c;
-		src = tail;
-		copy_char = FALSE;
+			    && vim_ispathsep(*tail))
+			++tail;
+		    dst += c;
+		    src = tail;
+		    copy_char = FALSE;
+		}
 	    }
 	    if (mustfree)
 		vim_free(var);
@@ -1637,6 +1723,8 @@ expand_env_esc(
 
     }
     *dst = NUL;
+
+    return (size_t)(dst - dst_start);
 }
 
 /*
@@ -1696,7 +1784,7 @@ vim_version_dir(char_u *vimdir)
  * Vim's version of getenv().
  * Special handling of $HOME, $VIM and $VIMRUNTIME.
  * Also does ACP to 'enc' conversion for Win32.
- * "mustfree" is set to TRUE when returned is allocated, it must be
+ * "mustfree" is set to TRUE when the returned string is allocated.  It must be
  * initialized to FALSE by the caller.
  */
     char_u *
@@ -2060,7 +2148,7 @@ add_user(char_u *user, int need_copy)
     if (user_copy == NULL || *user_copy == NUL || ga_grow(&ga_users, 1) == FAIL)
     {
 	if (need_copy)
-	    vim_free(user);
+	    vim_free(user_copy);
 	return;
     }
     ((char_u **)(ga_users.ga_data))[ga_users.ga_len++] = user_copy;
@@ -2140,7 +2228,7 @@ init_users(void)
 }
 
 /*
- * Function given to ExpandGeneric() to obtain an user names.
+ * Function given to ExpandGeneric() to obtain user names.
  */
     char_u*
 get_users(expand_T *xp UNUSED, int idx)
@@ -2182,7 +2270,7 @@ prepare_to_exit(void)
     // Ignore SIGHUP, because a dropped connection causes a read error, which
     // makes Vim exit and then handling SIGHUP causes various reentrance
     // problems.
-    signal(SIGHUP, SIG_IGN);
+    mch_signal(SIGHUP, SIG_IGN);
 #endif
 
 #ifdef FEAT_GUI
@@ -2699,11 +2787,11 @@ path_with_url(char_u *fname)
     // non-URL text.
 
     // first character must be alpha
-    if (!isalpha(*fname))
+    if (!ASCII_ISALPHA(*fname))
 	return 0;
 
     // check body: alpha or dash
-    for (p = fname + 1; (isalpha(*p) || (*p == '-')); ++p)
+    for (p = fname + 1; (ASCII_ISALPHA(*p) || (*p == '-')); ++p)
 	;
 
     // check last char is not a dash
@@ -2751,7 +2839,7 @@ restore_v_event(dict_T *v_event, save_v_event_T *sve)
  * Fires a ModeChanged autocmd event if appropriate.
  */
     void
-may_trigger_modechanged()
+may_trigger_modechanged(void)
 {
 #ifdef FEAT_EVAL
     dict_T	    *v_event;
@@ -2783,3 +2871,22 @@ may_trigger_modechanged()
     restore_v_event(v_event, &save_v_event);
 #endif
 }
+
+// For overflow detection, add a digit safely to a long value.
+    int
+vim_append_digit_long(long *value, int digit)
+{
+    long x = *value;
+    if (x > ((LONG_MAX - (long)digit) / 10))
+	return FAIL;
+    *value = x * 10 + (long)digit;
+    return OK;
+}
+
+// Return something that fits into an int.
+    int
+trim_to_int(vimlong_T x)
+{
+    return x > INT_MAX ? INT_MAX : x < INT_MIN ? INT_MIN : x;
+}
+

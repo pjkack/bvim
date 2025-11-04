@@ -1,6 +1,6 @@
 " Test for v:hlsearch
 
-source check.vim
+source util/screendump.vim
 
 func Test_hlsearch()
   new
@@ -70,6 +70,45 @@ func Test_hlsearch_eol_highlight()
   endfor
   set nohlsearch
   bwipe!
+endfunc
+
+func Test_hlsearch_Ctrl_R()
+  CheckScreendump
+  CheckRunVimInTerminal
+
+  let lines =<< trim END
+      set incsearch hlsearch
+      let @" = "text"
+      put
+  END
+  call writefile(lines, 'XhlsearchCtrlR', 'D')
+  let buf = RunVimInTerminal('-S XhlsearchCtrlR', #{rows: 6, cols: 60})
+
+  call term_sendkeys(buf, "/\<C-R>\<C-R>\"")
+  call VerifyScreenDump(buf, 'Test_hlsearch_ctrlr_1', {})
+
+  call term_sendkeys(buf, "\<Esc>")
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_hlsearch_clipboard()
+  CheckScreendump
+  CheckRunVimInTerminal
+  CheckFeature clipboard_working
+
+  let lines =<< trim END
+      set incsearch hlsearch
+      let @* = "text"
+      put *
+  END
+  call writefile(lines, 'XhlsearchClipboard', 'D')
+  let buf = RunVimInTerminal('-S XhlsearchClipboard', #{rows: 6, cols: 60})
+
+  call term_sendkeys(buf, "/\<C-R>*")
+  call VerifyScreenDump(buf, 'Test_hlsearch_ctrlr_1', {})
+
+  call term_sendkeys(buf, "\<Esc>")
+  call StopVimInTerminal(buf)
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

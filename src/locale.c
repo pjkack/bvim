@@ -151,20 +151,20 @@ get_mess_env(void)
     char_u	*p;
 
     p = mch_getenv((char_u *)"LC_ALL");
-    if (p == NULL || *p == NUL)
-    {
-	p = mch_getenv((char_u *)"LC_MESSAGES");
-	if (p == NULL || *p == NUL)
-	{
-	    p = mch_getenv((char_u *)"LANG");
-	    if (p != NULL && VIM_ISDIGIT(*p))
-		p = NULL;		// ignore something like "1043"
+    if (p != NULL && *p != NUL)
+	return p;
+
+    p = mch_getenv((char_u *)"LC_MESSAGES");
+    if (p != NULL && *p != NUL)
+	return p;
+
+    p = mch_getenv((char_u *)"LANG");
+    if (p != NULL && VIM_ISDIGIT(*p))
+	p = NULL;		// ignore something like "1043"
 # ifdef HAVE_GET_LOCALE_VAL
-	    if (p == NULL || *p == NUL)
-		p = get_locale_val(LC_CTYPE);
+    if (p == NULL || *p == NUL)
+	p = get_locale_val(LC_CTYPE);
 # endif
-	}
-    }
     return p;
 }
 #endif
@@ -212,7 +212,7 @@ set_lang_var(void)
 }
 #endif
 
-#if defined(HAVE_LOCALE_H) || defined(X_LOCALE)
+#if defined(HAVE_LOCALE_H) || defined(X_LOCALE) || defined(PROTO)
 /*
  * Setup to use the current locale (for ctype() and many other things).
  */
@@ -504,11 +504,11 @@ find_locales(void)
     static void
 init_locales(void)
 {
-    if (!did_init_locales)
-    {
-	did_init_locales = TRUE;
-	locales = find_locales();
-    }
+    if (did_init_locales)
+	return;
+
+    did_init_locales = TRUE;
+    locales = find_locales();
 }
 
 # if defined(EXITFREE) || defined(PROTO)
@@ -516,12 +516,13 @@ init_locales(void)
 free_locales(void)
 {
     int			i;
-    if (locales != NULL)
-    {
-	for (i = 0; locales[i] != NULL; i++)
-	    vim_free(locales[i]);
-	VIM_CLEAR(locales);
-    }
+
+    if (locales == NULL)
+	return;
+
+    for (i = 0; locales[i] != NULL; i++)
+	vim_free(locales[i]);
+    VIM_CLEAR(locales);
 }
 # endif
 
