@@ -36,6 +36,66 @@
 
 #if defined(FEAT_BORE)
 
+/* Hash set for visited directories — prevents duplicate scans across csproj files */
+#define BORE_VISITED_BUCKETS 4096
+typedef struct bore_visited_entry_t {
+    struct bore_visited_entry_t* next;
+    struct bore_visited_entry_t* next_alloc;
+    u32 hash;
+    int wdir_len;
+    const char* pattern;
+    WCHAR wdir[1];
+} bore_visited_entry_t;
+
+static bore_visited_entry_t* bore_visited_table[BORE_VISITED_BUCKETS];
+static bore_visited_entry_t* bore_visited_alloc_list;
+
+static void bore_visited_reset(void)
+{
+    bore_visited_entry_t* e;
+    bore_visited_entry_t* next;
+    for (e = bore_visited_alloc_list; e; e = next)
+    {
+        next = e->next_alloc;
+        vim_free(e);
+    }
+    memset(bore_visited_table, 0, sizeof(bore_visited_table));
+    bore_visited_alloc_list = NULL;
+}
+
+/* Returns 1 if already visited, 0 if newly inserted */
+static int bore_visit_and_insert(const WCHAR* wdir, int wdir_len, const char* pattern)
+{
+    u32 h = 5381;
+    int i, bucket, alloc_size;
+    bore_visited_entry_t* e;
+
+    for (i = 0; i < wdir_len; ++i)
+        h = ((h << 5) + h) + (u32)wdir[i];
+    h ^= (u32)(uintptr_t)pattern;
+    bucket = h & (BORE_VISITED_BUCKETS - 1);
+
+    for (e = bore_visited_table[bucket]; e; e = e->next)
+        if (e->hash == h && e->wdir_len == wdir_len && e->pattern == pattern &&
+            0 == memcmp(e->wdir, wdir, wdir_len * sizeof(WCHAR)))
+            return 1;
+
+    alloc_size = (int)(offsetof(bore_visited_entry_t, wdir) + (wdir_len + 1) * sizeof(WCHAR));
+    e = (bore_visited_entry_t*)alloc(alloc_size);
+    if (!e)
+        return 1;
+    e->hash = h;
+    e->wdir_len = wdir_len;
+    e->pattern = pattern;
+    memcpy(e->wdir, wdir, wdir_len * sizeof(WCHAR));
+    e->wdir[wdir_len] = 0;
+    e->next = bore_visited_table[bucket];
+    bore_visited_table[bucket] = e;
+    e->next_alloc = bore_visited_alloc_list;
+    bore_visited_alloc_list = e;
+    return 0;
+}
+
 static int bore_canonicalize (const char* src, char* dst, DWORD* attr);
 static u32 bore_string_hash(const char* s);
 static u32 bore_string_hash_n(const char* s, int n);
@@ -188,60 +248,349 @@ static int bore_is_excluded_file_n(const char* path, int len)
         ext_low[i] = TOLOWER_LOC(ext[i]);
     ext_low[i] = 0;
 
+    /* libraries, objects, executables */
     if (
             0 == STRCMP(ext_low, "a") ||
+            0 == STRCMP(ext_low, "aar") ||
             0 == STRCMP(ext_low, "apk") ||
             0 == STRCMP(ext_low, "bin") ||
             0 == STRCMP(ext_low, "dll") ||
+            0 == STRCMP(ext_low, "dylib") ||
             0 == STRCMP(ext_low, "exe") ||
+            0 == STRCMP(ext_low, "exp") ||
             0 == STRCMP(ext_low, "jar") ||
+            0 == STRCMP(ext_low, "jnilib") ||
             0 == STRCMP(ext_low, "lib") ||
+            0 == STRCMP(ext_low, "metallib") ||
             0 == STRCMP(ext_low, "msi") ||
+            0 == STRCMP(ext_low, "msm") ||
             0 == STRCMP(ext_low, "nupkg") ||
             0 == STRCMP(ext_low, "obj") ||
+            0 == STRCMP(ext_low, "pch") ||
             0 == STRCMP(ext_low, "pdb") ||
             0 == STRCMP(ext_low, "prx") ||
+            0 == STRCMP(ext_low, "pyc") ||
             0 == STRCMP(ext_low, "so") ||
+            0 == STRCMP(ext_low, "sym") ||
+            0 == STRCMP(ext_low, "vsix") ||
             0
        ) return 1;
 
+    /* images, fonts */
     if (
             0 == STRCMP(ext_low, "bmp") ||
+            0 == STRCMP(ext_low, "cur") ||
             0 == STRCMP(ext_low, "gif") ||
+            0 == STRCMP(ext_low, "hdr") ||
+            0 == STRCMP(ext_low, "ico") ||
+            0 == STRCMP(ext_low, "icns") ||
             0 == STRCMP(ext_low, "jpg") ||
             0 == STRCMP(ext_low, "pdf") ||
             0 == STRCMP(ext_low, "png") ||
             0 == STRCMP(ext_low, "psd") ||
             0 == STRCMP(ext_low, "tga") ||
+            0 == STRCMP(ext_low, "ttf") ||
+            0 == STRCMP(ext_low, "webp") ||
             0
        ) return 1;
 
+    /* audio */
     if (
+            0 == STRCMP(ext_low, "at9") ||
             0 == STRCMP(ext_low, "mp3") ||
             0 == STRCMP(ext_low, "mp4") ||
+            0 == STRCMP(ext_low, "sfx") ||
             0 == STRCMP(ext_low, "wav") ||
             0
        ) return 1;
 
+    /* data, profiling, caches */
     if (
+            0 == STRCMP(ext_low, "blob") ||
+            0 == STRCMP(ext_low, "cache") ||
+            0 == STRCMP(ext_low, "cbor") ||
+            0 == STRCMP(ext_low, "cnv") ||
+            0 == STRCMP(ext_low, "dat") ||
             0 == STRCMP(ext_low, "db") ||
+            0 == STRCMP(ext_low, "faiss") ||
+            0 == STRCMP(ext_low, "fatbin") ||
+            0 == STRCMP(ext_low, "icu") ||
+            0 == STRCMP(ext_low, "locres") ||
+            0 == STRCMP(ext_low, "nib") ||
             0 == STRCMP(ext_low, "pgc") ||
             0 == STRCMP(ext_low, "pgd") ||
             0 == STRCMP(ext_low, "profdata") ||
+            0 == STRCMP(ext_low, "profraw") ||
             0 == STRCMP(ext_low, "res") ||
+            0 == STRCMP(ext_low, "spv") ||
             0
        ) return 1;
 
+    /* UE assets */
     if (
-            0 == STRCMP((char*)ext, "7z") ||
-            0 == STRCMP((char*)ext, "cab") ||
-            0 == STRCMP((char*)ext, "gz") ||
-            0 == STRCMP((char*)ext, "tgz") ||
-            0 == STRCMP((char*)ext, "zip") ||
+            0 == STRCMP(ext_low, "fbx") ||
+            0 == STRCMP(ext_low, "uasset") ||
+            0 == STRCMP(ext_low, "umap") ||
+            0 == STRCMP(ext_low, "utrace") ||
+            0
+       ) return 1;
+
+    /* archives */
+    if (
+            0 == STRCMP(ext_low, "7z") ||
+            0 == STRCMP(ext_low, "cab") ||
+            0 == STRCMP(ext_low, "gz") ||
+            0 == STRCMP(ext_low, "tgz") ||
+            0 == STRCMP(ext_low, "zip") ||
+            0
+       ) return 1;
+
+    /* crypto, keys */
+    if (
+            0 == STRCMP(ext_low, "keystore") ||
+            0 == STRCMP(ext_low, "p12") ||
+            0 == STRCMP(ext_low, "p7s") ||
             0
        ) return 1;
 
     return 0;
+}
+
+/*
+ * Returns TRUE if the path needs a GetFileAttributesW check to confirm
+ * it is a real file (not a directory or assembly reference).
+ * Paths with a normal file extension (1-4 chars) are trusted.
+ */
+static int bore_requires_fileattr(const char* path, int len)
+{
+    const char* fname = path + len;
+    const char* dot;
+    int ext_len;
+
+    /* Find filename part (after last separator) */
+    while (fname > path && fname[-1] != '\\' && fname[-1] != '/')
+        --fname;
+
+    if (fname == path)
+        return 1; /* no path separator — not a real file path */
+
+    dot = (char*)vim_strrchr((char_u*)fname, '.');
+    if (!dot)
+        return 1; /* no extension */
+
+    ext_len = (int)(path + len - dot - 1);
+    if (ext_len >= 1 && ext_len <= 4)
+        return 0; /* normal extension like .cs, .cpp, .h, .json */
+
+    return 1; /* long or empty extension */
+}
+
+static int bore_is_excluded_dir(const WCHAR* name)
+{
+    if (name[0] == L'.')
+        return 1;
+    if (0 == _wcsicmp(name, L"bin")) return 1;
+    if (0 == _wcsicmp(name, L"lib")) return 1;
+    if (0 == _wcsicmp(name, L"obj")) return 1;
+    if (0 == _wcsicmp(name, L"x64")) return 1;
+    if (0 == _wcsicmp(name, L"Binaries")) return 1;
+    if (0 == _wcsicmp(name, L"Content")) return 1;
+    if (0 == _wcsicmp(name, L"DerivedDataCache")) return 1;
+    if (0 == _wcsicmp(name, L"Documentation")) return 1;
+    if (0 == _wcsicmp(name, L"Intermediate")) return 1;
+    if (0 == _wcsicmp(name, L"Saved")) return 1;
+    if (0 == _wcsicmp(name, L"ThirdParty")) return 1;
+    return 0;
+}
+
+/*
+ * Expand wildcard pattern under 'wdir' using FindFirstFileExW.
+ * Works in wide chars; 'wdir' is mutable with trailing backslash.
+ * Supports **, * globs, and literal path segments.
+ */
+static void bore_expand_wildcard_files_r(bore_t* b, int proj_index,
+    WCHAR* wdir, int wdir_len, const char* pattern, int depth)
+{
+    WCHAR wpath[BORE_MAX_PATH];
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind;
+    const char* sep;
+    const char* rest;
+    int seg_len, is_globstar;
+
+    if (depth > 64)
+        return;
+
+    /* Split pattern into first segment and rest */
+    sep = strchr(pattern, '\\');
+    if (!sep) sep = strchr(pattern, '/');
+    seg_len = sep ? (int)(sep - pattern) : (int)strlen(pattern);
+    rest = sep ? sep + 1 : NULL;
+    is_globstar = (seg_len == 2 && pattern[0] == '*' && pattern[1] == '*');
+
+    if (is_globstar && bore_visit_and_insert(wdir, wdir_len, pattern))
+        return;
+
+    if (is_globstar && rest && !strchr(rest, '\\') && !strchr(rest, '/'))
+    {
+        /*
+         * Optimized **\<leaf> (e.g. **\*.cs): single enumeration of '*'
+         * handles both subdirs and file matching in one pass.
+         */
+        WCHAR wrest[BORE_MAX_PATH];
+        char fullpath_utf8[BORE_MAX_PATH];
+        int dir_utf8_len;
+        const WCHAR* ext_pattern;
+
+        MultiByteToWideChar(CP_UTF8, 0, rest, -1, wrest, BORE_MAX_PATH);
+        ext_pattern = wcschr(wrest, L'.');
+        dir_utf8_len = WideCharToMultiByte(CP_UTF8, 0, wdir, wdir_len, fullpath_utf8, BORE_MAX_PATH, 0, 0);
+
+        memcpy(wpath, wdir, wdir_len * sizeof(WCHAR));
+        memcpy(wpath + wdir_len, L"*", 2 * sizeof(WCHAR));
+
+        hFind = FindFirstFileExW(wpath, FindExInfoBasic, &fd,
+            FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+        if (hFind == INVALID_HANDLE_VALUE)
+            return;
+        do
+        {
+            int name_len;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            {
+                if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+                    continue;
+                if (bore_is_excluded_dir(fd.cFileName))
+                    continue;
+                name_len = (int)wcslen(fd.cFileName);
+                if (wdir_len + name_len + 1 >= BORE_MAX_PATH)
+                    continue;
+                memcpy(wdir + wdir_len, fd.cFileName, name_len * sizeof(WCHAR));
+                wdir[wdir_len + name_len] = L'\\';
+                wdir[wdir_len + name_len + 1] = 0;
+                bore_expand_wildcard_files_r(b, proj_index, wdir, wdir_len + name_len + 1, pattern, depth + 1);
+            }
+            else if (ext_pattern && dir_utf8_len > 0)
+            {
+                const WCHAR* ext_file = wcsrchr(fd.cFileName, L'.');
+                if (ext_file && 0 == _wcsicmp(ext_pattern, ext_file))
+                {
+                    name_len = WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1,
+                        fullpath_utf8 + dir_utf8_len, BORE_MAX_PATH - dir_utf8_len, 0, 0);
+                    if (name_len > 0 && !bore_is_excluded_file(fullpath_utf8))
+                    {
+                        bore_file_t* f = (bore_file_t*)bore_alloc(&b->file_alloc, sizeof(bore_file_t));
+                        f->file = bore_strndup(b, fullpath_utf8, dir_utf8_len + name_len - 1);
+                        f->proj_index = proj_index;
+                        ++b->file_count;
+                    }
+                }
+            }
+        }
+        while (FindNextFileW(hFind, &fd));
+        wdir[wdir_len] = 0;
+        FindClose(hFind);
+    }
+    else if (is_globstar)
+    {
+        /* General ** — match rest at current level, then recurse into subdirs */
+        if (rest)
+            bore_expand_wildcard_files_r(b, proj_index, wdir, wdir_len, rest, depth);
+
+        memcpy(wpath, wdir, wdir_len * sizeof(WCHAR));
+        memcpy(wpath + wdir_len, L"*", 2 * sizeof(WCHAR));
+        hFind = FindFirstFileExW(wpath, FindExInfoBasic, &fd,
+            FindExSearchLimitToDirectories, NULL, FIND_FIRST_EX_LARGE_FETCH);
+        if (hFind == INVALID_HANDLE_VALUE)
+            return;
+        do
+        {
+            int name_len;
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                continue;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+                continue;
+            if (bore_is_excluded_dir(fd.cFileName))
+                continue;
+            name_len = (int)wcslen(fd.cFileName);
+            if (wdir_len + name_len + 1 >= BORE_MAX_PATH)
+                continue;
+            memcpy(wdir + wdir_len, fd.cFileName, name_len * sizeof(WCHAR));
+            wdir[wdir_len + name_len] = L'\\';
+            wdir[wdir_len + name_len + 1] = 0;
+            bore_expand_wildcard_files_r(b, proj_index, wdir, wdir_len + name_len + 1, pattern, depth + 1);
+        }
+        while (FindNextFileW(hFind, &fd));
+        wdir[wdir_len] = 0;
+        FindClose(hFind);
+    }
+    else if (rest)
+    {
+        /* Non-leaf segment — enumerate matching dirs, recurse with rest */
+        memcpy(wpath, wdir, wdir_len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_UTF8, 0, pattern, seg_len, wpath + wdir_len, BORE_MAX_PATH - wdir_len);
+        wpath[wdir_len + seg_len] = 0;
+        hFind = FindFirstFileExW(wpath, FindExInfoBasic, &fd,
+            FindExSearchLimitToDirectories, NULL, FIND_FIRST_EX_LARGE_FETCH);
+        if (hFind == INVALID_HANDLE_VALUE)
+            return;
+        do
+        {
+            int name_len;
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                continue;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+                continue;
+            if (fd.cFileName[0] == L'.' && (fd.cFileName[1] == 0 ||
+                (fd.cFileName[1] == L'.' && fd.cFileName[2] == 0)))
+                continue;
+            name_len = (int)wcslen(fd.cFileName);
+            if (wdir_len + name_len + 1 >= BORE_MAX_PATH)
+                continue;
+            memcpy(wdir + wdir_len, fd.cFileName, name_len * sizeof(WCHAR));
+            wdir[wdir_len + name_len] = L'\\';
+            wdir[wdir_len + name_len + 1] = 0;
+            bore_expand_wildcard_files_r(b, proj_index, wdir, wdir_len + name_len + 1, rest, depth + 1);
+        }
+        while (FindNextFileW(hFind, &fd));
+        wdir[wdir_len] = 0;
+        FindClose(hFind);
+    }
+    else
+    {
+        /* Leaf segment — enumerate matching files */
+        char fullpath_utf8[BORE_MAX_PATH];
+        int dir_utf8_len;
+
+        memcpy(wpath, wdir, wdir_len * sizeof(WCHAR));
+        MultiByteToWideChar(CP_UTF8, 0, pattern, seg_len, wpath + wdir_len, BORE_MAX_PATH - wdir_len);
+        wpath[wdir_len + seg_len] = 0;
+
+        dir_utf8_len = WideCharToMultiByte(CP_UTF8, 0, wdir, wdir_len, fullpath_utf8, BORE_MAX_PATH, 0, 0);
+        if (dir_utf8_len <= 0)
+            return;
+        hFind = FindFirstFileExW(wpath, FindExInfoBasic, &fd,
+            FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+        if (hFind == INVALID_HANDLE_VALUE)
+            return;
+        do
+        {
+            int name_len;
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                continue;
+            name_len = WideCharToMultiByte(CP_UTF8, 0, fd.cFileName, -1,
+                fullpath_utf8 + dir_utf8_len, BORE_MAX_PATH - dir_utf8_len, 0, 0);
+            if (name_len > 0 && !bore_is_excluded_file(fullpath_utf8))
+            {
+                bore_file_t* f = (bore_file_t*)bore_alloc(&b->file_alloc, sizeof(bore_file_t));
+                f->file = bore_strndup(b, fullpath_utf8, dir_utf8_len + name_len - 1);
+                f->proj_index = proj_index;
+                ++b->file_count;
+            }
+        }
+        while (FindNextFileW(hFind, &fd));
+        FindClose(hFind);
+    }
 }
 
 static void bore_load_vcxproj_files(bore_t* b, int proj_index, const char* path)
@@ -253,7 +602,6 @@ static void bore_load_vcxproj_files(bore_t* b, int proj_index, const char* path)
     char* ext_part;
     int path_len;
     int skipFile = 0;
-    DWORD attr;
     BOOL is_csproj;
 
     f = fopen(path, "rb");
@@ -271,6 +619,16 @@ static void bore_load_vcxproj_files(bore_t* b, int proj_index, const char* path)
         filename_part = strstr(buf, "Include=\"");
         if (filename_part)
         {
+            /* Only process source file tags, skip assembly/project references */
+            if (!strstr(buf, "<Compile ")
+                && !strstr(buf, "<ClCompile ")
+                && !strstr(buf, "<ClInclude ")
+                && !strstr(buf, "<None ")
+                && !strstr(buf, "<Content ")
+                && !strstr(buf, "<CustomBuild ")
+                && !strstr(buf, "<MASM ")
+                && !strstr(buf, "<Natvis "))
+                continue;
             filename_part += 9;
             char* end = strchr(filename_part, '"');
             if (end)
@@ -278,6 +636,14 @@ static void bore_load_vcxproj_files(bore_t* b, int proj_index, const char* path)
                 char* fn;
                 int len = end - filename_part;
                 filename_part[len] = 0;
+
+                /* Skip unresolved MSBuild variables */
+                if (strchr(filename_part, '$'))
+                    continue;
+                /* Skip build configurations (contain |) */
+                if (strchr(filename_part, '|'))
+                    continue;
+
                 vim_strncpy(filename_buf + path_len, filename_part, len);
                 if (len >= 2 && filename_part[1] == ':')
                 {
@@ -292,9 +658,12 @@ static void bore_load_vcxproj_files(bore_t* b, int proj_index, const char* path)
                 if (!wildcard)
                 {
                     skipFile = bore_is_excluded_file_n(fn, len);
-                    if (!skipFile && FAIL != bore_canonicalize(fn, buf, &attr))
+                    if (!skipFile)
                     {
-                        if (!(FILE_ATTRIBUTE_DIRECTORY & attr))
+                        DWORD attr;
+                        DWORD* pattr = bore_requires_fileattr(fn, len) ? &attr : NULL;
+                        if (FAIL != bore_canonicalize(fn, buf, pattr)
+                            && (!pattr || !(FILE_ATTRIBUTE_DIRECTORY & attr)))
                         {
                             bore_file_t* files = (bore_file_t*)bore_alloc(&b->file_alloc, sizeof(bore_file_t));
                             files->file = bore_strndup(b, buf, strlen(buf));
@@ -305,30 +674,23 @@ static void bore_load_vcxproj_files(bore_t* b, int proj_index, const char* path)
                     continue;
                 }
 
-                int retval;
-                int num_files;
-                char_u **files;
-
-                retval = gen_expand_wildcards(1, (char_u**)&fn, &num_files, &files, EW_FILE|EW_NOTWILD);
-                if (retval)
-                {
-                    for (int i = 0; i < num_files; ++i)
-                    {
-                        char* fn = (char*)files[i];
-                        skipFile = bore_is_excluded_file(fn);
-                        if (!skipFile && FAIL != bore_canonicalize(fn, buf, &attr))
-                        {
-                            if (!(FILE_ATTRIBUTE_DIRECTORY & attr))
-                            {
-                                bore_file_t* files = (bore_file_t*)bore_alloc(&b->file_alloc, sizeof(bore_file_t));
-                                files->file = bore_strndup(b, buf, strlen(buf));
-                                files->proj_index = proj_index;
-                                ++b->file_count;
-                            }
-                        }
-                    }
-                }
-                FreeWild(num_files, files);
+                WCHAR wdir[BORE_MAX_PATH];
+                WCHAR wtmp[BORE_MAX_PATH];
+                char dir_buf[BORE_MAX_PATH];
+                const char* last_sep = wildcard;
+                int dir_len, wdir_len;
+                while (last_sep > fn && last_sep[-1] != '\\' && last_sep[-1] != '/')
+                    --last_sep;
+                dir_len = (int)(last_sep - fn);
+                vim_strncpy(dir_buf, fn, dir_len);
+                MultiByteToWideChar(CP_UTF8, 0, dir_buf, -1, wtmp, BORE_MAX_PATH);
+                wdir_len = (int)GetFullPathNameW(wtmp, BORE_MAX_PATH, wdir, NULL);
+                if (wdir_len <= 0 || wdir_len >= BORE_MAX_PATH - 1)
+                    continue;
+                if (wdir[wdir_len - 1] != L'\\')
+                    wdir[wdir_len++] = L'\\';
+                wdir[wdir_len] = 0;
+                bore_expand_wildcard_files_r(b, proj_index, wdir, wdir_len, last_sep, 0);
             }
         }
     }
@@ -337,32 +699,19 @@ static void bore_load_vcxproj_files(bore_t* b, int proj_index, const char* path)
 
     if (is_csproj)
     {
-        int retval;
-        int num_files;
-        char_u **files;
-
-        filename_part = filename_buf;
-        vim_strncpy(filename_buf + path_len, "**/*.cs", 7);
-        retval = gen_expand_wildcards(1, (char_u**)&filename_part, &num_files, &files, EW_FILE|EW_NOTWILD);
-        if (retval)
+        WCHAR wdir[BORE_MAX_PATH];
+        WCHAR wtmp[BORE_MAX_PATH];
+        int wdir_len;
+        filename_buf[path_len] = 0;
+        MultiByteToWideChar(CP_UTF8, 0, filename_buf, -1, wtmp, BORE_MAX_PATH);
+        wdir_len = (int)GetFullPathNameW(wtmp, BORE_MAX_PATH, wdir, NULL);
+        if (wdir_len > 0 && wdir_len < BORE_MAX_PATH - 1)
         {
-            for (int i = 0; i < num_files; ++i)
-            {
-                char* fn = (char*)files[i];
-                skipFile = bore_is_excluded_file(fn);
-                if (!skipFile && FAIL != bore_canonicalize(fn, buf, &attr))
-                {
-                    if (!(FILE_ATTRIBUTE_DIRECTORY & attr))
-                    {
-                        bore_file_t* files = (bore_file_t*)bore_alloc(&b->file_alloc, sizeof(bore_file_t));
-                        files->file = bore_strndup(b, buf, strlen(buf));
-                        files->proj_index = proj_index;
-                        ++b->file_count;
-                    }
-                }
-            }
+            if (wdir[wdir_len - 1] != L'\\')
+                wdir[wdir_len++] = L'\\';
+            wdir[wdir_len] = 0;
+            bore_expand_wildcard_files_r(b, proj_index, wdir, wdir_len, "**\\*.cs", 0);
         }
-        FreeWild(num_files, files);
     }
 }
 
@@ -390,7 +739,7 @@ static int bore_extract_projects_and_files_from_sln(bore_t* b, const char* sln_p
     {
         goto done;
     }
-    
+
     int guid_map_count = 0;
     bore_alloc_t guid_map_alloc;
     bore_prealloc(&guid_map_alloc, 256*(sizeof(bore_guid_map_t)));
@@ -616,7 +965,7 @@ static int bore_extract_projects_and_files_from_dir(bore_t* b, const char* sln_p
     int skipFile;
     int len;
     int i;
-    
+
     output = get_cmd_output(subdir_cmd, 0, SHELL_READ & SHELL_SILENT, &len);
     if (!output)
         goto done;
@@ -691,6 +1040,9 @@ static int bore_extract_files_from_projects(bore_t* b)
 {
     bore_proj_t* proj = (bore_proj_t*)b->proj_alloc.base;
     int i;
+
+    bore_visited_reset();
+
     for (i = 0; i < b->proj_count; ++i)
     {
         if (proj[i].project_file_path)
@@ -698,6 +1050,9 @@ static int bore_extract_files_from_projects(bore_t* b)
             bore_load_vcxproj_files(b, i, bore_str(b, proj[i].project_file_path));
         }
     }
+
+    bore_visited_reset();
+
     return OK;
 }
 
@@ -897,14 +1252,14 @@ static int bore_build_toggle_index(bore_t* b)
         ext = ext ? ext + 1 : path + path_len;
         basename = basename ? basename + 1 : path;
 
-        bore_toggle_entry_t* e = (bore_toggle_entry_t*)bore_alloc(&b->toggle_index_alloc, 
+        bore_toggle_entry_t* e = (bore_toggle_entry_t*)bore_alloc(&b->toggle_index_alloc,
             sizeof(bore_toggle_entry_t));
         e->file = files[i].file;
         e->extension_index = ext_index;
         e->basename_hash = bore_string_hash_n(basename, (int)(ext - basename));
         b->toggle_entry_count++;
     }
-    qsort(b->toggle_index_alloc.base, b->toggle_entry_count, sizeof(bore_toggle_entry_t), 
+    qsort(b->toggle_index_alloc.base, b->toggle_entry_count, sizeof(bore_toggle_entry_t),
             bore_sort_toggle_entry);
 
     return OK;
@@ -1006,7 +1361,7 @@ static int bore_match_sln_config(bore_t* b, char* str)
     const char* config = str;
     const char* platform = str;
     char* div = strchr(str, '|');
-    
+
     if (NULL == div)
         div = strchr(str, ' ');
 
@@ -1233,7 +1588,7 @@ static void bore_print_sln(DWORD elapsed)
                 bore_str(g_bore, g_bore->sln_path),
                 g_bore->proj_count,
                 g_bore->file_count);
-        }           
+        }
         msg(IObuff);
     }
 }
@@ -1244,7 +1599,7 @@ static int bore_canonicalize(const char* src, char* dst, DWORD* attr)
     WCHAR wbuf2[BORE_MAX_PATH];
     DWORD fnresult;
     int result = MultiByteToWideChar(CP_UTF8, 0, src, -1, wbuf, BORE_MAX_PATH);
-    if (result <= 0) 
+    if (result <= 0)
         return FAIL;
     fnresult = GetFullPathNameW(wbuf, BORE_MAX_PATH, wbuf2, 0);
     if (!fnresult)
@@ -1524,7 +1879,7 @@ void bore_async_execute_update(DWORD flags)
     for (;;)
     {
         BOOL result = PeekNamedPipe(
-            g_bore_async_execute_context.result_handle, 
+            g_bore_async_execute_context.result_handle,
             NULL,
             0,
             NULL,
@@ -1600,7 +1955,7 @@ void bore_async_execute_update(DWORD flags)
         ex_copen(&eap);
     }
     update_screen(UPD_VALID);
-    
+
 done:
     if (completed)
     {
@@ -1638,7 +1993,7 @@ static DWORD WINAPI bore_async_execute_wait_thread(LPVOID param)
         if (result == WAIT_TIMEOUT)
         {
             BOOL peek_success = PeekNamedPipe(
-                g_bore_async_execute_context.result_handle, 
+                g_bore_async_execute_context.result_handle,
                 NULL,
                 0,
                 0,
@@ -1751,20 +2106,20 @@ static void bore_async_execute(char* title, const char* cmdline)
     }
 
     memset(
-            &g_bore_async_execute_context.spawned_process, 
-            0, 
+            &g_bore_async_execute_context.spawned_process,
+            0,
             sizeof(g_bore_async_execute_context.spawned_process));
 
     BOOL process_created = CreateProcess(
-            NULL, 
-            cmd, 
-            NULL, 
-            &sa_attr, 
-            TRUE, 
-            CREATE_NO_WINDOW, 
-            NULL, 
-            NULL, 
-            &startup_info, 
+            NULL,
+            cmd,
+            NULL,
+            &sa_attr,
+            TRUE,
+            CREATE_NO_WINDOW,
+            NULL,
+            NULL,
+            &startup_info,
             &g_bore_async_execute_context.spawned_process);
 
     if (!process_created)
@@ -1779,11 +2134,11 @@ static void bore_async_execute(char* title, const char* cmdline)
     DWORD thread_id = 0;
 
     g_bore_async_execute_context.wait_thread = CreateThread(
-            NULL, 
-            4096, 
-            bore_async_execute_wait_thread, 
-            &g_bore_async_execute_context, 
-            0, 
+            NULL,
+            4096,
+            bore_async_execute_wait_thread,
+            &g_bore_async_execute_context,
+            0,
             &thread_id);
 
     if (g_bore_async_execute_context.wait_thread == INVALID_HANDLE_VALUE)
@@ -1841,7 +2196,7 @@ bore_file_t* bore_find_file(char* fn)
     if (FAIL == bore_canonicalize(fn, path, 0))
         return NULL;
 
-    bore_file_t* file = (bore_file_t*)bsearch_s( 
+    bore_file_t* file = (bore_file_t*)bsearch_s(
         path,
         g_bore->file_alloc.base,
         g_bore->file_count,
@@ -1859,8 +2214,8 @@ void borefind_parse_options(bore_t* b, char* arg, bore_search_t* search)
     //   -p project only (based on current buffer)
     //   -e ext1,ext2,...,ext9
     //      filters the search based on a list of file extensions
-    //   -h exludes huge files 
-    //   - 
+    //   -h exludes huge files
+    //   -
     //   -u
     //      an empty (or any unknown) option will force the remainder to be treated as the search string
 
@@ -2019,8 +2374,8 @@ void ex_boreopen(exarg_T *eap)
     {
         const char* mappings[] =
         {
-            "q <C-w>q<CR>", 
-            "<CR> :ZZBoreopenselection<CR>", 
+            "q <C-w>q<CR>",
+            "<CR> :ZZBoreopenselection<CR>",
             "<2-LeftMouse> :ZZBoreopenselection<CR>",
             0};
         bore_show_borebuf(g_bore, bore_str(g_bore, g_bore->sln_filelist), g_bore->ini.borebuf_height, mappings);
@@ -2028,7 +2383,7 @@ void ex_boreopen(exarg_T *eap)
 }
 
 void bore_open_file_buffer(char_u* fn)
-{ 
+{
     buf_T* buf;
 
     buf = buflist_findname_exp(fn);
@@ -2398,7 +2753,7 @@ void ex_borebuild(exarg_T *eap)
         // TODO-pkack: Can target Build/Rebuild/Clean be specified for a specific project?
         // The following MSDN example does not work
         // https://msdn.microsoft.com/en-us/library/ms171486.aspx
-        // msbuild SlnFolders.sln /t:NotInSlnfolder:Rebuild;NewFolder\InSolutionFolder:Clean 
+        // msbuild SlnFolders.sln /t:NotInSlnfolder:Rebuild;NewFolder\InSolutionFolder:Clean
         // Note: '.' in project names must be replaced with '_' for msbuild targets
 
         project += proj_index;
@@ -2444,7 +2799,7 @@ void ex_borebuild(exarg_T *eap)
 
 // Internal functions
 
-// Open the file on the current row in the current buffer 
+// Open the file on the current row in the current buffer
 void ex_Boreopenselection(exarg_T *eap)
 {
     char_u* fn;
