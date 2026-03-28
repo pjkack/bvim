@@ -13,7 +13,7 @@ extern "C" {
 
 #ifdef BORE_CVPROFILE
 #pragma comment(lib, "Advapi32.lib")
-#include "C:\Program Files (x86)\Microsoft Visual Studio\2019\Preview\Common7\IDE\Extensions\4hhyuhoo.ghy\SDK\Native\Inc\cvmarkers.h"
+#include "C:\Program Files\Microsoft Visual Studio\18\Professional\Common7\IDE\Extensions\hzwiclye.s1a\SDK\Native\Inc\cvmarkers.h"
 // Add {551695CB-80AC-4C14-9858-ECB94348D43E} in ConcurrencyVisualizer / Advanced Settings / Markers
 PCV_PROVIDER g_provider;
 PCV_MARKERSERIES g_series1;
@@ -125,7 +125,79 @@ done:
 
 #undef BTSOUTPUT
 
-static void bore_resolve_match_location(int file_index, const char* p, u32 filesize, 
+/*
+ * Case-insensitive strstr: find needle in haystack ignoring case.
+ */
+static const char* bore_stristr(const char* haystack, const char* needle, int needle_len)
+{
+    if (needle_len == 0) return haystack;
+    for (; *haystack; ++haystack)
+    {
+        if (TOLOWER_LOC(*haystack) == TOLOWER_LOC(*needle))
+        {
+            const char* h = haystack + 1;
+            const char* n = needle + 1;
+            const char* nend = needle + needle_len;
+            while (n < nend && *h && TOLOWER_LOC(*h) == TOLOWER_LOC(*n))
+            {
+                ++h;
+                ++n;
+            }
+            if (n == nend)
+                return haystack;
+        }
+    }
+    return NULL;
+}
+
+/*
+ * Check if a line matches a wildcard pattern (fragments separated by *).
+ * Returns 1 if all fragments appear in order in the line.
+ * The pattern string is the original search input (e.g. "StrA*StrB").
+ * If case_insensitive is set, uses case-insensitive matching.
+ */
+static int bore_wildcard_match_line(const char* line, const char* pattern, int case_insensitive)
+{
+    const char* pos = line;
+    const char* p = pattern;
+
+    while (*p)
+    {
+        /* Find next fragment (between * characters) */
+        const char* frag_start = p;
+        while (*p && *p != '*')
+            ++p;
+        int frag_len = (int)(p - frag_start);
+
+        /* Skip empty fragments (leading/trailing/consecutive *) */
+        if (frag_len > 0)
+        {
+            const char* found;
+            if (case_insensitive)
+                found = bore_stristr(pos, frag_start, frag_len);
+            else
+            {
+                /* Use a bounded search */
+                for (found = pos; *found; ++found)
+                {
+                    if (0 == memcmp(found, frag_start, frag_len))
+                        break;
+                }
+                if (!*found) found = NULL;
+            }
+            if (!found)
+                return 0;
+            pos = found + frag_len;
+        }
+
+        /* Skip the * */
+        if (*p == '*')
+            ++p;
+    }
+    return 1;
+}
+
+static void bore_resolve_match_location(int file_index, const char* p, u32 filesize,
         bore_match_t* match, bore_match_t* match_end, int* offset, int offset_count)
 {
     const int* offset_end = offset + offset_count;
@@ -161,13 +233,16 @@ static void bore_resolve_match_location(int file_index, const char* p, u32 files
     }
 }
 
-struct search_context_t 
+struct search_context_t
 {
     bore_t* b;
     LONG* remaining_file_count;
     bore_alloc_t filedata;
     bore_alloc_t filedata_lowercase;
     const exact_string_search_t* string_search;
+    const char* wildcard_pattern;  /* full pattern with *, or NULL if no wildcards */
+    const char* search_str;       /* the string to Quick Search (longest fragment or full) */
+    int search_str_len;
     bore_search_t* search;
     bore_match_t* match;
     LONG match_size;
@@ -203,7 +278,7 @@ static void search_one_file(struct search_context_t* search_context, const char*
 
     {
         BORE_CVBEGINSPAN("rd"); // CvEnterSpanA(g_series1, &span, "rd %s", filename);
-        
+
 
         DWORD filesize = GetFileSize(file_handle, 0);
         if (filesize == INVALID_FILE_SIZE)
@@ -254,27 +329,49 @@ static void search_one_file(struct search_context_t* search_context, const char*
     {
         BORE_CVBEGINSPAN("srch");
 
-        // Search for the text
+        // Search for the text (longest fragment if wildcard, full string otherwise)
         int match_offset[BORE_MAX_MATCH_PER_FILE];
         int match_in_file = search_context->string_search->search(
-                start, 
+                start,
                 size,
-                search_context->search->what, 
-                search_context->search->what_len, 
-                &match_offset[0], 
+                search_context->search_str,
+                search_context->search_str_len,
+                &match_offset[0],
                 &match_offset[BORE_MAX_MATCH_PER_FILE]);
 
         // Fill the result with the line's text, etc.
         bore_resolve_match_location(
-                file_index, 
-                (char*)search_context->filedata.base, 
-                search_context->filedata.cursor - search_context->filedata.base, 
-                &search_result.result[0], 
-                &search_result.result[BORE_MAX_MATCH_PER_FILE], 
-                match_offset, 
+                file_index,
+                (char*)search_context->filedata.base,
+                search_context->filedata.cursor - search_context->filedata.base,
+                &search_result.result[0],
+                &search_result.result[BORE_MAX_MATCH_PER_FILE],
+                match_offset,
                 match_in_file);
 
-        if (match_in_file == BORE_MAX_MATCH_PER_FILE)
+        // Post-filter for wildcard patterns
+        if (search_context->wildcard_pattern && match_in_file > 0)
+        {
+            int was_capped = (match_in_file == BORE_MAX_MATCH_PER_FILE);
+            int ci = search_context->search->options & BS_IGNORECASE;
+            int write = 0;
+            for (int r = 0; r < match_in_file; ++r)
+            {
+                if (bore_wildcard_match_line(search_result.result[r].line,
+                        search_context->wildcard_pattern, ci))
+                {
+                    if (write != r)
+                        search_result.result[write] = search_result.result[r];
+                    ++write;
+                }
+            }
+            match_in_file = write;
+            /* If Quick Search hit the per-file cap, we may have missed
+             * wildcard matches beyond the cap — signal truncation. */
+            if (was_capped && write > 0)
+                search_context->was_truncated = 1;
+        }
+        else if (match_in_file == BORE_MAX_MATCH_PER_FILE)
             search_context->was_truncated = 1;
 
         search_result.hits = match_in_file;
@@ -301,7 +398,7 @@ static void search_one_file(struct search_context_t* search_context, const char*
     }
 
 skip:
-    if (file_handle != INVALID_HANDLE_VALUE) 
+    if (file_handle != INVALID_HANDLE_VALUE)
     {
         CloseHandle(file_handle);
     }
@@ -361,18 +458,48 @@ int bore_dofind(bore_t* b, int thread_count, int* truncated_, bore_match_t* matc
         CvCreateMarkerSeriesA(g_provider, "bore_find", &g_series1);
         g_cv_initialized = 1;
     }
-#endif  
+#endif
 
     LONG file_count = b->file_count;
-    *truncated_ = 0;    
+    *truncated_ = 0;
 
-    quick_search_t string_search(search->what, search->what_len);
+    /* Wildcard support: if pattern contains *, find the longest fragment
+     * for Quick Search and store the full pattern for post-filtering. */
+    const char* wildcard_pattern = NULL;
+    const char* search_str = search->what;
+    int search_len = search->what_len;
+
+    if (strchr(search->what, '*'))
+    {
+        wildcard_pattern = search->what;
+        const char* p = search->what;
+        const char* best = p;
+        int best_len = 0;
+        while (*p)
+        {
+            const char* frag = p;
+            while (*p && *p != '*')
+                ++p;
+            int frag_len = (int)(p - frag);
+            if (frag_len > best_len)
+            {
+                best = frag;
+                best_len = frag_len;
+            }
+            if (*p == '*')
+                ++p;
+        }
+        search_str = best;
+        search_len = best_len;
+    }
+
+    quick_search_t string_search(search_str, search_len);
 
     if (thread_count < 1)
     {
         thread_count = 1;
     }
-    else if (thread_count > 32) 
+    else if (thread_count > 32)
     {
         thread_count = 32;
     }
@@ -380,7 +507,7 @@ int bore_dofind(bore_t* b, int thread_count, int* truncated_, bore_match_t* matc
     HANDLE threads[32] = {0};
     search_context_t search_contexts[32] = {0};
     LONG match_count = 0;
-    for (int i = 0; i < thread_count; ++i) 
+    for (int i = 0; i < thread_count; ++i)
     {
         search_contexts[i].b = b;
         search_contexts[i].remaining_file_count = &file_count;
@@ -391,6 +518,9 @@ int bore_dofind(bore_t* b, int thread_count, int* truncated_, bore_match_t* matc
         search_contexts[i].match = match;
         search_contexts[i].match_size = match_size;
         search_contexts[i].match_count = &match_count;
+        search_contexts[i].wildcard_pattern = wildcard_pattern;
+        search_contexts[i].search_str = search_str;
+        search_contexts[i].search_str_len = search_len;
     }
 
     for (int i = 0; i < thread_count - 1; ++i)
@@ -409,7 +539,7 @@ int bore_dofind(bore_t* b, int thread_count, int* truncated_, bore_match_t* matc
     if (*truncated_ > 1)
         match_count = match_size;
 
-    for (int i = 0; i < thread_count; ++i) 
+    for (int i = 0; i < thread_count; ++i)
     {
         bore_alloc_free(&search_contexts[i].filedata);
         bore_alloc_free(&search_contexts[i].filedata_lowercase);

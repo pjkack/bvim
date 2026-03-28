@@ -640,9 +640,6 @@ static void bore_load_vcxproj_files(bore_t* b, int proj_index, const char* path)
                 /* Skip unresolved MSBuild variables */
                 if (strchr(filename_part, '$'))
                     continue;
-                /* Skip build configurations (contain |) */
-                if (strchr(filename_part, '|'))
-                    continue;
 
                 vim_strncpy(filename_buf + path_len, filename_part, len);
                 if (len >= 2 && filename_part[1] == ':')
