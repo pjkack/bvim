@@ -344,7 +344,7 @@ plines_win(
     linenr_T	lnum,
     int		limit_winheight)	// when TRUE limit to window height
 {
-#if defined(FEAT_DIFF) || defined(PROTO)
+#if defined(FEAT_DIFF)
     // Check for filler lines above this buffer line.  When folded the result
     // is one line anyway.
     return plines_win_nofill(wp, lnum, limit_winheight)
@@ -675,7 +675,7 @@ ask_yesno(char_u *str, int direct)
     return r;
 }
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 
 /*
  * Returns the current mode as a string in "buf[MODE_MAX_LENGTH]", NUL
@@ -694,14 +694,14 @@ get_mode(char_u *buf)
 	buf[i++] = 'x';
 	buf[i++] = '!';
     }
-#ifdef FEAT_TERMINAL
+# ifdef FEAT_TERMINAL
     else if (term_use_loop())
     {
 	if (State & MODE_CMDLINE)
 	    buf[i++] = 'c';
 	buf[i++] = 't';
     }
-#endif
+# endif
     else if (State == MODE_HITRETURN || State == MODE_ASKMORE
 						      || State == MODE_SETWSIZE
 		|| State == MODE_CONFIRM)
@@ -771,10 +771,10 @@ get_mode(char_u *buf)
 	    buf[i++] = 'i';
 	    buf[i++] = restart_edit;
 	}
-#ifdef FEAT_TERMINAL
-	else if (term_in_normal_mode())
+# ifdef FEAT_TERMINAL
+	else if (term_in_normal_mode(curbuf))
 	    buf[i++] = 't';
-#endif
+# endif
     }
 
     buf[i] = NUL;
@@ -871,6 +871,7 @@ get_keystroke(void)
     int		save_mapped_ctrl_c = mapped_ctrl_c;
     int		waited = 0;
 
+    mod_mask = 0;
     mapped_ctrl_c = FALSE;	// mappings are not used here
     for (;;)
     {
@@ -974,7 +975,7 @@ get_keystroke(void)
     vim_free(buf);
 
     mapped_ctrl_c = save_mapped_ctrl_c;
-    return n;
+    return merge_modifyOtherKeys(n, &mod_mask);
 }
 
 // For overflow detection, add a digit safely to an int value.
@@ -1016,7 +1017,7 @@ get_number(
     ++allow_keys;		// no mapping here, but recognize keys
     for (;;)
     {
-	windgoto(msg_row, msg_col);
+	windgoto(msg_row, cmdline_col_off + msg_col);
 	c = safe_vgetc();
 	if (VIM_ISDIGIT(c))
 	{
@@ -1349,7 +1350,7 @@ init_homedir(void)
     }
 }
 
-#if defined(EXITFREE) || defined(PROTO)
+#if defined(EXITFREE)
     void
 free_homedir(void)
 {
@@ -1363,7 +1364,7 @@ free_users(void)
 }
 #endif
 
-#if defined(MSWIN) || defined(PROTO)
+#if defined(MSWIN)
 /*
  * Initialize $VIM and $VIMRUNTIME when 'enc' is updated.
  */
@@ -1531,7 +1532,7 @@ expand_env_esc(
 		    if (src[1] == '{')
 # else
 		    if (*src == '%')
-#endif
+# endif
 			++tail;
 #endif
 		    *var = NUL;
@@ -2044,7 +2045,7 @@ vim_unsetenv_ext(char_u *var)
 	didset_vimruntime = FALSE;
 }
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 /*
  * Set environment variable "name" and take care of side effects.
  */
@@ -2169,7 +2170,7 @@ init_users(void)
     lazy_init_done = TRUE;
     ga_init2(&ga_users, sizeof(char_u *), 20);
 
-# if defined(HAVE_GETPWENT) && defined(HAVE_PWD_H)
+#if defined(HAVE_GETPWENT) && defined(HAVE_PWD_H)
     {
 	struct passwd*	pw;
 
@@ -2178,7 +2179,7 @@ init_users(void)
 	    add_user((char_u *)pw->pw_name, TRUE);
 	endpwent();
     }
-# elif defined(MSWIN)
+#elif defined(MSWIN)
     {
 	DWORD		nusers = 0, ntotal = 0, i;
 	PUSER_INFO_0	uinfo;
@@ -2192,8 +2193,8 @@ init_users(void)
 	    NetApiBufferFree(uinfo);
 	}
     }
-# endif
-# if defined(HAVE_GETPWNAM)
+#endif
+#if defined(HAVE_GETPWNAM)
     {
 	char_u	*user_env = mch_getenv((char_u *)"USER");
 
@@ -2224,7 +2225,7 @@ init_users(void)
 	    }
 	}
     }
-# endif
+#endif
 }
 
 /*
@@ -2282,7 +2283,7 @@ prepare_to_exit(void)
     else
 #endif
     {
-	windgoto((int)Rows - 1, 0);
+	windgoto((int)Rows - 1, cmdline_col_off);
 
 	/*
 	 * Switch terminal mode back now, so messages end up on the "normal"
@@ -2372,7 +2373,7 @@ fast_breakcheck(void)
     }
 }
 
-# if defined(FEAT_SPELL) || defined(PROTO)
+#if defined(FEAT_SPELL)
 /*
  * Like line_breakcheck() but check 100 times less often.
  */
@@ -2387,16 +2388,14 @@ veryfast_breakcheck(void)
 }
 #endif
 
-#if defined(VIM_BACKTICK) || defined(FEAT_EVAL) \
-	|| (defined(HAVE_LOCALE_H) || defined(X_LOCALE)) \
-	|| defined(PROTO)
+#if defined(FEAT_EVAL) || (defined(HAVE_LOCALE_H) || defined(X_LOCALE))
 
-#ifndef SEEK_SET
-# define SEEK_SET 0
-#endif
-#ifndef SEEK_END
-# define SEEK_END 2
-#endif
+# ifndef SEEK_SET
+#  define SEEK_SET 0
+# endif
+# ifndef SEEK_END
+#  define SEEK_END 2
+# endif
 
 /*
  * Get the stdout of an external command.
@@ -2472,9 +2471,9 @@ get_cmd_output(
     mch_remove(tempname);
     if (buffer == NULL)
 	goto done;
-#ifdef VMS
+# ifdef VMS
     len = i;	// VMS doesn't give us what we asked for...
-#endif
+# endif
     if (i != len)
     {
 	semsg(_(e_cant_read_file_str), tempname);
@@ -2497,7 +2496,7 @@ done:
     return buffer;
 }
 
-# if defined(FEAT_EVAL) || defined(PROTO)
+# if defined(FEAT_EVAL)
 
     static void
 get_cmd_output_as_rettv(
@@ -2512,6 +2511,9 @@ get_cmd_output_as_rettv(
     FILE	*fd;
     list_T	*list = NULL;
     int		flags = SHELL_SILENT;
+    int		use_argv = FALSE;
+    char	**argv = NULL;
+    int		argc = 0;
 
     rettv->v_type = VAR_STRING;
     rettv->vval.v_string = NULL;
@@ -2519,7 +2521,7 @@ get_cmd_output_as_rettv(
 	goto errret;
 
     if (in_vim9script()
-	    && (check_for_string_arg(argvars, 0) == FAIL
+	    && (check_for_string_or_list_arg(argvars, 0) == FAIL
 		|| check_for_opt_string_or_number_or_list_arg(argvars, 1)
 								      == FAIL))
 	return;
@@ -2599,6 +2601,47 @@ get_cmd_output_as_rettv(
 	}
     }
 
+    // When the command is a List, execute directly without the shell.
+    if (argvars[0].v_type == VAR_LIST)
+    {
+	list_T	*l = argvars[0].vval.v_list;
+
+	if (l == NULL || l->lv_len < 1)
+	{
+	    emsg(_(e_invalid_argument));
+	    goto errret;
+	}
+	if (build_argv_from_list(l, &argv, &argc) == FAIL)
+	    goto errret;
+	if (argc == 0 || *skipwhite((char_u *)argv[0]) == NUL)
+	{
+	    emsg(_(e_invalid_argument));
+	    goto errret;
+	}
+	use_argv = TRUE;
+
+	if (p_verbose > 3)
+	{
+	    int		i;
+	    garray_T	ga;
+
+	    verbose_enter();
+	    ga_init2(&ga, 1, 200);
+	    for (i = 0; i < argc; ++i)
+	    {
+		if (i > 0)
+		    ga_append(&ga, ' ');
+		ga_concat(&ga, (char_u *)argv[i]);
+	    }
+	    ga_append(&ga, NUL);
+	    smsg(_("Executing directly: \"%s\""), (char *)ga.ga_data);
+	    msg_putchar_attr('\n', 0);
+	    cursor_on();
+	    verbose_leave();
+	    ga_clear(&ga);
+	}
+    }
+
     // Omit SHELL_COOKED when invoked with ":silent".  Avoids that the shell
     // echoes typeahead, that messes up the display.
     if (!msg_silent)
@@ -2613,7 +2656,10 @@ get_cmd_output_as_rettv(
 	char_u		*end;
 	int		i;
 
-	res = get_cmd_output(tv_get_string(&argvars[0]), infile, flags, &len);
+	if (use_argv)
+	    res = mch_get_cmd_output_direct(argv, infile, flags, &len);
+	else
+	    res = get_cmd_output(tv_get_string(&argvars[0]), infile, flags, &len);
 	if (res == NULL)
 	    goto errret;
 
@@ -2653,8 +2699,11 @@ get_cmd_output_as_rettv(
     }
     else
     {
-	res = get_cmd_output(tv_get_string(&argvars[0]), infile, flags, NULL);
-#ifdef USE_CRNL
+	if (use_argv)
+	    res = mch_get_cmd_output_direct(argv, infile, flags, NULL);
+	else
+	    res = get_cmd_output(tv_get_string(&argvars[0]), infile, flags, NULL);
+#  ifdef USE_CRNL
 	// translate <CR><NL> into <NL>
 	if (res != NULL)
 	{
@@ -2669,12 +2718,19 @@ get_cmd_output_as_rettv(
 	    }
 	    *d = NUL;
 	}
-#endif
+#  endif
 	rettv->vval.v_string = res;
 	res = NULL;
     }
 
 errret:
+    if (argv != NULL)
+    {
+	int i;
+	for (i = 0; argv[i] != NULL; i++)
+	    vim_free(argv[i]);
+	vim_free(argv);
+    }
     if (infile != NULL)
     {
 	mch_remove(infile);
@@ -2802,7 +2858,7 @@ path_with_url(char_u *fname)
     return path_is_url(p);
 }
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 /*
  * Return the dictionary of v:event.
  * Save and clear the value in case it already has items.

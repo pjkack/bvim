@@ -484,9 +484,8 @@ do_mouse(
 
     // Check for clicking in the tab page panel.
 #if defined(FEAT_TABPANEL)
-    if (mouse_row < firstwin->w_winrow + topframe->fr_height
-	&& (mouse_col < firstwin->w_wincol
-		|| mouse_col >= firstwin->w_wincol + topframe->fr_width))
+    if (mouse_col < firstwin->w_wincol
+		|| mouse_col >= firstwin->w_wincol + topframe->fr_width)
     {
 	tp_label.is_panel = true;
 	tp_label.just_in = true;
@@ -796,7 +795,8 @@ do_mouse(
 #endif
 
 #if defined(FEAT_CLIPBOARD)
-    if ((jump_flags & IN_OTHER_WIN) && !VIsual_active && clip_star.available)
+    if ((jump_flags & IN_OTHER_WIN) && !VIsual_active &&
+	    (clip_star.available || clip_plus.available))
     {
 	clip_modeless(which_button, is_click, is_drag);
 	return FALSE;
@@ -1428,15 +1428,15 @@ get_pseudo_mouse_code(
     return (int)KE_IGNORE;	    // not recognized, ignore it
 }
 
-# define HMT_NORMAL	1
-# define HMT_NETTERM	2
-# define HMT_DEC	4
-# define HMT_JSBTERM	8
-# define HMT_PTERM	16
-# define HMT_URXVT	32
-# define HMT_GPM	64
-# define HMT_SGR	128
-# define HMT_SGR_REL	256
+#define HMT_NORMAL	1
+#define HMT_NETTERM	2
+#define HMT_DEC	4
+#define HMT_JSBTERM	8
+#define HMT_PTERM	16
+#define HMT_URXVT	32
+#define HMT_GPM	64
+#define HMT_SGR	128
+#define HMT_SGR_REL	256
 static int has_mouse_termcode = 0;
 
     void
@@ -1487,7 +1487,7 @@ set_mouse_termcode(
 	has_mouse_termcode |= HMT_NORMAL;
 }
 
-#if defined(UNIX) || defined(VMS) || defined(PROTO)
+#if defined(UNIX) || defined(VMS)
     void
 del_mouse_termcode(
     int		n)	// KS_MOUSE, KS_NETTERM_MOUSE or KS_DEC_MOUSE
@@ -2109,7 +2109,8 @@ retnomove:
 #ifdef FEAT_FOLDING
 	// Remember the character under the mouse, it might be a '-' or '+' in
 	// the fold column.
-	mouse_char = ScreenLines[off];
+	mouse_char = enc_utf8 && ScreenLinesUC[off] != 0
+				       ? ScreenLinesUC[off] : ScreenLines[off];
 #endif
     }
 
@@ -2316,6 +2317,10 @@ check_termcode_mouse(
 	 *	   0x23 = any button release
 	 *	   0x60 = button 4 down (scroll wheel down)
 	 *	   0x61 = button 5 down (scroll wheel up)
+	 *	   0x62 = button 6 down (scroll wheel left)
+	 *	   0x63 = button 7 down (scroll wheel right)
+	 *	   0xa0 = button 8 down (backward button)
+	 *	   0xa1 = button 9 down (forward button)
 	 *	add 0x04 for SHIFT
 	 *	add 0x08 for ALT
 	 *	add 0x10 for CTRL
@@ -2470,7 +2475,7 @@ check_termcode_mouse(
 	 * Linux console with GPM and the MS-DOS or Win32 console
 	 * (multi-clicks use >= 0x60).
 	 */
-	if (mouse_code >= MOUSEWHEEL_LOW
+	if (mouse_code >= MOUSEWHEEL_LOW && mouse_code < MOUSESIDEBUTTONS_LOW
 #  ifdef FEAT_GUI
 		&& !gui.in_use
 #  endif
@@ -2993,7 +2998,13 @@ check_termcode_mouse(
 	held_button = MOUSE_RELEASE;
     }
     else
+    {
+#if defined(UNIX)
+	if (use_xterm_mouse() && orig_mouse_code >= MOUSESIDEBUTTONS_LOW)
+	    current_button = (current_button) ? MOUSE_X2 : MOUSE_X1;
+#endif
 	key_name[1] = get_pseudo_mouse_code(current_button, is_click, is_drag);
+    }
 
 
     // Make sure the mouse position is valid.  Some terminals may return weird
@@ -3223,7 +3234,7 @@ mouse_find_win(int *rowp, int *colp, mouse_find_T popup UNUSED)
 }
 
 #if defined(NEED_VCOL2COL) || defined(FEAT_BEVAL) || defined(FEAT_PROP_POPUP) \
-	|| defined(FEAT_EVAL) || defined(PROTO)
+	|| defined(FEAT_EVAL)
 /*
  * Convert a virtual (screen) column to a character column.
  * The first column is zero.
@@ -3253,7 +3264,7 @@ vcol2col(win_T *wp, linenr_T lnum, int vcol, colnr_T *coladdp)
 }
 #endif
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 /*
  * "getmousepos()" function.
  */

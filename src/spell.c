@@ -58,7 +58,7 @@
 #define IN_SPELL_C
 #include "vim.h"
 
-#if defined(FEAT_SPELL) || defined(PROTO)
+#if defined(FEAT_SPELL)
 
 #include <time.h>
 
@@ -2100,9 +2100,8 @@ parse_spelllang(win_T *wp)
     for (splp = spl_copy; *splp != NUL; )
     {
 	// Get one language name.
-	copy_option_part(&splp, lang, MAXWLEN, ",");
+	len = copy_option_part(&splp, lang, MAXWLEN, ",");
 	region = NULL;
-	len = (int)STRLEN(lang);
 
 	if (!valid_spelllang(lang))
 	    continue;
@@ -2248,8 +2247,8 @@ parse_spelllang(win_T *wp)
 	else
 	{
 	    // One entry in 'spellfile'.
-	    copy_option_part(&spf, spf_name, MAXPATHL - 4, ",");
-	    STRCAT(spf_name, ".spl");
+	    len = copy_option_part(&spf, spf_name, MAXPATHL - 4, ",");
+	    STRCPY(spf_name + len, ".spl");
 
 	    // If it was already found above then skip it.
 	    for (c = 0; c < ga.ga_len; ++c)
@@ -3138,7 +3137,7 @@ make_case_word(char_u *fword, char_u *cword, int flags)
 	STRCPY(cword, fword);
 }
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 /*
  * Soundfold a string, for soundfold().
  * Result is in allocated memory, NULL for an error.

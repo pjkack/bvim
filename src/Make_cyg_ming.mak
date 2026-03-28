@@ -25,7 +25,14 @@
 #     http://www.matcode.com/mpress.htm
 #
 # Maintained by Ron Aaron <ronaharon@yahoo.com> et al.
-# Last Update: 2025 May 14.
+# Last Update: 2026 Mar 22.
+
+# If you want to build some optional features without modifying the source, you
+# can set EXTRA_DEFINES on the command line. Here's an example of setting
+# MODIFIED_BY:
+#
+#	mingw-make -f Make_ming.mvc \
+#	  'EXTRA_DEFINES=-DMODIFIED_BY=\"yourmail@example.com\"'
 
 #>>>>> choose options:
 # FEATURES=[TINY | NORMAL | HUGE]
@@ -536,7 +543,8 @@ endif # RUBY
 # Any other defines can be included here.
 DEF_GUI=-DFEAT_GUI_MSWIN -DFEAT_CLIPBOARD
 DEFINES=-DWIN32 -DWINVER=$(WINVER) -D_WIN32_WINNT=$(WINVER) \
-	-DHAVE_PATHDEF -DFEAT_$(FEATURES) -DHAVE_STDINT_H
+	-DHAVE_PATHDEF -DFEAT_$(FEATURES) -DHAVE_STDINT_H \
+	$(EXTRA_DEFINES)
 
 #>>>>> end of choices
 ###########################################################################
@@ -665,9 +673,7 @@ endif
 
 ifeq ($(CHANNEL),yes)
 DEFINES += -DFEAT_JOB_CHANNEL -DFEAT_IPV6
- ifeq ($(shell expr "$$(($(WINVER)))" \>= "$$((0x600))"),1)
 DEFINES += -DHAVE_INET_NTOP
- endif
 endif
 
 ifeq ($(TERMINAL),yes)
@@ -1254,8 +1260,9 @@ nvcmdidxs: nv_cmds.h
 
 ###########################################################################
 INCL =	vim.h alloc.h ascii.h ex_cmds.h feature.h errors.h globals.h \
-	keymap.h macros.h option.h os_dos.h os_win32.h proto.h regexp.h \
-	spell.h structs.h termdefs.h beval.h $(NBDEBUG_INCL)
+	keymap.h macros.h option.h optiondefs.h os_dos.h os_win32.h \
+	proto.h regexp.h spell.h structs.h termdefs.h beval.h \
+	$(NBDEBUG_INCL)
 GUI_INCL = gui.h
 ifeq ($(DIRECTX),yes)
 GUI_INCL += gui_dwrite.h

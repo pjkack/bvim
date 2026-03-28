@@ -12,7 +12,7 @@ char_u *ExpandOne(expand_T *xp, char_u *str, char_u *orig, int options, int mode
 void ExpandInit(expand_T *xp);
 void ExpandCleanup(expand_T *xp);
 void clear_cmdline_orig(void);
-int showmatches(expand_T *xp, int wildmenu, int noselect);
+int showmatches(expand_T *xp, int display_wildmenu, int display_list, int noselect);
 char_u *addstar(char_u *fname, int len, int context);
 void set_expand_context(expand_T *xp);
 void set_cmd_context(expand_T *xp, char_u *str, int len, int col, int use_ccline);
@@ -25,5 +25,5 @@ int wildmenu_process_key(cmdline_info_T *cclp, int key, expand_T *xp);
 void wildmenu_cleanup(cmdline_info_T *cclp);
 void f_getcompletion(typval_T *argvars, typval_T *rettv);
 void f_getcompletiontype(typval_T *argvars, typval_T *rettv);
-void f_cmdcomplete_info(typval_T *argvars UNUSED, typval_T *rettv);
+void f_cmdcomplete_info(typval_T *argvars, typval_T *rettv);
 /* vim: set ft=c : */

@@ -6522,7 +6522,7 @@ func Test_type()
     endif
     call assert_equal(v:t_blob, type(test_null_blob()))
 
-    call assert_fails("call type(test_void())", ['E340:', 'E685:'])
+    call assert_fails("call type(test_void())", ['E1031: Cannot use void value', 'E1031: Cannot use void value'])
     call assert_fails("call type(test_unknown())", ['E340:', 'E685:'])
 
     call assert_equal(0, 0 + v:false)
@@ -6598,6 +6598,10 @@ func Test_type()
     call assert_false(empty(v:true))
     call assert_true(empty(v:null))
     call assert_true(empty(v:none))
+
+    def s:GetVoidValue(): void
+    enddef
+    call assert_fails('let x = type(s:GetVoidValue())', 'E1031: Cannot use void value')
 
     func ChangeYourMind()
 	try
@@ -7082,7 +7086,11 @@ func Test_compound_assignment_operators()
     call assert_fails('let x %= 0.5', 'E734:')
     call assert_fails('let x .= "f"', 'E734:')
     let x = !3.14
-    call assert_equal(0.0, x)
+    call assert_equal(0, x)
+    call assert_equal(1, !!1.0)
+    let x = !0.0
+    call assert_equal(1, x)
+    call assert_equal(0, !!0.0)
 
     " integer and float operations
     let x = 1
@@ -7679,6 +7687,19 @@ func Test_catch_pattern_trailing_chars()
   endtry
   call assert_true(caught_exception)
   bw!
+endfunc
+
+" Test for long gerneric type name {{{1
+func Test_function_long_generic_name()
+  func TestFunc()
+    return
+  endfunc
+
+  let name = 'TestFunc<' .. repeat('T', 1100) .. '>'
+
+  call function(name)
+  call funcref(name)
+  delfunc TestFunc
 endfunc
 
 "-------------------------------------------------------------------------------

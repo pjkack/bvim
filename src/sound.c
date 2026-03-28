@@ -13,7 +13,7 @@
 
 #include "vim.h"
 
-#if defined(FEAT_SOUND) || defined(PROTO)
+#if defined(FEAT_SOUND)
 
 static long sound_id = 0;
 
@@ -63,8 +63,6 @@ get_sound_callback(typval_T *arg)
     soundcb->snd_next = first_callback;
     first_callback = soundcb;
     set_callback(&soundcb->snd_callback, &callback);
-    if (callback.cb_free_name)
-        vim_free(callback.cb_name);
     return soundcb;
 }
 
@@ -109,7 +107,7 @@ delete_sound_callback(soundcb_T *soundcb)
         }
 }
 
-# if defined(HAVE_CANBERRA) || defined(PROTO)
+# if defined(HAVE_CANBERRA)
 
 /*
  * Sound implementation for Linux/Unix using libcanberra.
@@ -279,7 +277,7 @@ f_sound_clear(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
     context = NULL;
 }
 
-#  if defined(EXITFREE) || defined(PROTO)
+#  if defined(EXITFREE)
 void
 sound_free(void)
 {
@@ -510,7 +508,7 @@ f_sound_clear(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
     sound_mch_clear();
 }
 
-#  if defined(EXITFREE) || defined(PROTO)
+#  if defined(EXITFREE)
 void
 sound_free(void)
 {

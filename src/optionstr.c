@@ -41,17 +41,19 @@ static char *(p_dip_inline_values[]) = {"none", "simple", "char", "word", NULL};
 #endif
 static char *(p_nf_values[]) = {"bin", "octal", "hex", "alpha", "unsigned", "blank", NULL};
 static char *(p_ff_values[]) = {FF_UNIX, FF_DOS, FF_MAC, NULL};
-#ifdef FEAT_CLIPBOARD
+#ifdef HAVE_CLIPMETHOD
 // Note: Keep this in sync with did_set_clipboard()
-static char *(p_cb_values[]) = {"unnamed", "unnamedplus", "autoselect", "autoselectplus", "autoselectml", "html", "exclude:", NULL};
-// Note: Keep this in sync with get_clipmethod()
-static char *(p_cpm_values[]) = {"wayland", "x11", "gui", "other", NULL};
+static char *(p_cb_values[]) = {"unnamed", "unnamedplus",
+# ifdef FEAT_CLIPBOARD
+    "autoselect", "autoselectplus", "autoselectml", "html", "exclude:",
+# endif
+    NULL};
 #endif
 #ifdef FEAT_CRYPT
 static char *(p_cm_values[]) = {"zip", "blowfish", "blowfish2",
- # ifdef FEAT_SODIUM
+# ifdef FEAT_SODIUM
     "xchacha20", "xchacha20v2",
- # endif
+# endif
     NULL};
 #endif
 static char *(p_cmp_values[]) = {"internal", "keepascii", NULL};
@@ -70,8 +72,17 @@ static char *(p_fdo_values[]) = {"all", "block", "hor", "mark", "percent",
 static char *(p_kpc_protocol_values[]) = {"none", "mok2", "kitty", NULL};
 #ifdef FEAT_PROP_POPUP
 // Note: Keep this in sync with parse_popup_option()
-static char *(p_popup_option_values[]) = {"height:", "width:", "highlight:", "border:", "align:", NULL};
-static char *(p_popup_option_border_values[]) = {"on", "off", NULL};
+static char *(p_popup_cpp_option_values[]) = {"align:", "border:",
+    "borderhighlight:", "close:", "height:", "highlight:", "resize:",
+    "shadow:", "width:", NULL};
+static char *(p_popup_pvp_option_values[]) = {"border:",
+    "borderhighlight:", "close:", "height:", "highlight:", "resize:",
+    "shadow:", "width:", NULL};
+static char *(p_popup_option_on_off_values[]) = {"on", "off", NULL};
+static char *(p_popup_cpp_border_values[]) = {"single", "double", "round",
+    "ascii", "on", "off", "custom:", NULL};
+static char *(p_popup_pvp_border_values[]) = {"single", "double", "round",
+    "ascii", "on", "off", "custom:", NULL};
 static char *(p_popup_option_align_values[]) = {"item", "menu", NULL};
 #endif
 #if defined(FEAT_SPELL)
@@ -84,6 +95,9 @@ static char *(p_ssop_values[]) = {"buffers", "winpos", "resize", "winsize",
     "localoptions", "options", "help", "blank", "globals", "slash", "unix",
     "sesdir", "curdir", "folds", "cursor", "tabpages", "terminal", "skiprtp",
     NULL};
+#endif
+#if defined(FEAT_STL_OPT)
+static char *(p_stlo_values[]) = {"fixedheight", "maxheight:", NULL};
 #endif
 // Keep in sync with SWB_ flags in option.h
 static char *(p_swb_values[]) = {"useopen", "usetab", "split", "newtab", "vsplit", "uselast", NULL};
@@ -136,6 +150,9 @@ static char *(p_csl_values[]) = {"slash", "backslash", NULL};
 #ifdef FEAT_SIGNS
 static char *(p_scl_values[]) = {"yes", "no", "auto", "number", NULL};
 #endif
+#ifdef UNIX
+static char *(p_trz_values[]) = {"inband", "sigwinch", "", NULL};
+#endif
 #if defined(MSWIN) && defined(FEAT_TERMINAL)
 static char *(p_twt_values[]) = {"winpty", "conpty", "", NULL};
 #endif
@@ -155,7 +172,6 @@ didset_string_options(void)
     (void)opt_strings_flags(p_cmp, p_cmp_values, &cmp_flags, TRUE);
     (void)opt_strings_flags(p_bkc, p_bkc_values, &bkc_flags, TRUE);
     (void)opt_strings_flags(p_bo, p_bo_values, &bo_flags, TRUE);
-    (void)opt_strings_flags(p_cfc, p_cfc_values, &cfc_flags, TRUE);
     (void)opt_strings_flags(p_cot, p_cot_values, &cot_flags, TRUE);
 #ifdef FEAT_SESSION
     (void)opt_strings_flags(p_ssop, p_ssop_values, &ssop_flags, TRUE);
@@ -181,7 +197,7 @@ didset_string_options(void)
     (void)opt_strings_flags(p_tcl, p_tcl_values, &tcl_flags, TRUE);
 }
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 /*
  * Trigger the OptionSet autocommand.
  * "opt_idx"	is the index of the option being set.
@@ -208,32 +224,35 @@ trigger_optionset_string(
 	return;
 
     char_u buf_type[7];
+    size_t buf_typelen;
+    size_t oldvallen;
 
-    sprintf((char *)buf_type, "%s",
-	    (opt_flags & OPT_LOCAL) ? "local" : "global");
-    set_vim_var_string(VV_OPTION_OLD, oldval, -1);
+    oldvallen = STRLEN(oldval);
+    set_vim_var_string(VV_OPTION_OLD, oldval, (int)oldvallen);
     set_vim_var_string(VV_OPTION_NEW, newval, -1);
-    set_vim_var_string(VV_OPTION_TYPE, buf_type, -1);
+    buf_typelen = vim_snprintf_safelen((char *)buf_type, sizeof(buf_type),
+	"%s", (opt_flags & OPT_LOCAL) ? "local" : "global");
+    set_vim_var_string(VV_OPTION_TYPE, buf_type, (int)buf_typelen);
     if (opt_flags & OPT_LOCAL)
     {
-	set_vim_var_string(VV_OPTION_COMMAND, (char_u *)"setlocal", -1);
-	set_vim_var_string(VV_OPTION_OLDLOCAL, oldval, -1);
+	set_vim_var_string(VV_OPTION_COMMAND, (char_u *)"setlocal", STRLEN_LITERAL("setlocal"));
+	set_vim_var_string(VV_OPTION_OLDLOCAL, oldval, (int)oldvallen);
     }
     if (opt_flags & OPT_GLOBAL)
     {
-	set_vim_var_string(VV_OPTION_COMMAND, (char_u *)"setglobal", -1);
-	set_vim_var_string(VV_OPTION_OLDGLOBAL, oldval, -1);
+	set_vim_var_string(VV_OPTION_COMMAND, (char_u *)"setglobal", STRLEN_LITERAL("setglobal"));
+	set_vim_var_string(VV_OPTION_OLDGLOBAL, oldval, (int)oldvallen);
     }
     if ((opt_flags & (OPT_LOCAL | OPT_GLOBAL)) == 0)
     {
-	set_vim_var_string(VV_OPTION_COMMAND, (char_u *)"set", -1);
+	set_vim_var_string(VV_OPTION_COMMAND, (char_u *)"set", STRLEN_LITERAL("set"));
 	set_vim_var_string(VV_OPTION_OLDLOCAL, oldval_l, -1);
 	set_vim_var_string(VV_OPTION_OLDGLOBAL, oldval_g, -1);
     }
     if (opt_flags & OPT_MODELINE)
     {
-	set_vim_var_string(VV_OPTION_COMMAND, (char_u *)"modeline", -1);
-	set_vim_var_string(VV_OPTION_OLDLOCAL, oldval, -1);
+	set_vim_var_string(VV_OPTION_COMMAND, (char_u *)"modeline", STRLEN_LITERAL("modeline"));
+	set_vim_var_string(VV_OPTION_OLDLOCAL, oldval, (int)oldvallen);
     }
     apply_autocmds(EVENT_OPTIONSET,
 	    get_option_fullname(opt_idx), NULL, FALSE,
@@ -301,9 +320,7 @@ check_buf_options(buf_T *buf)
     check_string_option(&buf->b_p_flp);
     check_string_option(&buf->b_p_isk);
     check_string_option(&buf->b_p_com);
-#ifdef FEAT_FOLDING
     check_string_option(&buf->b_p_cms);
-#endif
     check_string_option(&buf->b_p_nf);
     check_string_option(&buf->b_p_qe);
 #ifdef FEAT_SYN_HL
@@ -326,7 +343,6 @@ check_buf_options(buf_T *buf)
     check_string_option(&buf->b_p_cinw);
     check_string_option(&buf->b_p_cot);
     check_string_option(&buf->b_p_cpt);
-    check_string_option(&buf->b_p_ise);
 #ifdef FEAT_COMPL_FUNC
     check_string_option(&buf->b_p_cfu);
     check_string_option(&buf->b_p_ofu);
@@ -474,7 +490,7 @@ set_string_option_direct(
 	free_string_option(*varp);
 	*varp = empty_option;
     }
-# ifdef FEAT_EVAL
+#ifdef FEAT_EVAL
     if (set_sid != SID_NONE)
     {
 	sctx_T script_ctx;
@@ -490,11 +506,9 @@ set_string_option_direct(
 	}
 	set_option_sctx_idx(idx, opt_flags, script_ctx);
     }
-# endif
+#endif
 }
 
-#if defined(FEAT_PROP_POPUP) || \
-    (defined(FEAT_DIFF) && defined(FEAT_FOLDING)) || defined(PROTO)
 /*
  * Like set_string_option_direct(), but for a window-local option in "wp".
  * Blocks autocommands to avoid the old curwin becoming invalid.
@@ -518,9 +532,8 @@ set_string_option_direct_in_win(
     curbuf = curwin->w_buffer;
     unblock_autocmds();
 }
-#endif
 
-#if defined(FEAT_PROP_POPUP) || defined(PROTO)
+#if defined(FEAT_PROP_POPUP)
 /*
  * Like set_string_option_direct(), but for a buffer-local option in "buf".
  * Blocks autocommands to avoid the old curbuf becoming invalid.
@@ -658,6 +671,11 @@ check_stl_option(char_u *s)
 	if (!*s)
 	    break;
 	s++;
+	if (*s == STL_LINEBREAK)
+	{
+	    s++;
+	    continue;
+	}
 	if (*s == '%' || *s == STL_TRUNCMARK || *s == STL_SEPARATE)
 	{
 	    s++;
@@ -886,7 +904,7 @@ expand_set_opt_generic(
     return ret;
 }
 
-# if defined(FEAT_GUI_MSWIN) || defined(FEAT_GUI_GTK)
+#if defined(FEAT_GUI_MSWIN) || defined(FEAT_GUI_GTK)
 static garray_T *expand_cb_ga;
 static optexpand_T *expand_cb_args;
 
@@ -1239,7 +1257,7 @@ expand_set_belloff(optexpand_T *args, int *numMatches, char_u ***matches)
 	    matches);
 }
 
-#if defined(FEAT_LINEBREAK) || defined(PROTO)
+#if defined(FEAT_LINEBREAK)
 /*
  * The 'breakat' option is changed.
  */
@@ -1293,7 +1311,7 @@ expand_set_breakindentopt(
 }
 #endif
 
-#if defined(FEAT_BROWSE) || defined(PROTO)
+#if defined(FEAT_BROWSE)
 /*
  * The 'browsedir' option is changed.
  */
@@ -1390,7 +1408,7 @@ expand_set_casemap(optexpand_T *args, int *numMatches, char_u ***matches)
 	    matches);
 }
 
-#if defined(FEAT_CLIPBOARD) || defined(PROTO)
+#if defined(HAVE_CLIPMETHOD)
     int
 expand_set_clipboard(optexpand_T *args, int *numMatches, char_u ***matches)
 {
@@ -1401,7 +1419,9 @@ expand_set_clipboard(optexpand_T *args, int *numMatches, char_u ***matches)
 	    numMatches,
 	    matches);
 }
+#endif
 
+#ifdef HAVE_CLIPMETHOD
     char *
 did_set_clipmethod(optset_T *args UNUSED)
 {
@@ -1411,12 +1431,61 @@ did_set_clipmethod(optset_T *args UNUSED)
     int
 expand_set_clipmethod(optexpand_T *args, int *numMatches, char_u ***matches)
 {
-    return expand_set_opt_string(
+    // We want to expand using the predefined clipmethod values + clipboard
+    // provider names.
+    int		result;
+    char	**values;
+    int		count, pos = 0, start = 0;
+# ifdef FEAT_EVAL
+    dict_T	*providers = get_vim_var_dict(VV_CLIPPROVIDERS);
+# else
+    dict_T	*providers = NULL;
+# endif
+    hashtab_T	*ht = providers == NULL ? NULL : &providers->dv_hashtab;
+
+    count = (ht == NULL ? 0 : ht->ht_used);
+# ifdef FEAT_WAYLAND_CLIPBOARD
+    count++;
+    start++;
+# endif
+# ifdef FEAT_XCLIPBOARD
+    count++;
+    start++;
+# endif
+    values = ALLOC_MULT(char *, count + 1); // Add NULL terminator too
+
+    if (values == NULL)
+	return FAIL;
+
+# ifdef FEAT_WAYLAND_CLIPBOARD
+    values[pos++] = "wayland";
+# endif
+# ifdef FEAT_XCLIPBOARD
+    values[pos++] = "x11";
+# endif
+
+    if (ht != NULL)
+	for (long_u i = 0; i < ht->ht_mask + 1; i++)
+	{
+	    hashitem_T	*hi = ht->ht_array + i;
+
+	    if (!HASHITEM_EMPTY(hi))
+		values[pos++] = (char *)vim_strsave(hi->hi_key);
+	}
+    values[pos++] = NULL;
+
+    result = expand_set_opt_string(
 	    args,
-	    p_cpm_values,
-	    ARRAY_LENGTH(p_cpm_values) - 1,
+	    values,
+	    count,
 	    numMatches,
 	    matches);
+
+    for (int i = start; i < count; i++)
+	vim_free(values[i]);
+    vim_free(values);
+
+    return result;
 }
 #endif
 
@@ -1523,7 +1592,7 @@ did_set_cinoptions(optset_T *args UNUSED)
     return NULL;
 }
 
-#if defined(FEAT_SYN_HL) || defined(PROTO)
+#if defined(FEAT_SYN_HL)
 /*
  * The 'colorcolumn' option is changed.
  */
@@ -1576,7 +1645,6 @@ did_set_comments(optset_T *args)
     return errmsg;
 }
 
-#if defined(FEAT_FOLDING) || defined(PROTO)
 /*
  * The 'commentstring' option is changed.
  */
@@ -1590,7 +1658,6 @@ did_set_commentstring(optset_T *args)
 
     return NULL;
 }
-#endif
 
 /*
  * Check if value for 'complete' is valid when 'complete' option is changed.
@@ -1703,9 +1770,6 @@ did_set_completeopt(optset_T *args UNUSED)
 	// When using :set, clear the local flags.
 	curbuf->b_cot_flags = 0;
 
-    if (check_opt_strings(cot, p_cot_values, TRUE) != OK)
-	return e_invalid_argument;
-
     if (opt_strings_flags(cot, p_cot_values, flags, TRUE) != OK)
 	return e_invalid_argument;
 
@@ -1800,7 +1864,7 @@ did_set_completeitemalign(optset_T *args UNUSED)
     return NULL;
 }
 
-#if (defined(FEAT_PROP_POPUP) && defined(FEAT_QUICKFIX)) || defined(PROTO)
+#if defined(FEAT_PROP_POPUP) && defined(FEAT_QUICKFIX)
 /*
  * The 'completepopup' option is changed.
  */
@@ -1815,7 +1879,7 @@ did_set_completepopup(optset_T *args UNUSED)
 }
 #endif
 
-#if defined(BACKSLASH_IN_FILENAME) || defined(PROTO)
+#if defined(BACKSLASH_IN_FILENAME)
 /*
  * The 'completeslash' option is changed.
  */
@@ -1841,7 +1905,7 @@ expand_set_completeslash(optexpand_T *args, int *numMatches, char_u ***matches)
 }
 #endif
 
-#if defined(FEAT_CONCEAL) || defined(PROTO)
+#if defined(FEAT_CONCEAL)
 /*
  * The 'concealcursor' option is changed.
  */
@@ -1879,7 +1943,7 @@ expand_set_cpoptions(optexpand_T *args, int *numMatches, char_u ***matches)
     return expand_set_opt_listflag(args, (char_u*)CPO_ALL, numMatches, matches);
 }
 
-#if defined(FEAT_CRYPT) || defined(PROTO)
+#if defined(FEAT_CRYPT)
 /*
  * The 'cryptkey' option is changed.
  */
@@ -1982,7 +2046,7 @@ expand_set_cryptmethod(optexpand_T *args, int *numMatches, char_u ***matches)
 }
 #endif
 
-#if (defined(FEAT_CSCOPE) && defined(FEAT_QUICKFIX)) || defined(PROTO)
+#if defined(FEAT_CSCOPE) && defined(FEAT_QUICKFIX)
 /*
  * The 'cscopequickfix' option is changed.
  */
@@ -2012,7 +2076,7 @@ did_set_cscopequickfix(optset_T *args UNUSED)
 }
 #endif
 
-#if defined(FEAT_SYN_HL) || defined(PROTO)
+#if defined(FEAT_SYN_HL)
 /*
  * The 'cursorlineopt' option is changed.
  */
@@ -2060,7 +2124,7 @@ expand_set_debug(optexpand_T *args, int *numMatches, char_u ***matches)
 	    matches);
 }
 
-#if defined(FEAT_DIFF) || defined(PROTO)
+#if defined(FEAT_DIFF)
 /*
  * The 'diffanchors' option is changed.
  */
@@ -2409,7 +2473,7 @@ did_set_filetype_or_syntax(optset_T *args)
     return NULL;
 }
 
-#if defined(FEAT_FOLDING) || defined(PROTO)
+#if defined(FEAT_FOLDING)
 /*
  * The 'foldclose' option is changed.
  */
@@ -2431,7 +2495,7 @@ expand_set_foldclose(optexpand_T *args, int *numMatches, char_u ***matches)
 }
 #endif
 
-#if (defined(FEAT_EVAL) && defined(FEAT_FOLDING)) || defined(PROTO)
+#if defined(FEAT_EVAL) && defined(FEAT_FOLDING)
 /*
  * The 'foldexpr' option is changed.
  */
@@ -2445,7 +2509,7 @@ did_set_foldexpr(optset_T *args)
 }
 #endif
 
-#if defined(FEAT_FOLDING) || defined(PROTO)
+#if defined(FEAT_FOLDING)
 /*
  * The 'foldignore' option is changed.
  */
@@ -2544,7 +2608,7 @@ expand_set_formatoptions(optexpand_T *args, int *numMatches, char_u ***matches)
     return expand_set_opt_listflag(args, (char_u*)FO_ALL, numMatches, matches);
 }
 
-#if defined(CURSOR_SHAPE) || defined(PROTO)
+#if defined(CURSOR_SHAPE)
 /*
  * The 'guicursor' option is changed.
  */
@@ -2555,7 +2619,7 @@ did_set_guicursor(optset_T *args UNUSED)
 }
 #endif
 
-#if defined(FEAT_GUI) || defined(PROTO)
+#if defined(FEAT_GUI)
 /*
  * The 'guifont' option is changed.
  */
@@ -2619,7 +2683,7 @@ expand_set_guifont(optexpand_T *args, int *numMatches, char_u ***matches)
 # endif
 }
 
-# if defined(FEAT_XFONTSET) || defined(PROTO)
+# if defined(FEAT_XFONTSET)
 /*
  * The 'guifontset' option is changed.
  */
@@ -2654,7 +2718,7 @@ did_set_guifontwide(optset_T *args UNUSED)
 }
 #endif
 
-#if defined(FEAT_GUI_GTK) || defined(FEAT_GUI_MSWIN) || defined(PROTO)
+#if defined(FEAT_GUI_GTK) || defined(FEAT_GUI_MSWIN)
 /*
  * The 'guiligatures' option is changed.
  */
@@ -2666,7 +2730,7 @@ did_set_guiligatures(optset_T *args UNUSED)
 }
 #endif
 
-#if defined(FEAT_GUI) || defined(PROTO)
+#if defined(FEAT_GUI)
 /*
  * The 'guioptions' option is changed.
  */
@@ -2692,7 +2756,7 @@ expand_set_guioptions(optexpand_T *args, int *numMatches, char_u ***matches)
 }
 #endif
 
-#if defined(FEAT_GUI_TABLINE) || defined(PROTO)
+#if defined(FEAT_GUI_TABLINE)
 /*
  * The 'guitablabel' option is changed.
  */
@@ -2718,7 +2782,7 @@ did_set_helpfile(optset_T *args UNUSED)
     return NULL;
 }
 
-#if defined(FEAT_MULTI_LANG) || defined(PROTO)
+#if defined(FEAT_MULTI_LANG)
 /*
  * The 'helplang' option is changed.
  */
@@ -2755,6 +2819,63 @@ did_set_highlight(optset_T *args UNUSED)
     return NULL;
 }
 
+    static int
+expand_hl_occasions(
+	optexpand_T *args,
+	int *numMatches,
+	char_u ***matches,
+	char_u prefix)
+{
+    char_u	    *p;
+    static char_u   hl_flags[HLF_COUNT] = HL_FLAGS;
+    size_t	    i;
+    int		    count = 0;
+
+    *matches = ALLOC_MULT(char_u *, HLF_COUNT + 1);
+    if (*matches == NULL)
+	return FAIL;
+
+    // We still want to return the full option if it's requested.
+    if (args->oe_include_orig_val)
+    {
+	p = vim_strsave(args->oe_opt_value);
+	if (p == NULL)
+	{
+	    VIM_CLEAR(*matches);
+	    return FAIL;
+	}
+	(*matches)[count++] = p;
+    }
+
+    for (i = 0; i < HLF_COUNT; i++)
+    {
+	p = alloc((prefix == NUL ? 1 : 2) + 1);
+	if (p == NULL)
+	{
+	    if (count == 0)
+	    {
+		VIM_CLEAR(*matches);
+		return FAIL;
+	    }
+	    else
+		break;
+	}
+	if (prefix == NUL)
+	    sprintf((char *)p, "%c", hl_flags[i]);
+	else
+	    sprintf((char *)p, "%c%c", prefix, hl_flags[i]);
+	(*matches)[count++] = p;
+    }
+
+    if (count == 0)
+    {
+	VIM_CLEAR(*matches);
+	return FAIL;
+    }
+    *numMatches = count;
+    return OK;
+}
+
 /*
  * Expand 'highlight' option.
  */
@@ -2763,7 +2884,6 @@ expand_set_highlight(optexpand_T *args, int *numMatches, char_u ***matches)
 {
     char_u	    *p;
     expand_T	    *xp = args->oe_xp;
-    static char_u   hl_flags[HLF_COUNT] = HL_FLAGS;
     size_t	    i;
     int		    count = 0;
 
@@ -2778,49 +2898,9 @@ expand_set_highlight(optexpand_T *args, int *numMatches, char_u ***matches)
     }
 
     if (*xp->xp_pattern == NUL)
-    {
 	// At beginning of a comma-separated list. Return the specific list of
 	// supported occasions.
-	*matches = ALLOC_MULT(char_u *, HLF_COUNT + 1);
-	if (*matches == NULL)
-	    return FAIL;
-
-	// We still want to return the full option if it's requested.
-	if (args->oe_include_orig_val)
-	{
-	    p = vim_strsave(args->oe_opt_value);
-	    if (p == NULL)
-	    {
-		VIM_CLEAR(*matches);
-		return FAIL;
-	    }
-	    (*matches)[count++] = p;
-	}
-
-	for (i = 0; i < HLF_COUNT; i++)
-	{
-	    p = vim_strnsave(&hl_flags[i], 1);
-	    if (p == NULL)
-	    {
-		if (count == 0)
-		{
-		    VIM_CLEAR(*matches);
-		    return FAIL;
-		}
-		else
-		    break;
-	    }
-	    (*matches)[count++] = p;
-	}
-
-	if (count == 0)
-	{
-	    VIM_CLEAR(*matches);
-	    return FAIL;
-	}
-	*numMatches = count;
-	return OK;
-    }
+	return expand_hl_occasions(args, numMatches, matches, NUL);
 
     // We are after the initial character (which indicates the occasion). We
     // already made sure we are not matching after a ':' above, so now we want
@@ -2910,7 +2990,7 @@ did_set_iconstring(optset_T *args)
     return parse_titleiconstring(args, flagval);
 }
 
-#if (defined(FEAT_XIM) && defined(FEAT_GUI_GTK)) || defined(PROTO)
+#if defined(FEAT_XIM) && defined(FEAT_GUI_GTK)
 /*
  * The 'imactivatekey' option is changed.
  */
@@ -2922,48 +3002,6 @@ did_set_imactivatekey(optset_T *args UNUSED)
     return NULL;
 }
 #endif
-
-/*
- * The 'isexpand' option is changed.
- */
-    char *
-did_set_isexpand(optset_T *args)
-{
-    char_u  *ise = p_ise;
-    char_u  *p;
-    int     last_was_comma = FALSE;
-
-    if (args->os_flags & OPT_LOCAL)
-	ise = curbuf->b_p_ise;
-
-    for (p = ise; *p != NUL;)
-    {
-	if (*p == '\\' && p[1] == ',')
-	{
-	    p += 2;
-	    last_was_comma = FALSE;
-	    continue;
-	}
-
-	if (*p == ',')
-	{
-	    if (last_was_comma)
-		return e_invalid_argument;
-	    last_was_comma = TRUE;
-	    p++;
-	    continue;
-	}
-
-	last_was_comma = FALSE;
-	MB_PTR_ADV(p);
-    }
-
-    if (last_was_comma)
-	return e_invalid_argument;
-
-    return NULL;
-}
-
 
 /*
  * The 'iskeyword' option is changed.
@@ -3026,7 +3064,7 @@ expand_set_jumpoptions(optexpand_T *args, int *numMatches, char_u ***matches)
 	    matches);
 }
 
-#if defined(FEAT_KEYMAP) || defined(PROTO)
+#if defined(FEAT_KEYMAP)
 /*
  * The 'keymap' option is changed.
  */
@@ -3244,7 +3282,7 @@ expand_set_messagesopt(optexpand_T *args, int *numMatches, char_u ***matches)
 	    matches);
 }
 
-#if defined(FEAT_SPELL) || defined(PROTO)
+#if defined(FEAT_SPELL)
 /*
  * The 'mkspellmem' option is changed.
  */
@@ -3274,7 +3312,7 @@ did_set_mouse(optset_T *args)
 	redraw_tabline = TRUE;
 	if (tabline_height() > 0)
 	    update_screen(UPD_VALID);
-#if (defined(FEAT_PROP_POPUP) && defined(FEAT_QUICKFIX)) || defined(PROTO)
+#if defined(FEAT_PROP_POPUP) && defined(FEAT_QUICKFIX)
 	popup_close_info(); // Close info popup to apply new properties
 #endif
     }
@@ -3316,7 +3354,7 @@ expand_set_mousemodel(optexpand_T *args, int *numMatches, char_u ***matches)
 	    matches);
 }
 
-#if defined(FEAT_MOUSESHAPE) || defined(PROTO)
+#if defined(FEAT_MOUSESHAPE)
     char *
 did_set_mouseshape(optset_T *args UNUSED)
 {
@@ -3351,7 +3389,7 @@ expand_set_nrformats(optexpand_T *args, int *numMatches, char_u ***matches)
 	    matches);
 }
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 /*
  * One of the '*expr' options is changed: 'balloonexpr', 'diffexpr',
  * 'foldexpr', 'foldtext', 'formatexpr', 'includeexpr', 'indentexpr',
@@ -3398,7 +3436,7 @@ did_set_pastetoggle(optset_T *args UNUSED)
     return NULL;
 }
 
-#if defined(FEAT_PROP_POPUP) || defined(PROTO)
+#if defined(FEAT_PROP_POPUP)
 /*
  * The 'previewpopup' option is changed.
  */
@@ -3408,11 +3446,15 @@ did_set_previewpopup(optset_T *args UNUSED)
     if (parse_previewpopup(NULL) == FAIL)
 	return e_invalid_argument;
 
+# if defined(FEAT_QUICKFIX)
+    popup_close_info();
+# endif
     return NULL;
 }
 
-    int
-expand_set_popupoption(optexpand_T *args, int *numMatches, char_u ***matches)
+    static int
+expand_set_popupoption(optexpand_T *args, int *numMatches, char_u ***matches,
+	int previewpopup)
 {
     expand_T *xp = args->oe_xp;
 
@@ -3420,13 +3462,34 @@ expand_set_popupoption(optexpand_T *args, int *numMatches, char_u ***matches)
     {
 	// Within "highlight:"/"border:"/"align:", we have a subgroup of possible options.
 	int border_len = (int)STRLEN("border:");
-	if (xp->xp_pattern - args->oe_set_arg >= border_len &&
-		STRNCMP(xp->xp_pattern - border_len, "border:", border_len) == 0)
+	int close_len = (int)STRLEN("close:");
+	int resize_len = (int)STRLEN("resize:");
+	int shadow_len = (int)STRLEN("shadow:");
+	int is_border = xp->xp_pattern - args->oe_set_arg >= border_len &&
+		STRNCMP(xp->xp_pattern - border_len, "border:", border_len) == 0;
+	int is_close = xp->xp_pattern - args->oe_set_arg >= close_len &&
+		STRNCMP(xp->xp_pattern - close_len, "close:", close) == 0;
+	int is_resize = xp->xp_pattern - args->oe_set_arg >= resize_len &&
+		STRNCMP(xp->xp_pattern - resize_len, "resize:", resize_len) == 0;
+	int is_shadow = xp->xp_pattern - args->oe_set_arg >= shadow_len &&
+		STRNCMP(xp->xp_pattern - shadow_len, "shadow:", shadow_len) == 0;
+	if (is_close || is_resize || is_shadow)
 	{
 	    return expand_set_opt_string(
 		    args,
-		    p_popup_option_border_values,
-		    ARRAY_LENGTH(p_popup_option_border_values) - 1,
+		    p_popup_option_on_off_values,
+		    ARRAY_LENGTH(p_popup_option_on_off_values) - 1,
+		    numMatches,
+		    matches);
+	}
+	if (is_border)
+	{
+	    return expand_set_opt_string(
+		    args,
+		    previewpopup ? p_popup_pvp_border_values
+			: p_popup_cpp_border_values,
+		    (previewpopup ? ARRAY_LENGTH(p_popup_pvp_border_values) - 1
+			: ARRAY_LENGTH(p_popup_cpp_border_values)) - 1,
 		    numMatches,
 		    matches);
 	}
@@ -3442,8 +3505,15 @@ expand_set_popupoption(optexpand_T *args, int *numMatches, char_u ***matches)
 		    matches);
 	}
 	int highlight_len = (int)STRLEN("highlight:");
-	if (xp->xp_pattern - args->oe_set_arg >= highlight_len &&
-		STRNCMP(xp->xp_pattern - highlight_len, "highlight:", highlight_len) == 0)
+	int borderhighlight_len = (int)STRLEN("borderhighlight:");
+	int is_highlight = xp->xp_pattern - args->oe_set_arg >= highlight_len
+	    && STRNCMP(xp->xp_pattern - highlight_len, "highlight:",
+		    highlight_len) == 0;
+	int is_borderhighlight
+	    = xp->xp_pattern - args->oe_set_arg >= borderhighlight_len
+	    && STRNCMP(xp->xp_pattern - borderhighlight_len, "highlight:",
+		    borderhighlight_len) == 0;
+	if (is_highlight || is_borderhighlight)
 	{
 	    // Return the list of all highlight names
 	    return expand_set_opt_generic(
@@ -3457,14 +3527,28 @@ expand_set_popupoption(optexpand_T *args, int *numMatches, char_u ***matches)
 
     return expand_set_opt_string(
 	    args,
-	    p_popup_option_values,
-	    ARRAY_LENGTH(p_popup_option_values) - 1,
+	    previewpopup ? p_popup_pvp_option_values
+		: p_popup_cpp_option_values,
+	    previewpopup ? ARRAY_LENGTH(p_popup_pvp_option_values) - 1
+		: ARRAY_LENGTH(p_popup_cpp_option_values) - 1,
 	    numMatches,
 	    matches);
 }
+
+    int
+expand_set_previewpopup(optexpand_T *args, int *numMatches, char_u ***matches)
+{
+    return expand_set_popupoption(args, numMatches, matches, TRUE);
+}
+
+    int
+expand_set_completepopup(optexpand_T *args, int *numMatches, char_u ***matches)
+{
+    return expand_set_popupoption(args, numMatches, matches, FALSE);
+}
 #endif
 
-#if defined(FEAT_POSTSCRIPT) || defined(PROTO)
+#if defined(FEAT_POSTSCRIPT)
 /*
  * The 'printencoding' option is changed.
  */
@@ -3496,7 +3580,7 @@ did_set_printencoding(optset_T *args UNUSED)
 }
 #endif
 
-#if defined(FEAT_PRINTER) || defined(PROTO)
+#if defined(FEAT_PRINTER)
 
     static char_u *
 get_printoptions_names(expand_T *xp UNUSED, int idx)
@@ -3520,7 +3604,7 @@ expand_set_printoptions(optexpand_T *args, int *numMatches, char_u ***matches)
 }
 #endif
 
-#if defined(FEAT_STL_OPT) || defined(PROTO)
+#if defined(FEAT_STL_OPT)
 /*
  * The 'statusline' or the 'tabline' or the 'rulerformat' option is changed.
  * "rulerformat" is TRUE if the 'rulerformat' option is changed.
@@ -3562,7 +3646,7 @@ parse_statustabline_rulerformat(optset_T *args, int rulerformat)
 }
 #endif
 
-#if defined(FEAT_RENDER_OPTIONS) || defined(PROTO)
+#if defined(FEAT_RENDER_OPTIONS)
 /*
  * The 'renderoptions' option is changed.
  */
@@ -3576,7 +3660,7 @@ did_set_renderoptions(optset_T *args UNUSED)
 }
 #endif
 
-#if defined(FEAT_RIGHTLEFT) || defined(PROTO)
+#if defined(FEAT_RIGHTLEFT)
 /*
  * The 'rightleftcmd' option is changed.
  */
@@ -3605,7 +3689,146 @@ expand_set_rightleftcmd(optexpand_T *args, int *numMatches, char_u ***matches)
 }
 #endif
 
-#if defined(FEAT_STL_OPT) || defined(PROTO)
+#define PUM_BORDER_CLEAR()   \
+    do {                     \
+	pum_set_border(FALSE); \
+	pum_set_shadow(FALSE); \
+	pum_set_margin(FALSE); \
+    } while (0)
+
+/*
+ * The 'pumborder' option is changed.
+ * Rules:
+ *   - One of { single, double, round, ascii, custom:XXXXXXXX } may appear.
+ *   - "margin" may appear, but only together with exactly one border style.
+ *   - "shadow" is independent and can be combined freely.
+ */
+    char *
+did_set_pumborder(optset_T *args)
+{
+    char_u  **varp = (char_u **)args->os_varp;
+    // Use box-drawing characters only when 'encoding' is "utf-8" and
+    // 'ambiwidth' is "single".
+    int	    can_use_box_chars = (enc_utf8 && *p_ambw == 's');
+    char_u  *p, *token;
+    int	    len;
+    int	    have_border = FALSE;
+    int	    have_margin = FALSE;
+
+    PUM_BORDER_CLEAR();
+
+    if (*varp == NULL || **varp == NUL)
+	return NULL;
+
+    for (p = *varp; p != NULL && *p != NUL; )
+    {
+	// end of token is either ',' or NUL
+	char_u *comma = vim_strchr(p, ',');
+	if (comma != NULL)
+	    len = (int)(comma - p);
+	else
+	    len = (int)STRLEN(p);
+
+	token = vim_strnsave(p, len);
+	if (token == NULL)
+	    goto error;
+
+	if ((can_use_box_chars && (STRCMP(token, "single") == 0
+			|| STRCMP(token, "double") == 0
+			|| STRCMP(token, "round") == 0))
+		|| STRCMP(token, "ascii") == 0
+		|| (STRNCMP(token, "custom:", 7) == 0))
+	{
+	    if (have_border)
+	    {
+		// multiple border styles not allowed
+		vim_free(token);
+		goto error;
+	    }
+	    have_border = TRUE;
+
+	    if (STRCMP(token, "single") == 0)
+		pum_set_border_chars(0x2500, 0x2502, 0x2500, 0x2502, // ─ │ ─ │
+			0x250c, 0x2510, 0x2518, 0x2514); // ┌ ┐ ┘ └
+	    else if (STRCMP(token, "double") == 0)
+		pum_set_border_chars(0x2550, 0x2551, 0x2550, 0x2551, // ═ ║ ═ ║
+			0x2554, 0x2557, 0x255D, 0x255A); // ╔ ╗ ╝  ╚
+	    else if (STRCMP(token, "round") == 0)
+		pum_set_border_chars(0x2500, 0x2502, 0x2500, 0x2502, // ─ │ ─ │
+			0x256d, 0x256e, 0x256f, 0x2570); // ╭ ╮ ╯ ╰
+	    else if (STRCMP(token, "ascii") == 0)
+		pum_set_border_chars('-', '|', '-', '|', '+', '+', '+', '+');
+	    else if (STRNCMP(token, "custom:", 7) == 0)
+	    {
+		char_u	*q = token + 7;
+		int	out[8];
+
+		for (int i = 0; i < 8; i++)
+		{
+		    if (*q == NUL || *q == ',')
+			goto error;
+		    out[i] = mb_ptr2char(q);
+		    mb_ptr2char_adv(&q);
+		    if (i < 7)
+		    {
+			if (*q != ';')
+			    goto error;  // must be semicolon
+			q++;
+		    }
+		}
+		if (*q != NUL && *q != ',') // must end exactly after the 8th char
+		    goto error;
+		pum_set_border_chars(out[0], out[1], out[2], out[3], out[4], out[5],
+			out[6], out[7]);
+	    }
+	}
+	else if (STRCMP(token, "shadow") == 0)
+	    pum_set_shadow(TRUE);
+	else if (STRCMP(token, "margin") == 0)
+	{
+	    have_margin = TRUE;
+	    pum_set_margin(TRUE);
+	}
+	else
+	{
+	    vim_free(token);
+	    goto error;
+	}
+
+	vim_free(token);
+
+	if (comma != NULL)
+	    p = comma + 1; // move to next token (skip comma)
+	else
+	    break;
+    }
+
+    if (have_margin && !have_border)
+	goto error; // margin must be combined with border
+
+    return NULL;
+
+error:
+    PUM_BORDER_CLEAR();
+    pum_set_border_chars(0, 0, 0, 0, 0, 0, 0, 0);
+    return e_invalid_argument;
+}
+
+    int
+expand_set_pumborder(optexpand_T *args, int *numMatches, char_u ***matches)
+{
+    static char *(p_rlc_values[]) = {"single", "double", "round", "ascii",
+	"custom", "shadow", "margin", NULL};
+    return expand_set_opt_string(
+	    args,
+	    p_rlc_values,
+	    ARRAY_LENGTH(p_rlc_values) - 1,
+	    numMatches,
+	    matches);
+}
+
+#if defined(FEAT_STL_OPT)
+
 /*
  * The 'rulerformat' option is changed.
  */
@@ -3616,7 +3839,7 @@ did_set_rulerformat(optset_T *args)
 }
 #endif
 
-#if defined(FEAT_TABPANEL) || defined(PROTO)
+#if defined(FEAT_TABPANEL)
 /*
  * Process the new 'tabpanelopt' option value.
  */
@@ -3689,7 +3912,7 @@ did_set_wlseat(optset_T *args UNUSED)
 #ifdef FEAT_WAYLAND_CLIPBOARD
     // If there isn't any seat named 'wlseat', then let the Wayland clipboard be
     // unavailable. Ignore errors returned.
-    wayland_cb_reload();
+    clip_reset_wayland();
 #endif
 
     return NULL;
@@ -3738,7 +3961,7 @@ expand_set_selectmode(optexpand_T *args, int *numMatches, char_u ***matches)
 	    matches);
 }
 
-#if defined(FEAT_SESSION) || defined(PROTO)
+#if defined(FEAT_SESSION)
 /*
  * The 'sessionoptions' option is changed.
  */
@@ -3791,7 +4014,7 @@ expand_set_shortmess(optexpand_T *args, int *numMatches, char_u ***matches)
     return expand_set_opt_listflag(args, (char_u*)SHM_ALL, numMatches, matches);
 }
 
-#if defined(FEAT_LINEBREAK) || defined(PROTO)
+#if defined(FEAT_LINEBREAK)
 /*
  * The 'showbreak' option is changed.
  */
@@ -3837,7 +4060,7 @@ expand_set_showcmdloc(optexpand_T *args, int *numMatches, char_u ***matches)
 	    matches);
 }
 
-#if defined(FEAT_SIGNS) || defined(PROTO)
+#if defined(FEAT_SIGNS)
 /*
  * The 'signcolumn' option is changed.
  */
@@ -3846,6 +4069,7 @@ did_set_signcolumn(optset_T *args)
 {
     char_u	**varp = (char_u **)args->os_varp;
 
+# if defined(FEAT_LINEBREAK)
     if (check_opt_strings(*varp, p_scl_values, FALSE) != OK)
 	return e_invalid_argument;
     // When changing the 'signcolumn' to or from 'number', recompute the
@@ -3854,6 +4078,14 @@ did_set_signcolumn(optset_T *args)
 		|| (*curwin->w_p_scl == 'n' && *(curwin->w_p_scl + 1) =='u'))
 	    && (curwin->w_p_nu || curwin->w_p_rnu))
 	curwin->w_nrwidth_line_count = 0;
+# endif
+
+# if defined(FEAT_GUI)
+    // In the GUI, when sign icons are used, a full screen clear is needed
+    // to properly redraw the sign icons.
+    if (gui.in_use && curbuf->b_signlist != NULL)
+	redraw_all_later(UPD_CLEAR);
+# endif
 
     return NULL;
 }
@@ -3870,7 +4102,7 @@ expand_set_signcolumn(optexpand_T *args, int *numMatches, char_u ***matches)
 }
 #endif
 
-#if defined(FEAT_SPELL) || defined(PROTO)
+#if defined(FEAT_SPELL)
 /*
  * The 'spellcapcheck' option is changed.
  */
@@ -3983,14 +4215,160 @@ expand_set_splitkeep(optexpand_T *args, int *numMatches, char_u ***matches)
 	    matches);
 }
 
-#if defined(FEAT_STL_OPT) || defined(PROTO)
+#if defined(FEAT_STL_OPT)
 /*
  * The 'statusline' option is changed.
  */
     char *
 did_set_statusline(optset_T *args)
 {
-    return parse_statustabline_rulerformat(args, FALSE);
+    char_u  **varp = (char_u **)args->os_varp;
+    char    *ret = parse_statustabline_rulerformat(args, FALSE);
+
+    if (ret != NULL)
+	return ret;
+    update_stl_rendered_height(varp == &curwin->w_p_stl ? curwin : NULL);
+    frame_change_statusline_height();
+
+    return NULL;
+}
+
+/*
+ * Rewrite the 'statuslineopt' string: replace the last "maxheight:N" with
+ * actual_stlh and remove earlier duplicates.  Keyword order is preserved.
+ */
+    static void
+update_stlo_maxheight(char_u **varp, int actual_stlh)
+{
+    const char_u    *src = *varp;
+    const char_u    *last_mh = NULL;
+    const char_u    *p;
+
+    // Find the last "maxheight:" token.
+    p = src;
+    while (*p != NUL)
+    {
+	if (STRNCMP(p, "maxheight:", 10) == 0)
+	    last_mh = p;
+	while (*p != ',' && *p != NUL)
+	    ++p;
+	if (*p == ',')
+	    ++p;
+    }
+
+    if (last_mh == NULL)
+	return;
+
+    size_t	bufsize = STRLEN(src) + NUMBUFLEN + 1;
+    char_u	*buf = alloc(bufsize);
+    if (buf == NULL)
+	return;
+
+    int		len = 0;
+    bool	need_comma = false;
+
+    p = src;
+    while (*p != NUL)
+    {
+	const	char_u	*tok = p;
+	int	tok_len;
+
+	while (*p != ',' && *p != NUL)
+	    ++p;
+	tok_len = (int)(p - tok);
+	if (*p == ',')
+	    ++p;
+
+	if (STRNCMP(tok, "maxheight:", 10) == 0)
+	{
+	    if (tok == last_mh)
+	    {
+		// Replace the last occurrence with the actual value.
+		if (need_comma)
+		    buf[len++] = ',';
+		len += vim_snprintf((char *)buf + len,
+			bufsize - len, "maxheight:%d", actual_stlh);
+		need_comma = true;
+	    }
+	}
+	else
+	{
+	    if (need_comma)
+		buf[len++] = ',';
+	    mch_memmove(buf + len, tok, tok_len);
+	    len += tok_len;
+	    need_comma = true;
+	}
+    }
+    buf[len] = NUL;
+    free_string_option(*varp);
+    *varp = buf;
+}
+
+/*
+ * The 'statuslineopt' option is changed.
+ */
+    char *
+did_set_statuslineopt(optset_T *args)
+{
+    char_u	**varp = (char_u **)args->os_varp;
+    win_T       *wp = varp == &curwin->w_p_stlo ? curwin : NULL;
+
+    if (statuslineopt_changed(*varp, wp) == FAIL)
+	return e_invalid_argument;
+
+    // Sync stl_rendered_height with the current statusline.
+    update_stl_rendered_height(wp);
+
+    // Update the maxheight value to the actual value set.
+    // Note: Must be changed if p_stlo_values are changed.
+    if (*varp != empty_option)
+    {
+	int actual_stlh;
+
+	if (wp != NULL)
+	{
+	    frame_change_statusline_height();
+	    actual_stlh = MIN(wp->w_p_stlo_mh,
+		    wp->w_height + wp->w_status_height - p_wmh);
+	}
+	else
+	    actual_stlh = frame_change_statusline_height();
+
+	// Only re-serialize when the window actually has a status line shown.
+	if (actual_stlh > 0)
+	{
+	    update_stlo_maxheight(varp, actual_stlh);
+	    // Update the parsed maxheight member directly.
+	    if (wp != NULL)
+		wp->w_p_stlo_mh = actual_stlh;
+	    else
+		set_stlo_mh(actual_stlh);
+	}
+    }
+    else
+	frame_change_statusline_height();
+
+    if ((args->os_flags & (OPT_LOCAL | OPT_GLOBAL)) == 0)
+    {
+	// :set clears the local values.
+	clear_string_option(&curwin->w_p_stlo);
+	curwin->w_p_stlo_fh = -1;
+	curwin->w_p_stlo_mh = -1;
+    }
+
+    return NULL;
+}
+
+    int
+expand_set_statuslineopt(optexpand_T *args, int *numMatches, char_u ***matches)
+{
+    return expand_set_opt_string(
+	    args,
+	    p_stlo_values,
+	    ARRAY_LENGTH(p_stlo_values) - 1,
+	    numMatches,
+	    matches);
 }
 #endif
 
@@ -4054,7 +4432,7 @@ expand_set_tabclose(optexpand_T *args, int *numMatches, char_u ***matches)
 	    matches);
 }
 
-#if defined(FEAT_STL_OPT) || defined(PROTO)
+#if defined(FEAT_STL_OPT)
 /*
  * The 'tabline' option is changed.
  */
@@ -4194,10 +4572,44 @@ did_set_term_option(optset_T *args)
 	    out_str(T_BE);
     }
 
+    if (varp == &T_BSU || varp == &T_ESU)
+	term_set_sync_output(TERM_SYNC_OUTPUT_OFF);
+
     return NULL;
 }
 
-#if defined(FEAT_TERMINAL) || defined(PROTO)
+
+#ifdef UNIX
+/*
+ * The 'termresize' option is changed.
+ */
+    char *
+did_set_termresize(optset_T *args UNUSED)
+{
+    // If empty or "inband", then attempt to enable in-band resize events.
+    if (*p_trz == NUL || STRCMP(p_trz, "inband") == 0)
+	term_set_win_resize(true);
+    else if (STRCMP(p_trz, "sigwinch") == 0)
+	term_set_win_resize(false);
+    else
+	return e_invalid_argument;
+
+    return NULL;
+}
+
+    int
+expand_set_termresize(optexpand_T *args, int *numMatches, char_u ***matches)
+{
+    return expand_set_opt_string(
+	    args,
+	    p_trz_values,
+	    ARRAY_LENGTH(p_trz_values) - 1,
+	    numMatches,
+	    matches);
+}
+#endif
+
+#if defined(FEAT_TERMINAL)
 /*
  * The 'termwinkey' option is changed.
  */
@@ -4231,7 +4643,7 @@ did_set_termwinsize(optset_T *args)
     return NULL;
 }
 
-# if defined(MSWIN) || defined(PROTO)
+# if defined(MSWIN)
 /*
  * The 'termwintype' option is changed.
  */
@@ -4268,7 +4680,7 @@ did_set_titlestring(optset_T *args)
     return parse_titleiconstring(args, flagval);
 }
 
-#if (defined(FEAT_TOOLBAR) && !defined(FEAT_GUI_MSWIN)) || defined(PROTO)
+#if defined(FEAT_TOOLBAR) && !defined(FEAT_GUI_MSWIN)
 /*
  * The 'toolbar' option is changed.
  */
@@ -4297,7 +4709,7 @@ expand_set_toolbar(optexpand_T *args, int *numMatches, char_u ***matches)
 }
 #endif
 
-#if (defined(FEAT_TOOLBAR) && defined(FEAT_GUI_GTK)) || defined(PROTO)
+#if defined(FEAT_TOOLBAR) && defined(FEAT_GUI_GTK)
 /*
  * The 'toolbariconsize' option is changed.  GTK+ 2 only.
  */
@@ -4328,7 +4740,7 @@ expand_set_toolbariconsize(
 }
 #endif
 
-#if defined(UNIX) || defined(VMS) || defined(PROTO)
+#if defined(UNIX) || defined(VMS)
 /*
  * The 'ttymouse' option is changed.
  */
@@ -4362,7 +4774,7 @@ expand_set_ttymouse(optexpand_T *args, int *numMatches, char_u ***matches)
 }
 #endif
 
-#if defined(FEAT_VARTABS) || defined(PROTO)
+#if defined(FEAT_VARTABS)
 /*
  * The 'varsofttabstop' option is changed.
  */
@@ -4451,7 +4863,7 @@ did_set_verbosefile(optset_T *args UNUSED)
     return NULL;
 }
 
-#if defined(FEAT_SESSION) || defined(PROTO)
+#if defined(FEAT_SESSION)
 /*
  * The 'viewoptions' option is changed.
  */
@@ -4462,7 +4874,7 @@ did_set_viewoptions(optset_T *args UNUSED)
 }
 #endif
 
-#if defined(FEAT_VIMINFO) || defined(PROTO)
+#if defined(FEAT_VIMINFO)
 /*
  * The 'viminfo' option is changed.
  */
@@ -4639,7 +5051,7 @@ expand_set_wildoptions(optexpand_T *args, int *numMatches, char_u ***matches)
 	    matches);
 }
 
-#if defined(FEAT_WAK) || defined(PROTO)
+#if defined(FEAT_WAK)
 /*
  * The 'winaltkeys' option is changed.
  */
@@ -4680,10 +5092,46 @@ expand_set_winaltkeys(optexpand_T *args, int *numMatches, char_u ***matches)
     char *
 did_set_wincolor(optset_T *args UNUSED)
 {
-#ifdef FEAT_TERMINAL
-    term_update_wincolor(curwin);
-#endif
+    update_wincolor(curwin, args->os_newval.string);
     return NULL;
+}
+
+/*
+ * The 'winhighlight' option is changed
+ */
+    char *
+did_set_winhighlight(optset_T *args)
+{
+    return update_winhighlight(curwin, args->os_newval.string);
+}
+
+/*
+ * Expand 'winhighlight' option.
+ */
+    int
+expand_set_winhighlight(optexpand_T *args, int *numMatches, char_u ***matches)
+{
+    expand_T	    *xp = args->oe_xp;
+
+    if ((xp->xp_pattern > args->oe_set_arg && *(xp->xp_pattern-1) == ':')
+	    || xp->xp_pattern == args->oe_set_arg || *(xp->xp_pattern-1) == ',')
+    {
+	// After a ':' or after a ',', or at the start, so expand highlight
+	// group name.
+
+	// If starts with !, then expand 'highlight' occasions.
+	if (*xp->xp_pattern == '!')
+	    return expand_hl_occasions(args, numMatches, matches, '!');
+	else
+	    return expand_set_opt_generic(
+		    args,
+		    get_highlight_name,
+		    numMatches,
+		    matches);
+    }
+
+    VIM_CLEAR(*matches);
+    return FAIL;
 }
 
     int
@@ -4906,7 +5354,7 @@ did_set_string_option(
     if (varp == &p_rtp)
     {
 	export_myvimdir();
-#if defined(FEAT_LUA) || defined(PROTO)
+#if defined(FEAT_LUA)
 	update_package_paths_in_lua();
 #endif
     }
@@ -5073,27 +5521,29 @@ export_myvimdir(void)
     int		dofree = FALSE;
     char_u	*p;
     char_u	*q = p_rtp;
-    char_u	*buf = alloc(MAXPATHL);
+    string_T	buf;
 
-    if (buf == NULL)
+    buf.string = alloc(MAXPATHL);
+    if (buf.string == NULL)
 	return;
 
-    (void)copy_option_part(&q, buf, MAXPATHL, ",");
+    buf.length = (size_t)copy_option_part(&q, buf.string, MAXPATHL, ",");
 
     p = vim_getenv((char_u *)"MYVIMDIR", &dofree);
 
-    if (p == NULL || STRCMP(p, buf) != 0)
+    if (p == NULL || STRCMP(p, buf.string) != 0)
     {
-	add_pathsep(buf);
+	if (*buf.string != NUL && !after_pathsep(buf.string, buf.string + buf.length))
+	    STRCPY(buf.string + buf.length, PATHSEPSTR);
 #ifdef MSWIN
 	// normalize path separators
-	for (q = buf; *q != NUL; q++)
+	for (q = buf.string; *q != NUL; q++)
 	    if (*q == '/')
 		*q = '\\';
 #endif
-	vim_setenv((char_u *)"MYVIMDIR", buf);
+	vim_setenv((char_u *)"MYVIMDIR", buf.string);
     }
     if (dofree)
 	vim_free(p);
-    vim_free(buf);
+    vim_free(buf.string);
 }

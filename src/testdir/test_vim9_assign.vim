@@ -1592,12 +1592,17 @@ def Test_assignment_failure()
   v9.CheckDefFailure(['var $VAR = 5'], 'E1016: Cannot declare an environment variable:')
   v9.CheckScriptFailure(['vim9script', 'var $ENV = "xxx"'], 'E1016:')
 
+  # read-only registers
+  v9.CheckDefAndScriptFailure(['var @. = 5'], ['E354:', 'E1066:'], 1)
+  v9.CheckDefAndScriptFailure(['var @. = 5'], ['E354:', 'E1066:'], 1)
+  v9.CheckDefAndScriptFailure(['var @% = 5'], ['E354:', 'E1066:'], 1)
+  v9.CheckDefAndScriptFailure(['var @: = 5'], ['E354:', 'E1066:'], 1)
   if has('dnd')
-    v9.CheckDefFailure(['var @~ = 5'], 'E1066:')
+    v9.CheckDefAndScriptFailure(['var @~ = 5'], ['E354:', 'E1066:'], 1)
   else
-    v9.CheckDefFailure(['var @~ = 5'], 'E354:')
-    v9.CheckDefFailure(['@~ = 5'], 'E354:')
+    v9.CheckDefAndScriptFailure(['var @~ = 5'], ['E354:', 'E1066:'], 1)
   endif
+
   v9.CheckDefFailure(['var @a = 5'], 'E1066:')
   v9.CheckDefFailure(['var @/ = "x"'], 'E1066:')
   v9.CheckScriptFailure(['vim9script', 'var @a = "abc"'], 'E1066:')
@@ -2339,6 +2344,97 @@ def Test_var_declaration_fails()
   endfor
 enddef
 
+" Test for using "void" as the type in a variable declaration
+def Test_var_declaration_void_type()
+  # Using void as the type of a local variable
+  var lines =<< trim END
+    var x: void
+  END
+  v9.CheckDefAndScriptFailure(lines, 'E1330: Invalid type used in variable declaration: void')
+
+  # Using void as the type of a function argument
+  lines =<< trim END
+    vim9script
+    def Foo(x: void)
+    enddef
+    defcompile
+  END
+  v9.CheckSourceFailure(lines, 'E1330: Invalid type used in variable declaration: void', 2)
+
+  # Using void as the type of a variable with a initializer
+  lines =<< trim END
+    var a: void = 10
+  END
+  v9.CheckDefAndScriptFailure(lines, 'E1330: Invalid type used in variable declaration: void')
+
+  # Using void as the list item type
+  lines =<< trim END
+    var l: list<void> = []
+  END
+  v9.CheckDefAndScriptFailure(lines, 'E1330: Invalid type used in variable declaration: void')
+
+  # Using void as the tuple item type
+  lines =<< trim END
+    var t: tuple<void> = ()
+  END
+  v9.CheckDefAndScriptFailure(lines, 'E1330: Invalid type used in variable declaration: void')
+
+  # Using void as the dict item type
+  lines =<< trim END
+    var l: dict<void> = {}
+  END
+  v9.CheckDefAndScriptFailure(lines, 'E1330: Invalid type used in variable declaration: void')
+
+  # Using void as the argument type in a lambda
+  lines =<< trim END
+    var Fn = (x: void) => x
+  END
+  v9.CheckDefAndScriptFailure(lines, 'E1330: Invalid type used in variable declaration: void')
+
+  # Using void as the type of an object member variable
+  lines =<< trim END
+    vim9script
+    class A
+      var x: void = 1
+    endclass
+    var a = A.new()
+  END
+  v9.CheckScriptFailure(lines, 'E1330: Invalid type used in variable declaration: void')
+
+  # Using void as the type of a loop index
+  lines =<< trim END
+    for [i: number, j: void] in ((1, 2), (3, 4))
+    endfor
+  END
+  v9.CheckDefFailure(lines, 'E1330: Invalid type used in variable declaration: void')
+
+  # Using void as the type of a generic parameter
+  lines =<< trim END
+    vim9script
+    def Fn<T, U>()
+    enddef
+    Fn<void, void>()
+  END
+  v9.CheckSourceFailure(lines, 'E1330: Invalid type used in variable declaration: void', 4)
+
+  # Using void as the type of a parameter in a function type
+  lines =<< trim END
+    vim9script
+    def Foo()
+    enddef
+    var Fn: func(void): void = Foo
+  END
+  v9.CheckSourceFailure(lines, 'E1330: Invalid type used in variable declaration: void', 4)
+
+  # Using void in a type alias
+  lines =<< trim END
+    vim9script
+    type MyType = void
+    var x: MyType
+  END
+  v9.CheckSourceFailure(lines, 'E1330: Invalid type used in variable declaration: void', 3)
+enddef
+
 def Test_var_declaration_inferred()
   # check that type is set on the list so that extend() fails
   var lines =<< trim END
@@ -2467,6 +2563,52 @@ def Test_var_type_check()
     defcompile
   END
   v9.CheckScriptSuccess(lines)
+
+  # Modifying a variable type using the legacy command at script level
+  lines =<< trim END
+    vim9script
+    var l: list<number> = [1, 2]
+    legacy let s:l[0] = 'x'
+  END
+  v9.CheckSourceFailure(lines, 'E1012: Type mismatch; expected number but got string', 3)
+
+  # try with dict type
+  lines =<< trim END
+    vim9script
+    var d: dict<number>
+    legacy let s:d['a'] = 'x'
+  END
+  v9.CheckSourceFailure(lines, 'E1012: Type mismatch; expected number but got string', 3)
+
+  # Modifying a variable type using the legacy command in a def function
+  lines =<< trim END
+    vim9script
+    var l: list<number> = [1, 2]
+    def Fn()
+      legacy let s:l[0] = 'x'
+    enddef
+    Fn()
+  END
+  v9.CheckSourceFailure(lines, 'E1012: Type mismatch; expected number but got string', 1)
+
+  # try with dict type
+  lines =<< trim END
+    vim9script
+    var d: dict<string>
+    def Fn()
+      legacy let s:d['a'] = 10
+    enddef
+    Fn()
+  END
+  v9.CheckSourceFailure(lines, 'E1012: Type mismatch; expected string but got number', 1)
+
+  # after the first error, the assignment should be aborted
+  lines =<< trim END
+    vim9script
+    var l: list<number> = [1, 2]
+    legacy let [s:l[0], s:l[1]] = ['x', 1.0]
+  END
+  v9.CheckSourceFailureList(lines, ['', 'E1012: Type mismatch; expected number but got string'], 3)
 enddef
 
 let g:dict_number = #{one: 1, two: 2}
@@ -2725,6 +2867,26 @@ def Test_unlet()
     enddef
     defcompile
   END
+  v9.CheckScriptFailure(lines, 'E1260:', 1)
+
+  # unlet imported item at script level
+  lines =<< trim END
+    vim9script
+    import './XunletExport.vim' as exp
+    unlet exp.svar
+  END
+  v9.CheckScriptFailure(lines, 'E1260:', 3)
+
+  # unlet imported item in legacy function
+  lines =<< trim END
+    vim9script
+    import './XunletExport.vim' as exp
+    function F()
+      unlet exp.svar
+    endfunction
+    call F()
+  END
+  # error in line 1 of the F()
   v9.CheckScriptFailure(lines, 'E1260:', 1)
 
   $ENVVAR = 'foobar'
@@ -3321,6 +3483,19 @@ def Test_type_check()
     F()
   END
   v9.CheckScriptFailure(lines, 'E1411: Missing dot after object "o"')
+enddef
+
+" Test for using a compound operator with a dict
+def Test_dict_compoundop_check()
+  for op in ['+=', '-=', '*=', '/=', '%=']
+    v9.CheckSourceDefAndScriptFailure(['var d: dict<number> = {a: 1}', $'d {op} 1'], $'E734: Wrong variable type for {op}')
+  endfor
+  var lines =<< trim END
+    var d: dict<number> = {a: 1}
+    d['a'] += 2
+    assert_equal({a: 3}, d)
+  END
+  v9.CheckSourceDefAndScriptSuccess(lines)
 enddef
 
 " Test for checking the argument type of a def function

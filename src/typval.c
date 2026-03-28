@@ -13,7 +13,7 @@
 
 #include "vim.h"
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 
 /*
  * Allocate memory for a variable type-value, and make it empty (0 or NULL
@@ -283,7 +283,7 @@ tv_get_bool_or_number_chk(
 		{
 		    class_T *cl = varp->vval.v_object->obj_class;
 		    if (cl != NULL && IS_ENUM(cl))
-			semsg(_(e_using_enum_str_as_number), cl->class_name);
+			semsg(_(e_using_enum_str_as_number), cl->class_name.string);
 		    else
 			emsg(_(e_using_object_as_number));
 		}
@@ -391,15 +391,15 @@ tv_get_float_chk(typval_T *varp, int *error)
 	    emsg(_(e_using_special_value_as_float));
 	    break;
 	case VAR_JOB:
-# ifdef FEAT_JOB_CHANNEL
+#ifdef FEAT_JOB_CHANNEL
 	    emsg(_(e_using_job_as_float));
 	    break;
-# endif
+#endif
 	case VAR_CHANNEL:
-# ifdef FEAT_JOB_CHANNEL
+#ifdef FEAT_JOB_CHANNEL
 	    emsg(_(e_using_channel_as_float));
 	    break;
-# endif
+#endif
 	case VAR_BLOB:
 	    emsg(_(e_using_blob_as_float));
 	    break;
@@ -697,7 +697,7 @@ check_for_opt_nonnull_dict_arg(typval_T *args, int idx)
 	    || check_for_nonnull_dict_arg(args, idx) != FAIL) ? OK : FAIL;
 }
 
-#if defined(FEAT_JOB_CHANNEL) || defined(PROTO)
+#if defined(FEAT_JOB_CHANNEL)
 /*
  * Give an error and return FAIL unless "args[idx]" is a channel or a job.
  */
@@ -823,7 +823,6 @@ check_for_opt_lnum_arg(typval_T *args, int idx)
 	    || check_for_lnum_arg(args, idx) != FAIL) ? OK : FAIL;
 }
 
-#if defined(FEAT_JOB_CHANNEL) || defined(PROTO)
 /*
  * Give an error and return FAIL unless "args[idx]" is a string or a blob.
  */
@@ -837,7 +836,6 @@ check_for_string_or_blob_arg(typval_T *args, int idx)
     }
     return OK;
 }
-#endif
 
 /*
  * Give an error and return FAIL unless "args[idx]" is a string or a list.
@@ -1250,7 +1248,7 @@ tv_get_string_buf_chk_strict(typval_T *varp, char_u *buf, int strict)
 		{
 		    class_T *cl = varp->vval.v_object->obj_class;
 		    if (cl != NULL && IS_ENUM(cl))
-			semsg(_(e_using_enum_str_as_string), cl->class_name);
+			semsg(_(e_using_enum_str_as_string), cl->class_name.string);
 		    else
 			emsg(_(e_using_object_as_string));
 		}
@@ -1357,9 +1355,11 @@ tv_check_lock(typval_T *tv, char_u *name, int use_gettext)
  * It is OK for "from" and "to" to point to the same item.  This is used to
  * make a copy later.
  */
-    void
+    int
 copy_tv(typval_T *from, typval_T *to)
 {
+    int		ret = OK;
+
     to->v_type = from->v_type;
     to->v_lock = 0;
     switch (from->v_type)
@@ -1465,12 +1465,16 @@ copy_tv(typval_T *from, typval_T *to)
 	    break;
 	case VAR_VOID:
 	    emsg(_(e_cannot_use_void_value));
+	    ret = FAIL;
 	    break;
 	case VAR_UNKNOWN:
 	case VAR_ANY:
 	    internal_error_no_abort("copy_tv(UNKNOWN)");
+	    ret = FAIL;
 	    break;
     }
+
+    return ret;
 }
 
 /*
@@ -1882,6 +1886,11 @@ typval_compare_object(
     {
 	*res = obj1 == obj2 ? res_match : !res_match;
 	return OK;
+    }
+    else if (tv1->v_type != tv2->v_type)
+    {
+	emsg(_(e_can_only_compare_object_with_object));
+	return FAIL;
     }
 
     *res = object_equal(obj1, obj2, ic) ? res_match : !res_match;

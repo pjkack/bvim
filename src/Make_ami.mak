@@ -13,7 +13,6 @@ CFLAGS = -c -O3
 CFLAGS += \
 	-DNO_ARP \
 	-DUSE_TMPNAM \
-	-DHAVE_STDARG_H \
 	-DHAVE_TGETENT \
 	-DHAVE_TERMCAP \
 	-DNEW_SHELLSIZE \
@@ -69,6 +68,11 @@ endif
 # Patch level used for Amiga style version string
 ifdef PATCHLEVEL
 CFLAGS += -DPATCHLEVEL=\"$(PATCHLEVEL)\"
+endif
+
+# Build date used for Amiga style version string
+ifdef BUILDDATE
+CFLAGS += -DBUILDDATE=\"$(BUILDDATE)\"
 endif
 
 # Common sources

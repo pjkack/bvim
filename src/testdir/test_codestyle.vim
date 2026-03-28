@@ -43,6 +43,8 @@ def Test_source_files()
 
     PerformCheck(fname, '\s$', 'trailing white space', '')
 
+    PerformCheck(fname, ';;\+$', 'double semicolon', '')
+
     # some files don't stick to the Vim style rules
     if fname =~ 'iscygpty.c'
       continue
@@ -137,7 +139,7 @@ def Test_help_files()
     # Check for unnecessary whitespace at the end of a line
     cursor(1, 1)
     while 1
-      lnum = search('[^/~\\]\s$')
+      lnum = search('\%([^/~\\]\|^\)\s\+$')
       # skip line that are known to have trailing white space
       if fname == 'map.txt' && getline(lnum) =~ "unmap @@ $"
         || fname == 'usr_12.txt' && getline(lnum) =~ "^\t/ \t$"

@@ -27,6 +27,10 @@
 // Is there any system that doesn't have access()?
 #define USE_MCH_ACCESS
 
+// Bitmask with 0x80 set in each byte of a long_u word, used to detect
+// non-ASCII bytes (high bit set) in multiple bytes at once.
+#define NONASCII_MASK (((long_u)-1 / 0xFF) * 0x80)
+
 #if defined(__hpux) && !defined(HAVE_DIRFD)
 # define dirfd(x) ((x)->__dd_fd)
 # define HAVE_DIRFD
@@ -585,12 +589,12 @@ readfile(
 		else
 		{
 		    filemess(curbuf, sfname, (char_u *)(
-# ifdef EFBIG
+#ifdef EFBIG
 			    (errno == EFBIG) ? _("[File too big]") :
-# endif
-# ifdef EOVERFLOW
+#endif
+#ifdef EOVERFLOW
 			    (errno == EOVERFLOW) ? _("[File too big]") :
-# endif
+#endif
 						_("[Permission Denied]")), 0);
 		    curbuf->b_p_ro = TRUE;	// must use "w!" now
 		}
@@ -1170,7 +1174,12 @@ retry:
 	}
 
 	// Protect against the argument of lalloc() going negative.
-	if (size < 0 || size + linerest + 1 < 0 || linerest >= MAXCOL)
+	// Also split lines that are too long for colnr_T.  After this check
+	// passes, we read up to 'size' more bytes.  We must ensure that even
+	// after that read, the line length won't exceed MAXCOL - 1 (because
+	// we add 1 for the NUL when casting to colnr_T).  If this check fires,
+	// we insert a synthetic newline immediately, so linerest doesn't grow.
+	if (size < 0 || size + linerest + 1 < 0 || linerest >= MAXCOL - size)
 	{
 	    ++split;
 	    *ptr = NL;		    // split line by inserting a NL
@@ -1427,10 +1436,10 @@ retry:
 				break;
 			    }
 
-			    mch_memmove(new_buffer, buffer, linerest);
+			    mch_memmove(new_buffer, buffer, linerest + conv_restlen);
 			    if (newptr != NULL)
-				mch_memmove(new_buffer + linerest, newptr,
-							      decrypted_size);
+				mch_memmove(new_buffer + linerest + conv_restlen,
+					newptr, decrypted_size);
 			    vim_free(newptr);
 			}
 
@@ -1440,7 +1449,7 @@ retry:
 			    buffer = new_buffer;
 			    new_buffer = NULL;
 			    line_start = buffer;
-			    ptr = buffer + linerest;
+			    ptr = buffer + linerest + conv_restlen;
 			    real_size = size;
 			}
 			size = decrypted_size;
@@ -1695,7 +1704,7 @@ retry:
 		{
 		    found_bad = FALSE;
 
-#  ifdef CP_UTF8	// VC 4.1 doesn't define CP_UTF8
+# ifdef CP_UTF8	// VC 4.1 doesn't define CP_UTF8
 		    if (codepage == CP_UTF8)
 		    {
 			// Handle CP_UTF8 input ourselves to be able to handle
@@ -1725,7 +1734,7 @@ retry:
 			}
 		    }
 		    else
-#  endif
+# endif
 		    {
 			// We don't know how long the byte sequence is, try
 			// from one to three bytes.
@@ -2051,11 +2060,27 @@ retry:
 		int  incomplete_tail = FALSE;
 
 		// Reading UTF-8: Check if the bytes are valid UTF-8.
-		for (p = ptr; ; ++p)
+		for (p = ptr; ; )
 		{
-		    int	 todo = (int)((ptr + size) - p);
+		    int	 todo;
 		    int	 l;
 
+		    // Skip ASCII bytes quickly using word-at-a-time check.
+		    {
+			char_u *ascii_end = ptr + size;
+			while (ascii_end - p >= (long)sizeof(long_u))
+			{
+			    long_u word;
+			    memcpy(&word, p, sizeof(long_u));
+			    if (word & NONASCII_MASK)
+				break;
+			    p += sizeof(long_u);
+			}
+			while (p < ascii_end && *p < 0x80)
+			    ++p;
+		    }
+
+		    todo = (int)((ptr + size) - p);
 		    if (todo <= 0)
 			break;
 		    if (*p >= 0x80)
@@ -2104,14 +2129,17 @@ retry:
 			    if (bad_char_behavior == BAD_DROP)
 			    {
 				mch_memmove(p, p + 1, todo - 1);
-				--p;
 				--size;
 			    }
-			    else if (bad_char_behavior != BAD_KEEP)
-				*p = bad_char_behavior;
+			    else
+			    {
+				if (bad_char_behavior != BAD_KEEP)
+				    *p = bad_char_behavior;
+				++p;
+			    }
 			}
 			else
-			    p += l - 1;
+			    p += l;
 		    }
 		}
 		if (p < ptr + size && !incomplete_tail)
@@ -2250,73 +2278,101 @@ rewind_retry:
 	}
 	else
 	{
-	    --ptr;
-	    while (++ptr, --size >= 0)
+	    // Use memchr() for SIMD-optimized newline scanning instead
+	    // of scanning each byte individually.
+	    char_u *end = ptr + size;
+
+	    while (ptr < end)
 	    {
-		if ((c = *ptr) != NUL && c != NL)  // catch most common case
-		    continue;
-		if (c == NUL)
-		    *ptr = NL;	// NULs are replaced by newlines!
-		else
+		char_u *nl = (char_u *)memchr(ptr, NL, end - ptr);
+		char_u *nul_scan;
+
+		if (nl == NULL)
 		{
-		    if (skip_count == 0)
+		    // No more newlines in buffer.
+		    // Replace any NUL bytes with NL in remaining data.
+		    while ((nul_scan = (char_u *)memchr(ptr, NUL,
+						      end - ptr)) != NULL)
 		    {
-			*ptr = NUL;		// end of line
-			len = (colnr_T)(ptr - line_start + 1);
-			if (fileformat == EOL_DOS)
+			*nul_scan = NL;
+			ptr = nul_scan + 1;
+		    }
+		    ptr = end;
+		    break;
+		}
+
+		// Replace NUL bytes with NL before the newline.
+		{
+		    char_u *scan = ptr;
+		    while ((nul_scan = (char_u *)memchr(scan, NUL,
+						       nl - scan)) != NULL)
+		    {
+			*nul_scan = NL;
+			scan = nul_scan + 1;
+		    }
+		}
+
+		// Process the newline.
+		ptr = nl;
+		if (skip_count == 0)
+		{
+		    *ptr = NUL;		// end of line
+		    len = (colnr_T)(ptr - line_start + 1);
+		    if (fileformat == EOL_DOS)
+		    {
+			if (ptr > line_start && ptr[-1] == CAR)
 			{
-			    if (ptr > line_start && ptr[-1] == CAR)
-			    {
-				// remove CR before NL
-				ptr[-1] = NUL;
-				--len;
-			    }
-			    /*
-			     * Reading in Dos format, but no CR-LF found!
-			     * When 'fileformats' includes "unix", delete all
-			     * the lines read so far and start all over again.
-			     * Otherwise give an error message later.
-			     */
-			    else if (ff_error != EOL_DOS)
-			    {
-				if (   try_unix
-				    && !read_stdin
-				    && (read_buffer
-					|| vim_lseek(fd, (off_T)0L, SEEK_SET)
-									  == 0))
-				{
-				    fileformat = EOL_UNIX;
-				    if (set_options)
-					set_fileformat(EOL_UNIX, OPT_LOCAL);
-				    file_rewind = TRUE;
-				    keep_fileformat = TRUE;
-				    goto retry;
-				}
-				ff_error = EOL_DOS;
-			    }
+			    // remove CR before NL
+			    ptr[-1] = NUL;
+			    --len;
 			}
-			if (ml_append(lnum, line_start, len, newfile) == FAIL)
+			/*
+			 * Reading in Dos format, but no CR-LF found!
+			 * When 'fileformats' includes "unix", delete all
+			 * the lines read so far and start all over again.
+			 * Otherwise give an error message later.
+			 */
+			else if (ff_error != EOL_DOS)
 			{
-			    error = TRUE;
-			    break;
-			}
-#ifdef FEAT_PERSISTENT_UNDO
-			if (read_undo_file)
-			    sha256_update(&sha_ctx, line_start, len);
-#endif
-			++lnum;
-			if (--read_count == 0)
-			{
-			    error = TRUE;	    // break loop
-			    line_start = ptr;	// nothing left to write
-			    break;
+			    if (   try_unix
+				&& !read_stdin
+				&& (read_buffer
+				    || vim_lseek(fd, (off_T)0L, SEEK_SET)
+								      == 0))
+			    {
+				fileformat = EOL_UNIX;
+				if (set_options)
+				    set_fileformat(EOL_UNIX, OPT_LOCAL);
+				file_rewind = TRUE;
+				keep_fileformat = TRUE;
+				goto retry;
+			    }
+			    ff_error = EOL_DOS;
 			}
 		    }
-		    else
-			--skip_count;
-		    line_start = ptr + 1;
+		    if (ml_append(lnum, line_start, len, newfile) == FAIL)
+		    {
+			error = TRUE;
+			break;
+		    }
+#ifdef FEAT_PERSISTENT_UNDO
+		    if (read_undo_file)
+			sha256_update(&sha_ctx, line_start, len);
+#endif
+		    ++lnum;
+		    if (--read_count == 0)
+		    {
+			error = TRUE;	    // break loop
+			line_start = ptr;   // nothing left to write
+			break;
+		    }
 		}
+		else
+		    --skip_count;
+		line_start = ptr + 1;
+		++ptr;
 	    }
+	    size = -1;
 	}
 	linerest = (long)(ptr - line_start);
 	ui_breakcheck();
@@ -2732,10 +2788,10 @@ failed:
 							    FALSE, NULL, eap);
 	if (msg_scrolled == n)
 	    msg_scroll = m;
-# ifdef FEAT_EVAL
+#ifdef FEAT_EVAL
 	if (aborting())	    // autocmds may abort script processing
 	    goto theend;
-# endif
+#endif
     }
 
     if (!(recoverymode && error))
@@ -2750,7 +2806,7 @@ theend:
     return retval;
 }
 
-#if defined(OPEN_CHR_FILES) || defined(PROTO)
+#if defined(OPEN_CHR_FILES)
 /*
  * Returns TRUE if the file name argument is of the form "/dev/fd/\d\+",
  * which is the name of files used for process substitution output by
@@ -2955,7 +3011,7 @@ readfile_charconvert(
 }
 #endif
 
-#if defined(FEAT_CRYPT) || defined(PROTO)
+#if defined(FEAT_CRYPT)
 /*
  * Check for magic number used for encryption.  Applies to the current buffer.
  * If found, the magic number is removed from ptr[*sizep] and *sizep and
@@ -3017,9 +3073,13 @@ check_for_cryptkey(
 	    int header_len;
 
 	    header_len = crypt_get_header_len(method);
-	    if (*sizep <= header_len)
+	    if (*sizep < header_len)
+	    {
 		// invalid header, buffer can't be encrypted
+		if (cryptkey != curbuf->b_p_key)
+		    vim_free(cryptkey);
 		return NULL;
+	    }
 
 	    curbuf->b_cryptstate = crypt_create_from_header(
 							method, cryptkey, ptr);
@@ -3068,7 +3128,7 @@ check_file_readonly(
 	);
 }
 
-#if defined(HAVE_FSYNC) || defined(PROTO)
+#if defined(HAVE_FSYNC)
 /*
  * Call fsync() with Mac-specific exception.
  * Return fsync() result: zero for success.
@@ -3305,7 +3365,7 @@ get_fio_flags(char_u *ptr)
     return 0;
 }
 
-#if defined(MSWIN) || defined(PROTO)
+#if defined(MSWIN)
 /*
  * Check "ptr" for a MS-Windows codepage name and return the FIO_ flags needed
  * for the conversion MS-Windows can do for us.  Also accept "utf-8".
@@ -3323,18 +3383,18 @@ get_win_fio_flags(char_u *ptr)
     cp = encname2codepage(ptr);
     if (cp == 0)
     {
-#  ifdef CP_UTF8	// VC 4.1 doesn't define CP_UTF8
+# ifdef CP_UTF8	// VC 4.1 doesn't define CP_UTF8
 	if (STRCMP(ptr, "utf-8") == 0)
 	    cp = CP_UTF8;
 	else
-#  endif
+# endif
 	    return 0;
     }
     return FIO_PUT_CP(cp) | FIO_CODEPAGE;
 }
 #endif
 
-#if defined(MACOS_CONVERT) || defined(PROTO)
+#if defined(MACOS_CONVERT)
 /*
  * Check "ptr" for a Carbon supported encoding and return the FIO_ flags
  * needed for the internal conversion to/from utf-8 or latin1.
@@ -3457,7 +3517,9 @@ shorten_fname(char_u *full_path, char_u *dir_name)
 #endif
 	{
 	    if (vim_ispathsep(*p))
-		++p;
+		do
+		    ++p;
+		while (vim_ispathsep_nocolon(*p));
 #ifndef VMS   // the path separator is always part of the path
 	    else
 		p = NULL;
@@ -3545,8 +3607,7 @@ shorten_fnames(int force)
 
 #if (defined(FEAT_DND) && defined(FEAT_GUI_GTK)) \
 	|| defined(FEAT_GUI_MSWIN) \
-	|| defined(FEAT_GUI_HAIKU) \
-	|| defined(PROTO)
+	|| defined(FEAT_GUI_HAIKU)
 /*
  * Shorten all filenames in "fnames[count]" by current directory.
  */
@@ -4457,9 +4518,9 @@ buf_check_timestamp(
 			if (emsg_silent == 0 && !in_assert_fails)
 			{
 			    out_flush();
-    #ifdef FEAT_GUI
+#ifdef FEAT_GUI
 			    if (!focus)
-    #endif
+#endif
 				// give the user some time to think about it
 				ui_delay(1004L, TRUE);
 
@@ -4481,7 +4542,7 @@ buf_check_timestamp(
 	// Reload the buffer.
 	buf_reload(buf, orig_mode, reload == RELOAD_DETECT);
 #ifdef FEAT_PERSISTENT_UNDO
-	if (buf->b_p_udf && buf->b_ffname != NULL)
+	if (bufref_valid(&bufref) && buf->b_p_udf && buf->b_ffname != NULL)
 	{
 	    char_u	    hash[UNDO_HASH_SIZE];
 	    buf_T	    *save_curbuf = curbuf;
@@ -4823,7 +4884,7 @@ create_readdirex_item(char_u *path, char_u *name)
 {
     dict_T	*item;
     char	*p;
-    size_t	len;
+    size_t	pathlen, len;
     stat_T	st;
     int		ret, link = FALSE;
     varnumber_T	size;
@@ -4837,11 +4898,15 @@ create_readdirex_item(char_u *path, char_u *name)
 	return NULL;
     item->dv_refcount++;
 
-    len = STRLEN(path) + 1 + STRLEN(name) + 1;
+    pathlen = STRLEN(path);
+    len = pathlen + 1 + STRLEN(name) + 1;
     p = alloc(len);
     if (p == NULL)
 	goto theend;
-    vim_snprintf(p, len, "%s/%s", path, name);
+    if (pathlen > 0 && path[pathlen - 1] == '/')
+	vim_snprintf(p, len, "%s%s", path, name);
+    else
+	vim_snprintf(p, len, "%s/%s", path, name);
     ret = mch_lstat(p, &st);
     if (ret >= 0 && S_ISLNK(st.st_mode))
     {
@@ -4949,7 +5014,7 @@ compare_readdir_item(const void *s1, const void *s2)
 }
 #endif
 
-#if defined(TEMPDIRNAMES) || defined(FEAT_EVAL) || defined(PROTO)
+#if defined(TEMPDIRNAMES) || defined(FEAT_EVAL)
 /*
  * Core part of "readdir()" and "readdirex()" function.
  * Retrieve the list of files/directories of "path" into "gap".
@@ -5218,7 +5283,7 @@ delete_recursive(char_u *name)
 }
 #endif
 
-#if defined(TEMPDIRNAMES) || defined(PROTO)
+#if defined(TEMPDIRNAMES)
 static long	temp_count = 0;		// Temp filename counter.
 
 # if defined(UNIX) && defined(HAVE_FLOCK) && defined(HAVE_DIRFD)
@@ -5529,7 +5594,7 @@ vim_tempname(
 #endif // TEMPDIRNAMES
 }
 
-#if defined(BACKSLASH_IN_FILENAME) || defined(PROTO)
+#if defined(BACKSLASH_IN_FILENAME)
 /*
  * Convert all backslashes in fname to forward slashes in-place, unless when
  * it looks like a URL.
@@ -5840,7 +5905,7 @@ file_pat_to_reg_pat(
     return reg_pat;
 }
 
-#if defined(EINTR) || defined(PROTO)
+#if defined(EINTR)
 /*
  * Version of read() that retries when interrupted by EINTR (possibly
  * by a SIGWINCH).

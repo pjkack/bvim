@@ -14,12 +14,7 @@
 #define USING_FLOAT_STUFF
 #include "vim.h"
 
-#if defined(FEAT_EVAL) || defined(PROTO)
-
-// When not generating protos this is included in proto.h
-#ifdef PROTO
-# include "vim9.h"
-#endif
+#if defined(FEAT_EVAL)
 
 // flag passed from compile_subscript() to compile_load_scriptvar()
 static int paren_follows_after_expr = 0;
@@ -167,13 +162,13 @@ compile_member(int is_slice, int *keeping_dict, cctx_T *cctx)
     if (vartype == VAR_STRING || vartype == VAR_LIST || vartype == VAR_BLOB
 						|| vartype == VAR_TUPLE)
     {
-	if (need_type(idxtype, &t_number, FALSE,
+	if (need_type(idxtype, &t_number, 0,
 					    -1, 0, cctx, FALSE, FALSE) == FAIL)
 	    return FAIL;
 	if (is_slice)
 	{
 	    idxtype = get_type_on_stack(cctx, 1);
-	    if (need_type(idxtype, &t_number, FALSE,
+	    if (need_type(idxtype, &t_number, 0,
 					    -2, 0, cctx, FALSE, FALSE) == FAIL)
 		return FAIL;
 	}
@@ -204,7 +199,7 @@ compile_member(int is_slice, int *keeping_dict, cctx_T *cctx)
 	}
 	else
 	{
-	    if (need_type(typep->type_curr, &t_dict_any, FALSE,
+	    if (need_type(typep->type_curr, &t_dict_any, 0,
 					    -2, 0, cctx, FALSE, FALSE) == FAIL)
 		return FAIL;
 	    typep->type_curr = &t_any;
@@ -501,7 +496,7 @@ compile_class_object_index(cctx_T *cctx, char_u **arg, type_T *type)
 	    // Trying to invoke an abstract method in a super class is not
 	    // allowed.
 	    semsg(_(e_abstract_method_str_direct), ufunc->uf_name,
-		    ufunc->uf_defclass->class_name);
+		    ufunc->uf_defclass->class_name.string);
 	    goto done;
 	}
 
@@ -513,7 +508,7 @@ compile_class_object_index(cctx_T *cctx, char_u **arg, type_T *type)
 		((type->tt_type == VAR_OBJECT
 		  && !inside_class_hierarchy(cctx, cl))
 		 || (type->tt_type == VAR_CLASS
-		     && cctx->ctx_ufunc->uf_class != cl)))
+		     && cctx->ctx_ufunc->uf_defclass != cl)))
 	{
 	    semsg(_(e_cannot_access_protected_method_str), name);
 	    goto done;
@@ -556,7 +551,7 @@ compile_class_object_index(cctx_T *cctx, char_u **arg, type_T *type)
 	    if (*name == '_' && !inside_class(cctx, cl))
 	    {
 		emsg_var_cl_define(e_cannot_access_protected_variable_str,
-							m->ocm_name, 0, cl);
+							m->ocm_name.string, 0, cl);
 		goto done;
 	    }
 
@@ -601,7 +596,7 @@ compile_class_object_index(cctx_T *cctx, char_u **arg, type_T *type)
 	    if (*name == '_' && cctx->ctx_ufunc->uf_class != cl)
 	    {
 		emsg_var_cl_define(e_cannot_access_protected_variable_str,
-							m->ocm_name, 0, cl);
+							m->ocm_name.string, 0, cl);
 		goto done;
 	    }
 
@@ -1057,7 +1052,7 @@ compile_load(
 		else
 		{
 		    semsg(_(e_class_variable_str_accessible_only_inside_class_str),
-			    name, cl->class_name);
+			    name, cl->class_name.string);
 		    res = FAIL;
 		}
 	    }
@@ -1199,7 +1194,9 @@ compile_arguments(
 	    isn_T *isn = ((isn_T *)cctx->ctx_instr.ga_data) + instr_count;
 
 	    // {skip} argument of searchpair() can be compiled if not empty
-	    if (isn->isn_type == ISN_PUSHS && *isn->isn_arg.string != NUL)
+	    if (isn->isn_type == ISN_PUSHS
+		    && isn->isn_arg.string != NULL
+		    && *isn->isn_arg.string != NUL)
 		compile_string(isn, cctx, 0);
 	}
 	else if (special_fn == CA_SUBSTITUTE && *argcount == 3
@@ -1209,8 +1206,10 @@ compile_arguments(
 
 	    // {sub} argument of substitute() can be compiled if it starts
 	    // with \=
-	    if (isn->isn_type == ISN_PUSHS && isn->isn_arg.string[0] == '\\'
-					      && isn->isn_arg.string[1] == '=')
+	    if (isn->isn_type == ISN_PUSHS
+		    && isn->isn_arg.string != NULL
+		    && isn->isn_arg.string[0] == '\\'
+		    && isn->isn_arg.string[1] == '=')
 		compile_string(isn, cctx, 2);
 	}
 
@@ -1393,7 +1392,6 @@ compile_call(
     else
 	*arg += varlen + 1;
 
-    *arg = skipwhite(*arg);
     if (compile_arguments(arg, cctx, &argcount, special_fn) == FAIL)
 	goto theend;
 
@@ -1512,7 +1510,7 @@ compile_call(
 	    else
 	    {
 		semsg(_(e_class_method_str_accessible_only_inside_class_str),
-			name, cl->class_name);
+			name, cl->class_name.string);
 		res = FAIL;
 	    }
 	    goto theend;
@@ -1748,7 +1746,7 @@ compile_tuple(
  * "*arg" points to the '('.
  * Returns OK/FAIL when a lambda is recognized, NOTDONE if it's not a lambda.
  */
-    static int
+    int
 compile_lambda(char_u **arg, cctx_T *cctx)
 {
     int		r;
@@ -2375,7 +2373,7 @@ bool_on_stack(cctx_T *cctx)
 	// This requires a runtime type check.
 	return generate_COND2BOOL(cctx);
 
-    return need_type(type, &t_bool, FALSE, -1, 0, cctx, FALSE, FALSE);
+    return need_type(type, &t_bool, 0, -1, 0, cctx, FALSE, FALSE);
 }
 
 /*
@@ -2409,7 +2407,7 @@ compile_leader(cctx_T *cctx, int numeric_only, char_u *start, char_u **end)
 	{
 	    type_T *type = get_type_on_stack(cctx, 0);
 	    if (type->tt_type != VAR_FLOAT && need_type(type, &t_number,
-				     FALSE, -1, 0, cctx, FALSE, FALSE) == FAIL)
+				     0, -1, 0, cctx, FALSE, FALSE) == FAIL)
 		return FAIL;
 
 	    // only '-' has an effect, for '+' we only check the type
@@ -2431,6 +2429,8 @@ compile_leader(cctx_T *cctx, int numeric_only, char_u *start, char_u **end)
 		    invert = !invert;
 		--p;
 	    }
+	    if (check_type_is_value(get_type_on_stack(cctx, 0)) == FAIL)
+		return FAIL;
 	    if (generate_2BOOL(cctx, invert, -1) == FAIL)
 		return FAIL;
 	}
@@ -3197,8 +3197,8 @@ compile_expr8(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 	actual = get_type_on_stack(cctx, 0);
 	if (check_type_maybe(want_type, actual, FALSE, where) != OK)
 	{
-	    if (need_type_where(actual, want_type, FALSE, -1, where, cctx, FALSE, FALSE)
-		    == FAIL)
+	    if (need_type_where(actual, want_type, 0, -1, where, cctx, FALSE,
+							FALSE) == FAIL)
 		return FAIL;
 	}
     }
@@ -3439,7 +3439,7 @@ compile_expr5(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 	{
 	    type_T	*t = get_type_on_stack(cctx, 0);
 
-	    if (need_type(t, &t_number, FALSE, 0, 0, cctx, FALSE, FALSE) == FAIL)
+	    if (need_type(t, &t_number, 0, 0, 0, cctx, FALSE, FALSE) == FAIL)
 	    {
 		emsg(_(e_bitshift_ops_must_be_number));
 		return FAIL;
@@ -3494,7 +3494,7 @@ compile_expr5(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 	}
 	else
 	{
-	    if (need_type(get_type_on_stack(cctx, 0), &t_number, FALSE,
+	    if (need_type(get_type_on_stack(cctx, 0), &t_number, 0,
 					     0, 0, cctx, FALSE, FALSE) == FAIL)
 	    {
 		emsg(_(e_bitshift_ops_must_be_number));
@@ -3949,7 +3949,11 @@ compile_expr1(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 	    generate_JUMP(cctx, op_falsy
 				   ? JUMP_AND_KEEP_IF_TRUE : JUMP_IF_FALSE, 0);
 	    if (op_falsy)
+	    {
 		type1 = get_type_on_stack(cctx, -1);
+		if (check_type_is_value(type1) == FAIL)
+		    return FAIL;
+	    }
 	}
 
 	// evaluate the second expression; any type is accepted

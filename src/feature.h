@@ -170,10 +170,6 @@
 # define FEAT_KEYMAP
 #endif
 
-#ifdef FEAT_NORMAL
-# define VIM_BACKTICK		// internal backtick expansion
-#endif
-
 /*
  * +linebreak		'showbreak', 'breakat' and 'linebreak' options.
  *			Also 'numberwidth'.
@@ -221,7 +217,7 @@
 #endif
 #ifdef FEAT_ARABIC
 # ifndef FEAT_RIGHTLEFT
-#   define FEAT_RIGHTLEFT
+#  define FEAT_RIGHTLEFT
 # endif
 #endif
 
@@ -309,8 +305,9 @@
 #endif
 
 /*
- * +statusline		'statusline', 'rulerformat' and special format of
- *			'titlestring' and 'iconstring' options.
+ * +statusline		'statusline', 'statuslineopt', 'rulerformat' and
+ *			special format of 'titlestring' and 'iconstring'
+ *			options.
  */
 #ifdef FEAT_NORMAL
 # define FEAT_STL_OPT
@@ -341,7 +338,7 @@
  * +syntax		syntax highlighting.  When using this, it's a good
  *			idea to have +eval too.
  */
-#if defined(FEAT_NORMAL) || defined(PROTO)
+#if defined(FEAT_NORMAL)
 # define FEAT_SYN_HL
 #endif
 
@@ -356,14 +353,14 @@
 /*
  * +spell		spell checking
  */
-#if (defined(FEAT_NORMAL) || defined(PROTO))
+#if defined(FEAT_NORMAL)
 # define FEAT_SPELL
 #endif
 
 /*
  * +cryptv		Encryption (originally by Mohsin Ahmed <mosh@sasi.com>).
  */
-#if defined(FEAT_NORMAL) && !defined(FEAT_CRYPT) || defined(PROTO)
+#if defined(FEAT_NORMAL) && !defined(FEAT_CRYPT)
 # define FEAT_CRYPT
 #endif
 
@@ -508,7 +505,7 @@
 /*
  * GUI dark theme variant
  */
-#if defined(FEAT_GUI_GTK) && defined(USE_GTK3)
+#if (defined(FEAT_GUI_GTK) && defined(USE_GTK3)) || defined(FEAT_GUI_MSWIN)
 # define FEAT_GUI_DARKTHEME
 #endif
 
@@ -929,6 +926,13 @@
 #endif
 
 /*
+ * +wayland_focus_steal	    Focus stealing support for Wayland clipboard
+ */
+#if !defined(FEAT_WAYLAND_CLIPBOARD) && defined(FEAT_WAYLAND_CLIPBOARD_FS)
+# undef FEAT_WAYLAND_CLIPBOARD_FS
+#endif
+
+/*
  * +dnd		Drag'n'drop support.  Always used for the GTK+ GUI.
  */
 #if defined(FEAT_CLIPBOARD) && defined(FEAT_GUI_GTK)
@@ -948,9 +952,8 @@
 /*
  * +socketserver	 Use UNIX domain sockets for clientserver communication
  */
-#if defined(UNIX) && (defined(WANT_SOCKETSERVER) || \
-	(defined(MAYBE_SOCKETSERVER) && !defined(HAVE_X11)))
-#define FEAT_SOCKETSERVER
+#if defined(UNIX) && defined(WANT_SOCKETSERVER)
+# define FEAT_SOCKETSERVER
 #endif
 
 /*

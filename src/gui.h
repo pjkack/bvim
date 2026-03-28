@@ -260,6 +260,9 @@ typedef struct Gui
     int		left_sbar_x;	    // Calculated x coord for left scrollbar
     int		right_sbar_x;	    // Calculated x coord for right scrollbar
     int         force_redraw;       // Force a redraw even e.g. not resized
+#ifdef FEAT_DIRECTX
+    int		directx_enabled;    // DirectX (DirectWrite) rendering active
+#endif
 
 #ifdef FEAT_MENU
 # ifndef FEAT_GUI_GTK
@@ -389,6 +392,9 @@ typedef struct Gui
     char_u	*browse_fname;	    // file name from filedlg
 
     guint32	event_time;
+# ifdef GDK_WINDOWING_WAYLAND
+    bool	is_wayland;	    // active gdk backend in gtk is wayland
+# endif
 #endif	// FEAT_GUI_GTK
 
 #if defined(FEAT_GUI_GTK) || defined(FEAT_GUI_MSWIN)
@@ -422,6 +428,11 @@ typedef struct Gui
     guicolor_T	currFgColor;	    // Current foreground text color
     guicolor_T	currBgColor;	    // Current background text color
     guicolor_T	currSpColor;	    // Current special text color
+
+    guicolor_T	title_bg_pixel;	    // window title bar color
+    guicolor_T	title_fg_pixel;	    // window title bar's text color
+    guicolor_T	titlenc_bg_pixel;   // window title bar color not current
+    guicolor_T	titlenc_fg_pixel;   // window title bar's text color not current
 #endif
 
 #ifdef FEAT_GUI_HAIKU

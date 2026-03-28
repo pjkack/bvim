@@ -4264,6 +4264,161 @@ func Test_text_after_nowrap_list()
   call StopVimInTerminal(buf)
 endfunc
 
+func Test_text_after_wrap_showbreak()
+  CheckScreendump
+  CheckRunVimInTerminal
+
+  let lines =<< trim END
+    set cursorline
+    set shiftwidth=4
+
+    set breakindent
+    set showbreak=>\ 
+    set breakindentopt=shift:2,min:64
+
+    call setline(1, ['        " 1234567890', 'foo', 'bar'])
+
+    call prop_type_add('Test', {
+          \ 'highlight': 'Visual',
+          \ 'priority': 10,
+          \ 'combine': v:true,
+          \ })
+    call prop_add(1, 0, #{
+          \ type: 'Test',
+          \ bufnr: bufnr('%'),
+          \ text: 'aaaa890 123 456 789',
+          \ text_wrap: 'wrap',
+          \ text_align: 'after'
+          \ })
+  END
+  call writefile(lines, 'XTestAfterWrapShowbreak', 'D')
+  let buf = RunVimInTerminal('-S XTestAfterWrapShowbreak', #{rows: 8, cols: 20})
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_01', {})
+  call term_sendkeys(buf, 'j')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_02', {})
+  call term_sendkeys(buf, 'j')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_03', {})
+  call term_sendkeys(buf, 'k')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_02', {})
+  call term_sendkeys(buf, 'k')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_01', {})
+
+  call term_sendkeys(buf, '$x0')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_04', {})
+  call term_sendkeys(buf, 'j')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_05', {})
+  call term_sendkeys(buf, 'j')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_06', {})
+  call term_sendkeys(buf, 'k')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_05', {})
+  call term_sendkeys(buf, 'k')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_04', {})
+
+  call term_sendkeys(buf, ":set list listchars=eol:$\<CR>")
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_07', {})
+  call term_sendkeys(buf, 'j')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_08', {})
+  call term_sendkeys(buf, 'j')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_09', {})
+  call term_sendkeys(buf, 'k')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_08', {})
+  call term_sendkeys(buf, 'k')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_07', {})
+
+  call term_sendkeys(buf, '$x0')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_10', {})
+  call term_sendkeys(buf, 'j')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_11', {})
+  call term_sendkeys(buf, 'j')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_12', {})
+  call term_sendkeys(buf, 'k')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_11', {})
+  call term_sendkeys(buf, 'k')
+  call VerifyScreenDump(buf, 'Test_text_after_wrap_showbreak_10', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_text_eol_long_wrap_smoothscroll()
+  CheckScreendump
+  CheckRunVimInTerminal
+
+  let lines =<< trim END
+    call setline(1, [repeat('0123456789', 5), 'foo', 'bar'])
+    normal! G$
+    call prop_type_add('Test', #{highlight: 'ErrorMsg'})
+    call prop_add(1, 51, #{type: 'Test', text: repeat('x', 145), text_wrap: 'wrap'})
+
+    set cursorline scrolloff=0 showbreak=>\  smoothscroll
+  END
+  call writefile(lines, 'XTestEolLongWrapSms', 'D')
+  let buf = RunVimInTerminal('-S XTestEolLongWrapSms', #{rows: 8, cols: 50})
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_01', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_02', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_03', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_04', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_05', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_06', {})
+
+  call term_sendkeys(buf, 'gg$xG$')
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_07', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_08', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_09', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_10', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_11', {})
+
+  call term_sendkeys(buf, "zb:set list listchars=eol:$ | echo\<CR>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_12', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_13', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_14', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_15', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_16', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_17', {})
+
+  call term_sendkeys(buf, 'gg$xG$')
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_18', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_19', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_20', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_21', {})
+  call term_sendkeys(buf, "\<C-E>")
+  call VerifyScreenDump(buf, 'Test_text_eol_long_wrap_sms_22', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_text_eol_virtcol()
+  new
+  call prop_type_add('test', #{highlight: 'ErrorMsg'})
+  call setline(1, repeat(['1234567890'], 6))
+
+  for [ln, tx] in [[2, 'a'], [3, 'ab'], [4, 'abc'], [5, 'abcd'], [6, 'αβγ口']]
+    let co = col([ln, '$'])
+    call assert_equal(11, virtcol([ln, '$']))
+    call prop_add(ln, co, #{type: 'test', text: tx})
+    call assert_equal(11 + strwidth(tx), virtcol([ln, '$']))
+  endfor
+
+  bwipe!
+  call prop_type_delete('test')
+endfunc
+
 func Test_text_below_nowrap()
   CheckScreendump
   CheckRunVimInTerminal
@@ -4514,47 +4669,18 @@ endfunc
 
 func Test_error_when_using_negative_id()
   call prop_type_add('test1', #{highlight: 'ErrorMsg'})
-  call prop_add(1, 1, #{type: 'test1', text: 'virtual'})
+
+  " Negative id is always rejected.  Before the fix, prop_add() with a negative
+  " id succeeded when no virtual text existed, then prop_list() would dereference
+  " a NULL pointer (b_textprop_text.ga_data) and crash.
   call assert_fails("call prop_add(1, 1, #{type: 'test1', length: 1, id: -1})", 'E1293:')
+  call assert_equal([], prop_list(1))
+
+  " id is silently ignored when text is also specified.
+  let propid = prop_add(1, 1, #{type: 'test1', text: 'virtual', id: 42})
+  call assert_true(propid < 0)
 
   call prop_type_delete('test1')
-endfunc
-
-func Test_error_after_using_negative_id()
-  CheckScreendump
-  " This needs to run a separate Vim instance because the
-  " "did_use_negative_pop_id" will be set.
-  CheckRunVimInTerminal
-
-  let lines =<< trim END
-      vim9script
-
-      setline(1, ['one', 'two', 'three'])
-      prop_type_add('test_1', {highlight: 'Error'})
-      prop_type_add('test_2', {highlight: 'WildMenu'})
-
-      prop_add(3, 1, {
-          type: 'test_1',
-          length: 5,
-          id: -1
-      })
-
-      def g:AddTextprop()
-          prop_add(1, 0, {
-              type: 'test_2',
-              text: 'The quick fox',
-              text_padding_left: 2
-          })
-      enddef
-  END
-  call writefile(lines, 'XtextPropError', 'D')
-  let buf = RunVimInTerminal('-S XtextPropError', #{rows: 8, cols: 60})
-  call VerifyScreenDump(buf, 'Test_prop_negative_error_1', {})
-
-  call term_sendkeys(buf, ":call AddTextprop()\<CR>")
-  call VerifyScreenDump(buf, 'Test_prop_negative_error_2', {})
-
-  call StopVimInTerminal(buf)
 endfunc
 
 func Test_modify_text_before_prop()

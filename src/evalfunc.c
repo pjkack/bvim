@@ -14,7 +14,7 @@
 
 #include "vim.h"
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 
 #ifdef VMS
 # include <float.h>
@@ -233,7 +233,7 @@ check_arg_type(
 	type_T		*actual,
 	argcontext_T	*context)
 {
-    return need_type(actual, expected, FALSE,
+    return need_type(actual, expected, 0,
 	    context->arg_idx - context->arg_count, context->arg_idx + 1,
 	    context->arg_cctx, FALSE, FALSE);
 }
@@ -247,7 +247,7 @@ check_arg_type_mod(
 	type_T		*actual,
 	argcontext_T	*context)
 {
-    if (need_type(actual, expected, FALSE,
+    if (need_type(actual, expected, 0,
 	    context->arg_idx - context->arg_count, context->arg_idx + 1,
 	    context->arg_cctx, FALSE, FALSE) == FAIL)
 	return FAIL;
@@ -1261,7 +1261,7 @@ static argcheck_T arg1_string[] = {arg_string};
 static argcheck_T arg1_string_or_list_any[] = {arg_string_or_list_any};
 static argcheck_T arg1_string_or_list_string[] = {arg_string_or_list_string};
 static argcheck_T arg1_string_or_nr[] = {arg_string_or_nr};
-static argcheck_T arg2_any_buffer[] = {arg_any, arg_buffer};
+static argcheck_T arg1_string_or_blob[] = {arg_string_or_blob};
 static argcheck_T arg2_buffer_any[] = {arg_buffer, arg_any};
 static argcheck_T arg2_buffer_bool[] = {arg_buffer, arg_bool};
 static argcheck_T arg2_buffer_list_any[] = {arg_buffer, arg_list_any};
@@ -1304,6 +1304,7 @@ static argcheck_T arg2_string_or_list_number[] = {arg_string_or_list_any, arg_nu
 static argcheck_T arg2_string_string_or_number[] = {arg_string, arg_string_or_nr};
 static argcheck_T arg2_blob_dict[] = {arg_blob, arg_dict_any};
 static argcheck_T arg2_list_or_tuple_string[] = {arg_list_or_tuple, arg_string};
+static argcheck_T arg3_any_buffer_bool[] = {arg_any, arg_buffer, arg_bool};
 static argcheck_T arg3_any_list_dict[] = {arg_any, arg_list_any, arg_dict_any};
 static argcheck_T arg3_buffer_lnum_lnum[] = {arg_buffer, arg_lnum, arg_lnum};
 static argcheck_T arg3_buffer_number_number[] = {arg_buffer, arg_number, arg_number};
@@ -1383,7 +1384,7 @@ static argcheck_T arg45_sign_place[] = {arg_number, arg_string, arg_string, arg_
 static argcheck_T arg23_slice[] = {arg_slice1, arg_number, arg_number};
 static argcheck_T arg13_sortuniq[] = {arg_list_any_mod, arg_sort_how, arg_dict_any};
 static argcheck_T arg24_strpart[] = {arg_string, arg_number, arg_number, arg_bool};
-static argcheck_T arg12_system[] = {arg_string, arg_str_or_nr_or_list};
+static argcheck_T arg12_system[] = {arg_string_or_list_any, arg_str_or_nr_or_list};
 static argcheck_T arg23_win_execute[] = {arg_number, arg_string_or_list_string, arg_string};
 static argcheck_T arg23_writefile[] = {arg_list_or_blob, arg_string, arg_string};
 static argcheck_T arg24_match_func[] = {arg_string_or_list_any, arg_string, arg_number, arg_number};
@@ -2097,6 +2098,8 @@ static const funcentry_T global_functions[] =
 			ret_job,	    JOB_FUNC(f_ch_getjob)},
     {"ch_info",		1, 1, FEARG_1,	    arg1_chan_or_job,
 			ret_dict_any,	    JOB_FUNC(f_ch_info)},
+    {"ch_listen",	1, 2, FEARG_1,	    arg2_string_dict,
+			ret_channel,	    JOB_FUNC(f_ch_listen)},
     {"ch_log",		1, 2, FEARG_1,	    arg2_string_chan_or_job,
 			ret_void,	    f_ch_log},
     {"ch_logfile",	1, 2, FEARG_1,	    arg2_string,
@@ -2145,8 +2148,6 @@ static const funcentry_T global_functions[] =
 			ret_number_bool,    f_complete_check},
     {"complete_info",	0, 1, FEARG_1,	    arg1_list_string,
 			ret_dict_any,	    f_complete_info},
-    {"complete_match",	0, 2, 0,	    NULL,
-			ret_list_any,	    f_complete_match},
     {"confirm",		1, 4, FEARG_1,	    arg4_string_string_number_string,
 			ret_number,	    f_confirm},
     {"copy",		1, 1, FEARG_1,	    NULL,
@@ -2521,7 +2522,7 @@ static const funcentry_T global_functions[] =
 			ret_string,	    f_list2str},
     {"list2tuple",	1, 1, FEARG_1,	    arg1_list_any,
 			ret_tuple_any,	    f_list2tuple},
-    {"listener_add",	1, 2, FEARG_2,	    arg2_any_buffer,
+    {"listener_add",	1, 3, FEARG_2,	    arg3_any_buffer_bool,
 			ret_number,	    f_listener_add},
     {"listener_flush",	0, 1, FEARG_1,	    arg1_buffer,
 			ret_void,	    f_listener_flush},
@@ -2666,9 +2667,11 @@ static const funcentry_T global_functions[] =
     {"popup_settext",	2, 2, FEARG_1,	    arg2_number_string_or_list,
 			ret_void,	    PROP_FUNC(f_popup_settext)},
     {"popup_show",	1, 1, FEARG_1,	    arg1_number,
-			ret_void,	    PROP_FUNC(f_popup_show)},
+			ret_number,	    PROP_FUNC(f_popup_show)},
     {"pow",		2, 2, FEARG_1,	    arg2_float_or_nr,
 			ret_float,	    f_pow},
+    {"preinserted",	0, 0, 0,	    NULL,
+			ret_number_bool,    f_preinserted},
     {"prevnonblank",	1, 1, FEARG_1,	    arg1_lnum,
 			ret_number,	    f_prevnonblank},
     {"printf",		1, 19, FEARG_2,	    arg119_printf,
@@ -2743,6 +2746,10 @@ static const funcentry_T global_functions[] =
 			ret_list_dict_any,  f_readdirex},
     {"readfile",	1, 3, FEARG_1,	    arg3_string_string_number,
 			ret_list_string,    f_readfile},
+    {"redraw_listener_add", 1, 1, FEARG_1,  arg1_dict_any,
+			ret_number,	    f_redraw_listener_add},
+    {"redraw_listener_remove", 1, 1, FEARG_1, arg1_number,
+			ret_void,	    f_redraw_listener_remove},
     {"reduce",		2, 3, FEARG_1,	    arg23_reduce,
 			ret_any,	    f_reduce},
     {"reg_executing",	0, 0, 0,	    NULL,
@@ -2857,7 +2864,7 @@ static const funcentry_T global_functions[] =
 			ret_number_bool,    f_settagstack},
     {"setwinvar",	3, 3, FEARG_3,	    arg3_number_string_any,
 			ret_void,	    f_setwinvar},
-    {"sha256",		1, 1, FEARG_1,	    arg1_string,
+    {"sha256",		1, 1, FEARG_1,	    arg1_string_or_blob,
 			ret_string,
 #ifdef FEAT_CRYPT
 	    f_sha256
@@ -5030,7 +5037,7 @@ execute_redir_str(char_u *value, int value_len)
     redir_execute_ga.ga_len += len;
 }
 
-#if defined(FEAT_LUA) || defined(PROTO)
+#if defined(FEAT_LUA)
 /*
  * Get next line from a string containing NL separated lines.
  * Called by do_cmdline() to get the next line.
@@ -5546,7 +5553,9 @@ f_feedkeys(typval_T *argvars, typval_T *rettv UNUSED)
 		++ex_normal_busy;
 		++in_feedkeys;
 	    }
+	    ++allow_osc_key;
 	    exec_normal(TRUE, lowlevel, TRUE);
+	    --allow_osc_key;
 	    if (!dangerous)
 	    {
 		--ex_normal_busy;
@@ -5826,9 +5835,13 @@ common_function(typval_T *argvars, typval_T *rettv, int is_funcref)
 	    else
 	    {
 		// generic function
-		STRCPY(IObuff, name);
-		STRCAT(IObuff, start_bracket);
-		rettv->vval.v_string = vim_strsave(IObuff);
+		size_t len = STRLEN(name) + STRLEN(start_bracket);
+		rettv->vval.v_string = alloc(len + 1);
+		if (rettv->vval.v_string != NULL)
+		{
+		    STRCPY(rettv->vval.v_string, name);
+		    STRCAT(rettv->vval.v_string, start_bracket);
+		}
 		vim_free(name);
 	    }
 	}
@@ -6415,24 +6428,25 @@ f_getpos(typval_T *argvars, typval_T *rettv)
 /*
  * Convert from block_def to string
  */
-    static char_u *
-block_def2str(struct block_def *bd)
+    static int
+block_def2str(struct block_def *bd, string_T *ret)
 {
-    char_u *p, *ret;
-    size_t size = bd->startspaces + bd->endspaces + bd->textlen;
-
-    ret = alloc(size + 1);
-    if (ret != NULL)
+    ret->string = alloc(bd->startspaces + bd->endspaces + bd->textlen + 1);
+    if (ret->string == NULL)
     {
-	p = ret;
-	vim_memset(p, ' ', bd->startspaces);
-	p += bd->startspaces;
-	mch_memmove(p, bd->textstart, bd->textlen);
-	p += bd->textlen;
-	vim_memset(p, ' ', bd->endspaces);
-	*(p + bd->endspaces) = NUL;
+	ret->length = 0;
+	return FAIL;
     }
-    return ret;
+
+    vim_memset(ret->string, ' ', bd->startspaces);
+    ret->length = bd->startspaces;
+    mch_memmove(ret->string + ret->length, bd->textstart, bd->textlen);
+    ret->length += bd->textlen;
+    vim_memset(ret->string + ret->length, ' ', bd->endspaces);
+    ret->length += bd->endspaces;
+    ret->string[ret->length] = NUL;
+
+    return OK;
 }
 
     static int
@@ -6567,8 +6581,17 @@ getregionpos(
     {
 	colnr_T sc1, ec1, sc2, ec2;
 
+#ifdef FEAT_LINEBREAK
+	int	lbr_saved = reset_lbr();
+#endif
+
 	getvvcol(curwin, p1, &sc1, NULL, &ec1);
 	getvvcol(curwin, p2, &sc2, NULL, &ec2);
+
+#ifdef FEAT_LINEBREAK
+	restore_lbr(lbr_saved);
+#endif
+
 	oap->motion_type = MBLOCK;
 	oap->inclusive = TRUE;
 	oap->op_type = OP_NOP;
@@ -6604,7 +6627,7 @@ f_getregion(typval_T *argvars, typval_T *rettv)
 
     buf_T		*save_curbuf;
     int			save_virtual;
-    char_u		*akt = NULL;
+    string_T		akt = {NULL, 0};
     linenr_T		lnum;
 
     save_curbuf = curbuf;
@@ -6616,31 +6639,47 @@ f_getregion(typval_T *argvars, typval_T *rettv)
 
     for (lnum = p1.lnum; lnum <= p2.lnum; lnum++)
     {
-	int ret = 0;
-	struct block_def	bd;
+	int ret = OK;
 
-	if (region_type == MLINE)
-	    akt = vim_strsave(ml_get(lnum));
-	else if (region_type == MBLOCK)
+	if (region_type == MBLOCK)
 	{
+	    struct block_def	bd;
+
 	    block_prep(&oa, &bd, lnum, FALSE);
-	    akt = block_def2str(&bd);
+	    block_def2str(&bd, &akt);
 	}
-	else if (p1.lnum < lnum && lnum < p2.lnum)
-	    akt = vim_strsave(ml_get(lnum));
+	else if (region_type == MLINE
+	    || (p1.lnum < lnum && lnum < p2.lnum))
+	{
+	    string_T	s;
+
+	    s.string = ml_get(lnum);
+	    s.length = ml_get_len(lnum);
+	    akt.string = vim_strnsave(s.string, s.length);
+	    if (akt.string == NULL)
+		akt.length = 0;
+	    else
+		akt.length = s.length;
+	}
 	else
 	{
+	    struct block_def	bd;
+
 	    charwise_block_prep(p1, p2, &bd, lnum, inclusive);
-	    akt = block_def2str(&bd);
+	    block_def2str(&bd, &akt);
 	}
 
-	if (akt)
+	if (akt.string == NULL)
 	{
-	    ret = list_append_string(rettv->vval.v_list, akt, -1);
-	    vim_free(akt);
+	    clear_tv(rettv);
+	    (void)rettv_list_alloc(rettv);
+	    break;
 	}
 
-	if (akt == NULL || ret == FAIL)
+	ret = list_append_string(rettv->vval.v_list, akt.string, (int)akt.length);
+	vim_free(akt.string);
+
+	if (ret == FAIL)
 	{
 	    clear_tv(rettv);
 	    (void)rettv_list_alloc(rettv);
@@ -6943,7 +6982,7 @@ f_getregtype(typval_T *argvars, typval_T *rettv)
 	case MCHAR: buf[0] = 'v'; break;
 	case MBLOCK:
 		buf[0] = Ctrl_V;
-		sprintf((char *)buf + 1, "%ld", reglen + 1);
+		vim_snprintf((char *)buf + 1, NUMBUFLEN + 1, "%ld", reglen + 1);
 		break;
     }
     rettv->vval.v_string = vim_strsave(buf);
@@ -7040,6 +7079,13 @@ f_has(typval_T *argvars, typval_T *rettv)
 		0
 #endif
 		},
+	{"android",
+#ifdef __ANDROID__
+		1
+#else
+		0
+#endif
+		},
 	{"arp",
 #if defined(AMIGA) && defined(FEAT_ARP)
 		1
@@ -7119,6 +7165,13 @@ f_has(typval_T *argvars, typval_T *rettv)
 		},
 	{"sun",
 #ifdef SUN_SYSTEM
+		1
+#else
+		0
+#endif
+		},
+	{"termux",
+#ifdef __TERMUX__
 		1
 #else
 		0
@@ -7234,7 +7287,7 @@ f_has(typval_T *argvars, typval_T *rettv)
 	{"builtin_terms", 1},
 	{"all_builtin_terms", 1},
 	{"browsefilter",
-#if defined(FEAT_BROWSE) && (defined(USE_FILE_CHOOSER) \
+#if defined(FEAT_BROWSE) && (defined(FEAT_GUI_GTK) \
 	|| defined(FEAT_GUI_MSWIN) \
 	|| defined(FEAT_GUI_MOTIF))
 		1
@@ -7266,6 +7319,13 @@ f_has(typval_T *argvars, typval_T *rettv)
 		},
 	{"clipboard",
 #ifdef FEAT_CLIPBOARD
+		1
+#else
+		0
+#endif
+		},
+	{"clipboard_provider",
+#ifdef FEAT_CLIPBOARD_PROVIDER
 		1
 #else
 		0
@@ -7968,14 +8028,6 @@ f_has(typval_T *argvars, typval_T *rettv)
 		0
 #endif
 		},
-	{"unnamedplus",
-#if defined(FEAT_CLIPBOARD) && (defined(FEAT_X11) \
-	|| defined(FEAT_WAYLAND_CLIPBOARD))
-		1
-#else
-		0
-#endif
-		},
 	{"user-commands", 1},    // was accidentally included in 5.4
 	{"user_commands", 1},
 	{"vartabs",
@@ -8018,6 +8070,13 @@ f_has(typval_T *argvars, typval_T *rettv)
 		},
 	{"wayland_clipboard",
 #ifdef FEAT_WAYLAND_CLIPBOARD
+		1
+#else
+		0
+#endif
+		},
+	{"wayland_focus_steal",
+#ifdef FEAT_WAYLAND_CLIPBOARD_FS
 		1
 #else
 		0
@@ -8127,194 +8186,217 @@ f_has(typval_T *argvars, typval_T *rettv)
 	return;
 
     name = tv_get_string(&argvars[0]);
-    for (i = 0; has_list[i].name != NULL; ++i)
-	if (STRICMP(name, has_list[i].name) == 0)
-	{
-	    x = TRUE;
-	    n = has_list[i].present;
-	    break;
-	}
 
-    // features also in has_list[] but sometimes enabled at runtime
-    if (x == TRUE && n == FALSE)
+    // Fast-path: check features not in has_list[] first to avoid the full
+    // linear scan for very common queries like has('patch-...').
+    if (STRNICMP(name, "patch", 5) == 0)
     {
-	if (0)
+	x = TRUE;
+	if (name[5] == '-'
+		&& STRLEN(name) >= 11
+		&& (name[6] >= '1' && name[6] <= '9'))
 	{
-	    // intentionally empty
+	    char	*end;
+	    int	major, minor;
+
+	    // This works for patch-8.1.2, patch-9.0.3, patch-10.0.4, etc.
+	    // Not for patch-9.10.5.
+	    major = (int)strtoul((char *)name + 6, &end, 10);
+	    if (*end == '.' && vim_isdigit(end[1])
+		    && end[2] == '.' && vim_isdigit(end[3]))
+	    {
+		minor = atoi(end + 1);
+
+		// Expect "patch-9.9.01234".
+		n = (major < VIM_VERSION_MAJOR
+		     || (major == VIM_VERSION_MAJOR
+			 && (minor < VIM_VERSION_MINOR
+			     || (minor == VIM_VERSION_MINOR
+				 && has_patch(atoi(end + 3))))));
+	    }
 	}
-#ifdef VIMDLL
-	else if (STRICMP(name, "filterpipe") == 0)
-	    n = gui.in_use || gui.starting;
+	else if (SAFE_isdigit(name[5]))
+	    n = has_patch(atoi((char *)name + 5));
+    }
+    else if (STRICMP(name, "vim_starting") == 0)
+    {
+	x = TRUE;
+	n = (starting != 0);
+    }
+    else if (STRICMP(name, "ttyin") == 0)
+    {
+	x = TRUE;
+	n = mch_input_isatty();
+    }
+    else if (STRICMP(name, "ttyout") == 0)
+    {
+	x = TRUE;
+	n = stdout_isatty;
+    }
+    else if (STRICMP(name, "multi_byte_encoding") == 0)
+    {
+	x = TRUE;
+	n = has_mbyte;
+    }
+    else if (STRICMP(name, "gui_running") == 0)
+    {
+	x = TRUE;
+#ifdef FEAT_GUI
+	n = (gui.in_use || gui.starting);
 #endif
-#if defined(USE_ICONV) && defined(DYNAMIC_ICONV)
-	else if (STRICMP(name, "iconv") == 0)
-	    n = iconv_enabled(FALSE);
+    }
+    else if (STRICMP(name, "browse") == 0)
+    {
+	x = TRUE;
+#if defined(FEAT_GUI) && defined(FEAT_BROWSE)
+	n = gui.in_use;	// gui_mch_browse() works when GUI is running
 #endif
-#ifdef DYNAMIC_LUA
-	else if (STRICMP(name, "lua") == 0)
-	    n = lua_enabled(FALSE);
+    }
+    else if (STRICMP(name, "syntax_items") == 0)
+    {
+	x = TRUE;
+#ifdef FEAT_SYN_HL
+	n = syntax_present(curwin);
 #endif
-#ifdef DYNAMIC_MZSCHEME
-	else if (STRICMP(name, "mzscheme") == 0)
-	    n = mzscheme_enabled(FALSE);
+    }
+    else if (STRICMP(name, "vcon") == 0)
+    {
+	x = TRUE;
+#ifdef FEAT_VTP
+	n = is_term_win32() && has_vtp_working();
 #endif
-#ifdef DYNAMIC_PERL
-	else if (STRICMP(name, "perl") == 0)
-	    n = perl_enabled(FALSE);
+    }
+    else if (STRICMP(name, "netbeans_enabled") == 0)
+    {
+	x = TRUE;
+#ifdef FEAT_NETBEANS_INTG
+	n = netbeans_active();
 #endif
-#ifdef DYNAMIC_PYTHON
-	else if (STRICMP(name, "python") == 0)
-	    n = python_enabled(FALSE);
+    }
+    else if (STRICMP(name, "mouse_gpm_enabled") == 0)
+    {
+	x = TRUE;
+#ifdef FEAT_MOUSE_GPM
+	n = gpm_enabled();
 #endif
-#ifdef DYNAMIC_PYTHON3
-	else if (STRICMP(name, "python3") == 0)
-	    n = python3_enabled(FALSE);
-#endif
-#if defined(DYNAMIC_PYTHON) || defined(DYNAMIC_PYTHON3)
-	else if (STRICMP(name, "pythonx") == 0)
-	{
-# if defined(DYNAMIC_PYTHON) && defined(DYNAMIC_PYTHON3)
-	    if (p_pyx == 0)
-		n = python3_enabled(FALSE) || python_enabled(FALSE);
-	    else if (p_pyx == 3)
-		n = python3_enabled(FALSE);
-	    else if (p_pyx == 2)
-		n = python_enabled(FALSE);
-# elif defined(DYNAMIC_PYTHON)
-	    n = python_enabled(FALSE);
-# elif defined(DYNAMIC_PYTHON3)
-	    n = python3_enabled(FALSE);
-# endif
-	}
-#endif
-#ifdef DYNAMIC_RUBY
-	else if (STRICMP(name, "ruby") == 0)
-	    n = ruby_enabled(FALSE);
-#endif
-#ifdef DYNAMIC_TCL
-	else if (STRICMP(name, "tcl") == 0)
-	    n = tcl_enabled(FALSE);
-#endif
-#ifdef DYNAMIC_SODIUM
-	else if (STRICMP(name, "sodium") == 0)
-	    n = sodium_enabled(FALSE);
-#endif
+    }
+    else if (STRICMP(name, "conpty") == 0)
+    {
+	x = TRUE;
 #if defined(FEAT_TERMINAL) && defined(MSWIN)
-	else if (STRICMP(name, "terminal") == 0)
-	    n = terminal_enabled();
+	n = use_conpty();
 #endif
-#ifdef DYNAMIC_GPM
-	else if (STRICMP(name, "mouse_gpm") == 0)
-	    n = gpm_available();
+    }
+    else if (STRICMP(name, "clipboard_working") == 0)
+    {
+	x = TRUE;
+#ifdef FEAT_CLIPBOARD
+	n = clipmethod == CLIPMETHOD_PROVIDER ? TRUE : clip_star.available;
+#endif
+    }
+    else if (STRICMP(name, "unnamedplus") == 0)
+    {
+	x = TRUE;
+#ifdef FEAT_CLIPBOARD
+	// The + register is available when clipmethod is set to a provider,
+	// but becomes unavailable if on a platform that doesn't support it
+	// and clipmethod is "none".
+	// (Windows, MacOS).
+# if defined(FEAT_X11) || defined(FEAT_WAYLAND_CLIPBOARD)
+	n = TRUE;
+# elif defined(FEAT_EVAL)
+	if (clipmethod == CLIPMETHOD_PROVIDER)
+	    n = TRUE;
+	else
+	    n = FALSE;
+# else
+	n = FALSE;
+# endif
 #endif
     }
 
-    // features not in has_list[]
+    // Look up in has_list[] only if not already handled above.
     if (x == FALSE)
     {
-	if (STRNICMP(name, "patch", 5) == 0)
-	{
-	    x = TRUE;
-	    if (name[5] == '-'
-		    && STRLEN(name) >= 11
-		    && (name[6] >= '1' && name[6] <= '9'))
+	for (i = 0; has_list[i].name != NULL; ++i)
+	    if (STRICMP(name, has_list[i].name) == 0)
 	    {
-		char	*end;
-		int	major, minor;
-
-		// This works for patch-8.1.2, patch-9.0.3, patch-10.0.4, etc.
-		// Not for patch-9.10.5.
-		major = (int)strtoul((char *)name + 6, &end, 10);
-		if (*end == '.' && vim_isdigit(end[1])
-			&& end[2] == '.' && vim_isdigit(end[3]))
-		{
-		    minor = atoi(end + 1);
-
-		    // Expect "patch-9.9.01234".
-		    n = (major < VIM_VERSION_MAJOR
-			 || (major == VIM_VERSION_MAJOR
-			     && (minor < VIM_VERSION_MINOR
-				 || (minor == VIM_VERSION_MINOR
-				     && has_patch(atoi(end + 3))))));
-		}
+		x = TRUE;
+		n = has_list[i].present;
+		break;
 	    }
-	    else if (SAFE_isdigit(name[5]))
-		n = has_patch(atoi((char *)name + 5));
-	}
-	else if (STRICMP(name, "vim_starting") == 0)
+
+	// features also in has_list[] but sometimes enabled at runtime
+	if (x == TRUE && n == FALSE)
 	{
-	    x = TRUE;
-	    n = (starting != 0);
-	}
-	else if (STRICMP(name, "ttyin") == 0)
-	{
-	    x = TRUE;
-	    n = mch_input_isatty();
-	}
-	else if (STRICMP(name, "ttyout") == 0)
-	{
-	    x = TRUE;
-	    n = stdout_isatty;
-	}
-	else if (STRICMP(name, "multi_byte_encoding") == 0)
-	{
-	    x = TRUE;
-	    n = has_mbyte;
-	}
-	else if (STRICMP(name, "gui_running") == 0)
-	{
-	    x = TRUE;
-#ifdef FEAT_GUI
-	    n = (gui.in_use || gui.starting);
+	    if (0)
+	    {
+		// intentionally empty
+	    }
+#ifdef VIMDLL
+	    else if (STRICMP(name, "filterpipe") == 0)
+		n = gui.in_use || gui.starting;
 #endif
-	}
-	else if (STRICMP(name, "browse") == 0)
-	{
-	    x = TRUE;
-#if defined(FEAT_GUI) && defined(FEAT_BROWSE)
-	    n = gui.in_use;	// gui_mch_browse() works when GUI is running
+#if defined(USE_ICONV) && defined(DYNAMIC_ICONV)
+	    else if (STRICMP(name, "iconv") == 0)
+		n = iconv_enabled(FALSE);
 #endif
-	}
-	else if (STRICMP(name, "syntax_items") == 0)
-	{
-	    x = TRUE;
-#ifdef FEAT_SYN_HL
-	    n = syntax_present(curwin);
+#ifdef DYNAMIC_LUA
+	    else if (STRICMP(name, "lua") == 0)
+		n = lua_enabled(FALSE);
 #endif
-	}
-	else if (STRICMP(name, "vcon") == 0)
-	{
-	    x = TRUE;
-#ifdef FEAT_VTP
-	    n = is_term_win32() && has_vtp_working();
+#ifdef DYNAMIC_MZSCHEME
+	    else if (STRICMP(name, "mzscheme") == 0)
+		n = mzscheme_enabled(FALSE);
 #endif
-	}
-	else if (STRICMP(name, "netbeans_enabled") == 0)
-	{
-	    x = TRUE;
-#ifdef FEAT_NETBEANS_INTG
-	    n = netbeans_active();
+#ifdef DYNAMIC_PERL
+	    else if (STRICMP(name, "perl") == 0)
+		n = perl_enabled(FALSE);
 #endif
-	}
-	else if (STRICMP(name, "mouse_gpm_enabled") == 0)
-	{
-	    x = TRUE;
-#ifdef FEAT_MOUSE_GPM
-	    n = gpm_enabled();
+#ifdef DYNAMIC_PYTHON
+	    else if (STRICMP(name, "python") == 0)
+		n = python_enabled(FALSE);
 #endif
-	}
-	else if (STRICMP(name, "conpty") == 0)
-	{
-	    x = TRUE;
+#ifdef DYNAMIC_PYTHON3
+	    else if (STRICMP(name, "python3") == 0)
+		n = python3_enabled(FALSE);
+#endif
+#if defined(DYNAMIC_PYTHON) || defined(DYNAMIC_PYTHON3)
+	    else if (STRICMP(name, "pythonx") == 0)
+	    {
+# if defined(DYNAMIC_PYTHON) && defined(DYNAMIC_PYTHON3)
+		if (p_pyx == 0)
+		    n = python3_enabled(FALSE) || python_enabled(FALSE);
+		else if (p_pyx == 3)
+		    n = python3_enabled(FALSE);
+		else if (p_pyx == 2)
+		    n = python_enabled(FALSE);
+# elif defined(DYNAMIC_PYTHON)
+		n = python_enabled(FALSE);
+# elif defined(DYNAMIC_PYTHON3)
+		n = python3_enabled(FALSE);
+# endif
+	    }
+#endif
+#ifdef DYNAMIC_RUBY
+	    else if (STRICMP(name, "ruby") == 0)
+		n = ruby_enabled(FALSE);
+#endif
+#ifdef DYNAMIC_TCL
+	    else if (STRICMP(name, "tcl") == 0)
+		n = tcl_enabled(FALSE);
+#endif
+#ifdef DYNAMIC_SODIUM
+	    else if (STRICMP(name, "sodium") == 0)
+		n = sodium_enabled(FALSE);
+#endif
 #if defined(FEAT_TERMINAL) && defined(MSWIN)
-	    n = use_conpty();
+	    else if (STRICMP(name, "terminal") == 0)
+		n = terminal_enabled();
 #endif
-	}
-	else if (STRICMP(name, "clipboard_working") == 0)
-	{
-	    x = TRUE;
-#ifdef FEAT_CLIPBOARD
-	    n = clip_star.available;
+#ifdef DYNAMIC_GPM
+	    else if (STRICMP(name, "mouse_gpm") == 0)
+		n = gpm_available();
 #endif
 	}
     }
@@ -9153,7 +9235,7 @@ f_islocked(typval_T *argvars, typval_T *rettv)
 }
 
 /*
- * "items(dict)" function
+ * "items()" function
  */
     static void
 f_items(typval_T *argvars, typval_T *rettv)
@@ -10076,7 +10158,7 @@ f_min(typval_T *argvars, typval_T *rettv)
     max_min(argvars, rettv, FALSE);
 }
 
-#if defined(FEAT_MZSCHEME) || defined(PROTO)
+#if defined(FEAT_MZSCHEME)
 /*
  * "mzeval()" function
  */
@@ -10236,6 +10318,9 @@ f_perleval(typval_T *argvars, typval_T *rettv)
 {
     char_u	*str;
     char_u	buf[NUMBUFLEN];
+
+    if (check_restricted() || check_secure())
+	return;
 
     if (in_vim9script() && check_for_string_arg(argvars, 0) == FAIL)
 	return;
@@ -10491,11 +10576,11 @@ init_srand(UINT32_T *x)
 #if defined(FEAT_RELTIME)
 	proftime_T res;
 	profile_start(&res);
-#  if defined(MSWIN)
+# if defined(MSWIN)
 	*x = (UINT32_T)res.LowPart;
-#  else
+# else
 	*x = (UINT32_T)res.tv_fsec;
-#  endif
+# endif
 #else
 	*x = vim_time();
 #endif
@@ -11165,6 +11250,9 @@ f_rubyeval(typval_T *argvars, typval_T *rettv)
 {
     char_u	*str;
     char_u	buf[NUMBUFLEN];
+
+    if (check_restricted() || check_secure())
+	return;
 
     if (in_vim9script() && check_for_string_arg(argvars, 0) == FAIL)
 	return;
@@ -11889,7 +11977,7 @@ f_setpos(typval_T *argvars, typval_T *rettv)
 /*
  * Translate a register type string to the yank type and block length
  */
-    static int
+    int
 get_yank_type(char_u **pp, char_u *yank_type, long *block_len)
 {
     char_u *stropt = *pp;
@@ -12148,20 +12236,33 @@ f_settagstack(typval_T *argvars, typval_T *rettv)
 
 #ifdef FEAT_CRYPT
 /*
- * "sha256({string})" function
+ * "sha256({expr})" function
  */
     static void
 f_sha256(typval_T *argvars, typval_T *rettv)
 {
     char_u	*p;
+    int		len;
 
-    if (in_vim9script() && check_for_string_arg(argvars, 0) == FAIL)
+    if (in_vim9script() && check_for_string_or_blob_arg(argvars, 0) == FAIL)
 	return;
 
-    p = tv_get_string(&argvars[0]);
-    rettv->vval.v_string = vim_strsave(
-				    sha256_bytes(p, (int)STRLEN(p), NULL, 0));
     rettv->v_type = VAR_STRING;
+    rettv->vval.v_string = NULL;
+
+    if (argvars[0].v_type == VAR_BLOB)
+    {
+	blob_T *blob = argvars[0].vval.v_blob;
+	p = blob != NULL ? (char_u *)blob->bv_ga.ga_data : (char_u *)"";
+	len = blob != NULL ? blob->bv_ga.ga_len : 0;
+	rettv->vval.v_string = vim_strsave(sha256_bytes(p, len, NULL, 0));
+    }
+    else
+    {
+	p = tv_get_string(&argvars[0]);
+	rettv->vval.v_string = vim_strsave(
+				    sha256_bytes(p, (int)STRLEN(p), NULL, 0));
+    }
 }
 #endif // FEAT_CRYPT
 
@@ -12305,12 +12406,28 @@ f_spellbadword(typval_T *argvars UNUSED, typval_T *rettv)
 #endif
 
     list_append_string(rettv->vval.v_list, word, len);
-    list_append_string(rettv->vval.v_list, (char_u *)(
-			attr == HLF_SPB ? "bad" :
-			attr == HLF_SPR ? "rare" :
-			attr == HLF_SPL ? "local" :
-			attr == HLF_SPC ? "caps" :
-			""), -1);
+    switch (attr)
+    {
+    case HLF_SPB:
+	list_append_string(rettv->vval.v_list, (char_u *)"bad", STRLEN_LITERAL("bad"));
+	break;
+
+    case HLF_SPR:
+	list_append_string(rettv->vval.v_list, (char_u *)"rare", STRLEN_LITERAL("rare"));
+	break;
+
+    case HLF_SPL:
+	list_append_string(rettv->vval.v_list, (char_u *)"local", STRLEN_LITERAL("local"));
+	break;
+
+    case HLF_SPC:
+	list_append_string(rettv->vval.v_list, (char_u *)"caps", STRLEN_LITERAL("caps"));
+	break;
+
+    default:
+	list_append_string(rettv->vval.v_list, (char_u *)"", 0);
+	break;
+    }
 }
 
 /*
@@ -12667,11 +12784,11 @@ f_synIDattr(typval_T *argvars UNUSED, typval_T *rettv)
     }
     else
     {
-#if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
+# if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
 	if (USE_24BIT)
 	    modec = 'g';
 	else
-#endif
+# endif
 	    if (t_colors > 1)
 		modec = 'c';
 	    else
@@ -13008,9 +13125,11 @@ f_type(typval_T *argvars, typval_T *rettv)
 		}
 		break;
 	    }
+	case VAR_VOID:
+	    emsg(_(e_cannot_use_void_value));
+	    break;
 	case VAR_UNKNOWN:
 	case VAR_ANY:
-	case VAR_VOID:
 	    internal_error_no_abort("f_type(UNKNOWN)");
 	    n = -1;
 	    break;

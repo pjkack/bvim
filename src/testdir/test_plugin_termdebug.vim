@@ -55,6 +55,96 @@ endfunction
 
 packadd termdebug
 
+func s:GetTermdebugFunction(name)
+  for line in execute('scriptnames')->split("\n")
+    if line =~# 'termdebug/plugin/termdebug\.vim$'
+      let sid = matchstr(line, '^\s*\zs\d\+')
+      return function('<SNR>' .. sid .. '_' .. a:name)
+    endif
+  endfor
+  throw 'termdebug script not found'
+endfunc
+
+func Test_termdebug_break_command_builder()
+  let bin_name = 'XTD_break_cmd'
+  let src_name = bin_name .. '.c'
+  let BuildBreakpointCommand = s:GetTermdebugFunction('BuildBreakpointCommand')
+  call s:generate_files(bin_name)
+
+  execute 'edit ' .. src_name
+  call cursor(22, 1)
+  let here = '"' .. fnamemodify(src_name, ':p') .. ':22"'
+
+  call assert_equal('-break-insert ' .. here, BuildBreakpointCommand('', v:false))
+  call assert_equal('-break-insert -t ' .. here, BuildBreakpointCommand('', v:true))
+  call assert_equal('-break-insert -c "argc == 1" ' .. here,
+        \ BuildBreakpointCommand('if argc == 1', v:false))
+  call assert_equal('-break-insert -p 2 ' .. here,
+        \ BuildBreakpointCommand('thread 2', v:false))
+  call assert_equal('-break-insert -p 2 -c "argc == 1" ' .. here,
+        \ BuildBreakpointCommand('thread 2 if argc == 1', v:false))
+  call assert_equal('-break-insert -p 2 -c "argc == 1" 22',
+        \ BuildBreakpointCommand('22 thread 2 if argc == 1', v:false))
+  call assert_equal('-break-insert -c "argc == 1" 22',
+        \ BuildBreakpointCommand('22 if argc == 1', v:false))
+  call assert_equal('-break-insert -c "é == 1" 断点',
+        \ BuildBreakpointCommand('断点 if é == 1', v:false))
+  call assert_equal('-break-insert -p 2 断点',
+        \ BuildBreakpointCommand('断点 thread 2', v:false))
+  call assert_equal('-break-insert 断点 if',
+        \ BuildBreakpointCommand('断点 if', v:false))
+  call assert_equal('-break-insert 断点 thread 2 if',
+        \ BuildBreakpointCommand('断点 thread 2 if', v:false))
+  call assert_equal('-break-insert foo\ if\ bar',
+        \ BuildBreakpointCommand('foo\ if\ bar', v:false))
+
+  call s:cleanup_files(bin_name)
+  %bw!
+endfunc
+
+func Test_termdebug_break_with_default_location_and_condition()
+  let g:test_is_flaky = 1
+  let bin_name = 'XTD_break_if'
+  let src_name = bin_name .. '.c'
+  call s:generate_files(bin_name)
+
+  execute 'edit ' .. src_name
+  execute 'Termdebug ./' .. bin_name
+  call WaitForAssert({-> assert_true(get(g:, "termdebug_is_running", v:false))})
+  call WaitForAssert({-> assert_equal(3, winnr('$'))})
+  let gdb_buf = winbufnr(1)
+  wincmd b
+
+  call cursor(22, 1)
+  Break if argc == 1
+  call term_wait(gdb_buf)
+  redraw!
+  call WaitForAssert({-> assert_equal([
+        \ {'lnum': 22, 'id': 1014, 'name': 'debugBreakpoint1.0',
+        \  'priority': 110, 'group': 'TermDebug'}],
+        \ sign_getplaced('', #{group: 'TermDebug'})[0].signs)})
+
+  Run
+  call term_wait(gdb_buf, 400)
+  redraw!
+  call WaitForAssert({-> assert_equal([
+        \ {'lnum': 22, 'id': 12, 'name': 'debugPC', 'priority': 110,
+        \  'group': 'TermDebug'},
+        \ {'lnum': 22, 'id': 1014, 'name': 'debugBreakpoint1.0',
+        \  'priority': 110, 'group': 'TermDebug'}],
+        \ sign_getplaced('', #{group: 'TermDebug'})[0].signs)})
+
+  Continue
+  call term_wait(gdb_buf)
+  wincmd t
+  quit!
+  redraw!
+  call WaitForAssert({-> assert_equal(1, winnr('$'))})
+
+  call s:cleanup_files(bin_name)
+  %bw!
+endfunc
+
 " should be the first test to run, since it validates the window layout with
 " win ids
 func Test_termdebug_basic()
@@ -351,7 +441,7 @@ func Test_termdebug_evaluate_in_popup()
   call TermWait(buf, 400)
   call VerifyScreenDump(buf, 'Test_termdebug_evaluate_in_popup_01', {})
 
-  call term_sendkeys(buf, ":Evaluate p_ptr\<CR>")
+  call term_sendkeys(buf, ":Evaluate *p_ptr\<CR>")
   call TermWait(buf, 400)
   call VerifyScreenDump(buf, 'Test_termdebug_evaluate_in_popup_02', {})
 
@@ -367,6 +457,7 @@ endfunc
 func Test_termdebug_mapping()
   %bw!
   call assert_true(maparg('K', 'n', 0, 1)->empty())
+  call assert_true(maparg('K', 'x', 0, 1)->empty())
   call assert_true(maparg('-', 'n', 0, 1)->empty())
   call assert_true(maparg('+', 'n', 0, 1)->empty())
   Termdebug
@@ -374,6 +465,7 @@ func Test_termdebug_mapping()
   call WaitForAssert({-> assert_equal(3, winnr('$'))})
   wincmd b
   call assert_false(maparg('K', 'n', 0, 1)->empty())
+  call assert_false(maparg('K', 'x', 0, 1)->empty())
   call assert_false(maparg('-', 'n', 0, 1)->empty())
   call assert_false(maparg('+', 'n', 0, 1)->empty())
   call assert_false(maparg('K', 'n', 0, 1).buffer)
@@ -385,11 +477,13 @@ func Test_termdebug_mapping()
   redraw!
   call WaitForAssert({-> assert_equal(1, winnr('$'))})
   call assert_true(maparg('K', 'n', 0, 1)->empty())
+  call assert_true(maparg('K', 'x', 0, 1)->empty())
   call assert_true(maparg('-', 'n', 0, 1)->empty())
   call assert_true(maparg('+', 'n', 0, 1)->empty())
 
   %bw!
   nnoremap K :echom "K"<cr>
+  xnoremap K :<C-U>echom "VK"<cr>
   nnoremap - :echom "-"<cr>
   nnoremap + :echom "+"<cr>
   Termdebug
@@ -397,9 +491,11 @@ func Test_termdebug_mapping()
   call WaitForAssert({-> assert_equal(3, winnr('$'))})
   wincmd b
   call assert_false(maparg('K', 'n', 0, 1)->empty())
+  call assert_false(maparg('K', 'x', 0, 1)->empty())
   call assert_false(maparg('-', 'n', 0, 1)->empty())
   call assert_false(maparg('+', 'n', 0, 1)->empty())
   call assert_false(maparg('K', 'n', 0, 1).buffer)
+  call assert_false(maparg('K', 'x', 0, 1).buffer)
   call assert_false(maparg('-', 'n', 0, 1).buffer)
   call assert_false(maparg('+', 'n', 0, 1).buffer)
   call assert_equal(':Evaluate<CR>', maparg('K', 'n', 0, 1).rhs)
@@ -408,12 +504,15 @@ func Test_termdebug_mapping()
   redraw!
   call WaitForAssert({-> assert_equal(1, winnr('$'))})
   call assert_false(maparg('K', 'n', 0, 1)->empty())
+  call assert_false(maparg('K', 'x', 0, 1)->empty())
   call assert_false(maparg('-', 'n', 0, 1)->empty())
   call assert_false(maparg('+', 'n', 0, 1)->empty())
   call assert_false(maparg('K', 'n', 0, 1).buffer)
+  call assert_false(maparg('K', 'x', 0, 1).buffer)
   call assert_false(maparg('-', 'n', 0, 1).buffer)
   call assert_false(maparg('+', 'n', 0, 1).buffer)
   call assert_equal(':echom "K"<cr>', maparg('K', 'n', 0, 1).rhs)
+  call assert_equal(':<C-U>echom "VK"<cr>', maparg('K', 'x', 0, 1).rhs)
 
   %bw!
 
@@ -596,5 +695,170 @@ function Test_termdebug_config_types()
 
   unlet g:termdebug_config
 endfunction
+
+func Test_termdebug_toggle_break()
+  let g:test_is_flaky = 1
+  let bin_name = 'XTD_tbreak'
+  let src_name = bin_name .. '.c'
+
+  eval s:generate_files(bin_name)
+
+  execute 'edit ' .. src_name
+  execute 'Termdebug ./' .. bin_name
+
+  call WaitForAssert({-> assert_true(get(g:, "termdebug_is_running", v:false))})
+  call WaitForAssert({-> assert_equal(3, winnr('$'))})
+  let gdb_buf = winbufnr(1)
+  wincmd b
+
+  let bp_line = 22        " 'return' statement in main
+  execute "normal! " .. bp_line .. "G"
+  execute "ToggleBreak"
+
+  call term_wait(gdb_buf)
+  redraw!
+  call assert_equal([
+        \ {'lnum': bp_line, 'id': 1014, 'name': 'debugBreakpoint1.0',
+        \  'priority': 110, 'group': 'TermDebug'}],
+        \ sign_getplaced('', #{group: 'TermDebug'})[0].signs)
+
+  RunOrContinue
+  call term_wait(gdb_buf, 400)
+  redraw!
+  call WaitForAssert({-> assert_equal([
+        \ {'lnum': bp_line, 'id': 12, 'name': 'debugPC', 'priority': 110,
+        \  'group': 'TermDebug'},
+        \ {'lnum': bp_line, 'id': 1014, 'name': 'debugBreakpoint1.0',
+        \  'priority': 110, 'group': 'TermDebug'}],
+        \ sign_getplaced('', #{group: 'TermDebug'})[0].signs)})
+
+  " Add one break point
+  execute "normal! " .. bp_line .. "G"
+  execute "ToggleBreak"
+  call term_wait(gdb_buf)
+  redraw!
+  call WaitForAssert({-> assert_equal([
+        \ {'lnum': bp_line, 'id': 12, 'name': 'debugPC', 'priority': 110,
+        \  'group': 'TermDebug'}],
+        \ sign_getplaced('', #{group: 'TermDebug'})[0].signs)})
+
+  " Remove one break point
+  execute "normal! " .. bp_line .. "G"
+  execute "ToggleBreak"
+  call term_wait(gdb_buf)
+  redraw!
+  call WaitForAssert({-> assert_equal([
+        \ {'lnum': bp_line, 'id': 2014, 'name': 'debugBreakpoint2.0',
+        \  'priority': 110, 'group': 'TermDebug'},
+        \ {'lnum': bp_line, 'id': 12, 'name': 'debugPC', 'priority': 110,
+        \  'group': 'TermDebug'}],
+        \ sign_getplaced('', #{group: 'TermDebug'})[0].signs)})
+
+  " Remove multiple break points
+  execute "Break"
+  execute "Break"
+  execute "Break"
+  execute "Break"
+  call term_wait(gdb_buf, 400)
+  execute "ToggleBreak"
+  call term_wait(gdb_buf)
+  redraw!
+  call WaitForAssert({-> assert_equal([
+        \ {'lnum': bp_line, 'id': 12, 'name': 'debugPC', 'priority': 110,
+        \  'group': 'TermDebug'}],
+        \ sign_getplaced('', #{group: 'TermDebug'})[0].signs)})
+
+
+  wincmd t
+  quit!
+  redraw!
+  call WaitForAssert({-> assert_equal(1, winnr('$'))})
+  call assert_equal([], sign_getplaced('', #{group: 'TermDebug'})[0].signs)
+
+  eval s:cleanup_files(bin_name)
+  %bw!
+endfunc
+
+" Check substitution capabilities and simulate remote debugging
+func Test_termdebug_remote_basic()
+  let bin_name = 'XTD_basicremote'
+  let src_name = bin_name .. '.c'
+  call s:generate_files(bin_name)
+  defer s:cleanup_files(bin_name)
+
+  " Duplicate sources to test the mapping
+  const pwd = getcwd()
+  const src_shadow_dir = "shadow"
+  call mkdir(src_shadow_dir)
+  const src_shadow_file = $"{src_shadow_dir}/{src_name}"
+  call filecopy(src_name, src_shadow_file)
+  defer delete(src_shadow_dir, 'rf')
+
+  let modes = [v:true]
+  " termdebug only works fine if socat is available on the remote machine
+  " otherwise the communication pty will be unstable
+  if executable('socat')
+    let modes += [v:false]
+  endif
+
+  for use_prompt in modes
+    " Set up mock remote and mapping
+    let g:termdebug_config = {}
+
+    let g:termdebug_config['use_prompt'] = use_prompt
+    " favor socat if available
+    if executable('socat')
+      let g:termdebug_config['remote_window'] =
+            \ ['socat', '-d', '-d', '-', 'PTY,raw,echo=0']
+    else
+      let g:termdebug_config['remote_window'] = ['sh']
+    endif
+
+    let g:termdebug_config['substitute_path'] = {}
+    let g:termdebug_config['substitute_path'][pwd] = pwd . '/' . src_shadow_dir
+    defer execute("unlet g:termdebug_config")
+
+    " Launch the debugger and set breakpoints in the shadow file instead
+    exe $"edit {src_shadow_file}"
+    exe $"Termdebug ./{bin_name}"
+    call WaitForAssert({-> assert_true(get(g:, "termdebug_is_running", v:false))})
+    call WaitForAssert({-> assert_equal(3, winnr('$'))})
+    let gdb_buf = winbufnr(1)
+    wincmd b
+    Break 9
+    sleep 100m
+    redraw!
+    call assert_equal([
+          \ {'lnum': 9, 'id': 1014, 'name': 'debugBreakpoint1.0',
+          \  'priority': 110, 'group': 'TermDebug'}],
+          \ sign_getplaced('', #{group: 'TermDebug'})[0].signs)
+    Run
+    call term_wait(gdb_buf, 400)
+    redraw!
+    call WaitForAssert({-> assert_equal([
+          \ {'lnum': 9, 'id': 12, 'name': 'debugPC', 'priority': 110,
+          \  'group': 'TermDebug'},
+          \ {'lnum': 9, 'id': 1014, 'name': 'debugBreakpoint1.0',
+          \  'priority': 110, 'group': 'TermDebug'}],
+          \ sign_getplaced('', #{group: 'TermDebug'})[0].signs)})
+    Finish
+    call term_wait(gdb_buf)
+    redraw!
+    call WaitForAssert({-> assert_equal([
+          \ {'lnum': 9, 'id': 1014, 'name': 'debugBreakpoint1.0',
+          \  'priority': 110, 'group': 'TermDebug'},
+          \ {'lnum': 20, 'id': 12, 'name': 'debugPC',
+          \  'priority': 110, 'group': 'TermDebug'}],
+          \ sign_getplaced('', #{group: 'TermDebug'})[0].signs)})
+
+    " Cleanup, make sure the gdb job is terminated before return
+    " otherwise may interfere with next test
+    Gdb
+    bw!
+    call WaitForAssert({-> assert_equal(1, winnr('$'))})
+  endfor
+
+  %bw!
+endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

@@ -1,7 +1,7 @@
 " Vim syntax file
 " Language:		Vim help file
 " Maintainer:		Doug Kearns <dougkearns@gmail.com>
-" Last Change:		2025 Jul 20
+" Last Change:		2025 Nov 13
 " Former Maintainer:	Bram Moolenaar <Bram@vim.org>
 
 " Quit when a (custom) syntax file was already loaded
@@ -15,7 +15,7 @@ set cpo&vim
 syn iskeyword @,48-57,_,192-255
 
 if !exists('g:help_example_languages')
-  let g:help_example_languages = #{ vim: 'vim' }
+  let g:help_example_languages = #{ vim: 'vim', vim9: 'vim' }
 endif
 
 syn match helpHeadline		"^[A-Z.][-A-Z0-9 .,()_']*?\=\ze\(\s\+\*\|$\)"
@@ -32,9 +32,18 @@ endif
 
 for [s:lang, s:syntax] in g:help_example_languages->items()
   unlet! b:current_syntax
+
+  if s:lang == "vim9"
+    let b:vimsyn_force_vim9 = v:true
+  endif
+
   " silent! to prevent E403
   execute 'silent! syn include' $'@helpExampleHighlight_{s:lang}'
         \ $'syntax/{s:syntax}.vim'
+
+  if s:lang == "vim9"
+    unlet b:vimsyn_force_vim9
+  endif
 
   execute $'syn region helpExampleHighlight_{s:lang} matchgroup=helpIgnore'
         \ $'start=/\%(^\| \)>{s:lang}$/'
@@ -43,6 +52,15 @@ for [s:lang, s:syntax] in g:help_example_languages->items()
         \ $'contains=@helpExampleHighlight_{s:lang} keepend'
 endfor
 unlet! s:lang s:syntax
+
+if has_key(g:help_example_languages, "vim9")
+  " for example at :help vim9-mix
+  syn region vim9LegacyHeader_HelpExample
+	\ start=+" legacy Vim script comments may go here+
+	\ end="^\ze\s*vim9s\%[cript]\>"
+	\ contains=@vimLegacyTop,vimComment,vimLineComment
+  syn cluster helpExampleHighlight_vim9 add=vim9LegacyHeader_HelpExample
+endif
 
 if has("ebcdic")
   syn match helpHyperTextJump	"\\\@<!|[^"*|]\+|" contains=helpBar
@@ -66,7 +84,9 @@ syn match helpNormal		"|.*====*|"
 syn match helpNormal		"|||"
 syn match helpNormal		":|vim:|"	" for :help modeline
 syn match helpVim		"\<Vim version [0-9][0-9.a-z]*"
-syn match helpVim		"VIM REFERENCE.*"
+syn match helpVim		"^\s\+\zsVIM - main help file$"
+syn region helpVim		start="^\s\+VIM REFERENCE" end="^$"
+syn region helpVim		start="^\s\+VIM USER MANUAL" end="^$"
 syn match helpOption		"'[a-z]\{2,\}'"
 syn match helpOption		"'t_..'"
 syn match helpNormal		"'ab'"
@@ -195,6 +215,26 @@ syn match helpDiffAdded		"\t[* ]Added\t\+[a-z].*"
 syn match helpDiffChanged	"\t[* ]Changed\t\+[a-z].*"
 syn match helpDiffRemoved	"\t[* ]Removed\t\+[a-z].*"
 
+" builtin.txt
+syn region helpReturnType
+      \ start="^\t\tReturn type: "
+      \ end="^$"
+      \ contains=@vimType,helpHyperTextJump,helpSpecial
+      \ transparent
+syn match helpSpecial		contained "{type}" containedin=vimCompoundType
+
+" digraph.txt
+syn region helpDigraphTable
+      \ start="*digraph-table\%(-mbyte\)\=\*"
+      \ end="^$"
+      \ contains=helpHyperTextEntry,helpHeader
+
+" various.txt
+syn region helpExCommand_Version
+      \ start="^:ve\[rsion]\t\t"
+      \ end="\n\ze\n:ve\[rsion] {nr}"
+      \ contains=helpHyperTextEntry,helpHyperTextJump,helpOption
+
 " Additionally load a language-specific syntax file "help_ab.vim".
 let s:i = match(expand("%"), '\.\a\ax$')
 if s:i > 0
@@ -203,7 +243,6 @@ endif
 unlet s:i
 
 syn sync minlines=40
-
 
 " Define the default highlighting.
 " Only used when an item doesn't have highlighting yet

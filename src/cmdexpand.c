@@ -387,8 +387,7 @@ nextwild(
 }
 
 /*
- * Create and display a cmdline completion popup menu with items from
- * 'matches'.
+ * Create completion popup menu with items from 'matches'.
  */
     static int
 cmdline_pum_create(
@@ -396,11 +395,9 @@ cmdline_pum_create(
 	expand_T	*xp,
 	char_u		**matches,
 	int		numMatches,
-	int		showtail,
-	int		noselect)
+	int		showtail)
 {
-    int		i;
-    int		prefix_len;
+    int	prefix_len;
 
     // Add all the completion matches
     compl_match_array = ALLOC_MULT(pumitem_T, numMatches);
@@ -408,7 +405,7 @@ cmdline_pum_create(
 	return EXPAND_UNSUCCESSFUL;
 
     compl_match_arraysize = numMatches;
-    for (i = 0; i < numMatches; i++)
+    for (int i = 0; i < numMatches; i++)
     {
 	compl_match_array[i].pum_text = SHOW_MATCH(i);
 	compl_match_array[i].pum_info = NULL;
@@ -424,13 +421,7 @@ cmdline_pum_create(
     if (showtail)
 	prefix_len += vim_strsize(showmatches_gettail(matches[0]))
 	    - vim_strsize(matches[0]);
-    compl_startcol = MAX(0, compl_startcol - prefix_len);
-
-    // no default selection
-    compl_selected = noselect ? -1 : 0;
-
-    pum_clear();
-    cmdline_pum_display();
+    compl_startcol = cmdline_col_off + MAX(0, compl_startcol - prefix_len);
 
     return EXPAND_OK;
 }
@@ -620,9 +611,9 @@ win_redr_status_matches(
 	return;
 
     if (has_mbyte)
-	buf = alloc(Columns * MB_MAXBYTES + 1);
+	buf = alloc(topframe->fr_width * MB_MAXBYTES + 1);
     else
-	buf = alloc(Columns + 1);
+	buf = alloc(topframe->fr_width + 1);
     if (buf == NULL)
 	return;
 
@@ -649,7 +640,7 @@ win_redr_status_matches(
 	if (first_match > 0)
 	    clen += 2;
 	// jumping right, put match at the left
-	if ((long)clen > Columns)
+	if (clen > topframe->fr_width)
 	{
 	    first_match = match;
 	    // if showing the last match, we can add some on the left
@@ -657,7 +648,7 @@ win_redr_status_matches(
 	    for (i = match; i < num_matches; ++i)
 	    {
 		clen += status_match_len(xp, SHOW_MATCH(i)) + 2;
-		if ((long)clen >= Columns)
+		if (clen >= topframe->fr_width)
 		    break;
 	    }
 	    if (i == num_matches)
@@ -668,7 +659,7 @@ win_redr_status_matches(
 	while (first_match > 0)
 	{
 	    clen += status_match_len(xp, SHOW_MATCH(first_match - 1)) + 2;
-	    if ((long)clen >= Columns)
+	    if (clen >= topframe->fr_width)
 		break;
 	    --first_match;
 	}
@@ -688,7 +679,7 @@ win_redr_status_matches(
     clen = len;
 
     i = first_match;
-    while ((long)(clen + status_match_len(xp, SHOW_MATCH(i)) + 2) < Columns)
+    while (clen + status_match_len(xp, SHOW_MATCH(i)) + 2 < topframe->fr_width)
     {
 	if (i == match)
 	{
@@ -782,14 +773,17 @@ win_redr_status_matches(
 	    }
 	}
 
-	screen_puts(buf, row, 0, attr);
+	screen_puts(buf, row, firstwin->w_wincol, attr);
 	if (selstart != NULL && highlight)
 	{
 	    *selend = NUL;
-	    screen_puts(selstart, row, selstart_col, HL_ATTR(HLF_WM));
+	    screen_puts(selstart, row, firstwin->w_wincol + selstart_col,
+		    HL_ATTR(HLF_WM));
 	}
 
-	screen_fill(row, row + 1, clen, (int)Columns, fillchar, fillchar, attr);
+	screen_fill(row, row + 1, firstwin->w_wincol + clen,
+		firstwin->w_wincol + topframe->fr_width,
+		fillchar, fillchar, attr);
     }
 
     win_redraw_last_status(topframe);
@@ -868,14 +862,27 @@ get_next_or_prev_match(int mode, expand_T *xp)
     }
 
     // Display matches on screen
-    if (compl_match_array)
+    if (p_wmnu)
     {
-	compl_selected = findex;
-	cmdline_pum_display();
+	if (compl_match_array)
+	{
+	    compl_selected = findex;
+	    cmdline_pum_display();
+	}
+	else if (vim_strchr(p_wop, WOP_PUM) != NULL)
+	{
+	    if (cmdline_pum_create(get_cmdline_info(), xp, xp->xp_files,
+			xp->xp_numfiles, cmd_showtail) == EXPAND_OK)
+	    {
+		compl_selected = findex;
+		pum_clear();
+		cmdline_pum_display();
+	    }
+	}
+	else
+	    win_redr_status_matches(xp, xp->xp_numfiles, xp->xp_files, findex,
+		    cmd_showtail);
     }
-    else if (p_wmnu)
-	win_redr_status_matches(xp, xp->xp_numfiles, xp->xp_files, findex,
-		cmd_showtail);
 
     xp->xp_selected = findex;
     // Return the original text or the selected match
@@ -1277,12 +1284,12 @@ showmatches_oneline(
 }
 
 /*
- * Show all matches for completion on the command line.
- * Returns EXPAND_NOTHING when the character that triggered expansion should
- * be inserted like a normal character.
+ * Display completion matches.
+ * Returns EXPAND_NOTHING when the character that triggered expansion should be
+ *   inserted as a normal character.
  */
     int
-showmatches(expand_T *xp, int wildmenu, int noselect)
+showmatches(expand_T *xp, int display_wildmenu, int display_list, int noselect)
 {
     cmdline_info_T	*ccline = get_cmdline_info();
     int		numMatches;
@@ -1311,12 +1318,21 @@ showmatches(expand_T *xp, int wildmenu, int noselect)
 	showtail = cmd_showtail;
     }
 
-    if (wildmenu && vim_strchr(p_wop, WOP_PUM) != NULL)
-	// cmdline completion popup menu (with wildoptions=pum)
-	return cmdline_pum_create(ccline, xp, matches, numMatches,
-		showtail && !noselect, noselect);
+    if (display_wildmenu && !display_list
+	    && vim_strchr(p_wop, WOP_PUM) != NULL)
+    {
+	int retval = cmdline_pum_create(ccline, xp, matches, numMatches,
+		showtail && !noselect);
+	if (retval == EXPAND_OK)
+	{
+	    compl_selected = noselect ? -1 : 0;
+	    pum_clear();
+	    cmdline_pum_display();
+	}
+	return retval;
+    }
 
-    if (!wildmenu)
+    if (display_list)
     {
 	msg_didany = FALSE;		// lines_left will be set
 	msg_start();			// prepare for paging
@@ -1328,10 +1344,11 @@ showmatches(expand_T *xp, int wildmenu, int noselect)
     }
 
     if (got_int)
-	got_int = FALSE;	// only int. the completion, not the cmd line
-    else if (wildmenu)
-	win_redr_status_matches(xp, numMatches, matches, noselect ? -1 : 0, showtail);
-    else
+	got_int = FALSE;  // only interrupt the completion, not the cmd line
+    else if (display_wildmenu && !display_list)
+	win_redr_status_matches(xp, numMatches, matches, noselect ? -1 : 0,
+		showtail);  // display statusbar menu
+    else if (display_list)
     {
 	// find the length of the longest file name
 	maxlen = 0;
@@ -1357,7 +1374,7 @@ showmatches(expand_T *xp, int wildmenu, int noselect)
 	{
 	    // compute the number of columns and lines for the listing
 	    maxlen += 2;    // two spaces between file names
-	    columns = ((int)Columns + 2) / maxlen;
+	    columns = (cmdline_width + 2) / maxlen;
 	    if (columns < 1)
 		columns = 1;
 	    lines = (numMatches + columns - 1) / columns;
@@ -2468,6 +2485,8 @@ set_context_by_cmdname(
 	case CMD_execute:
 	case CMD_echomsg:
 	case CMD_echoerr:
+	case CMD_echoconsole:
+	case CMD_echowindow:
 	case CMD_call:
 	case CMD_return:
 	case CMD_cexpr:
@@ -3496,8 +3515,10 @@ ExpandFromContext(
     {
 	regmatch.regprog = vim_regcomp(pat, magic_isset() ? RE_MAGIC : 0);
 	if (regmatch.regprog == NULL)
+	{
+	    vim_free(tofree);
 	    return FAIL;
-
+	}
 	// set ignore-case according to p_ic, p_scs and pat
 	regmatch.rm_ic = ignorecase(pat);
     }
@@ -4158,9 +4179,9 @@ globpath(
 #if defined(MSWIN)
     // Using the platform's path separator (\) makes vim incorrectly
     // treat it as an escape character, use '/' instead.
-    #define TMP_PATHSEPSTR "/"
+# define TMP_PATHSEPSTR "/"
 #else
-    #define TMP_PATHSEPSTR PATHSEPSTR
+# define TMP_PATHSEPSTR PATHSEPSTR
 #endif
 
     // Loop over all entries in {path}.
@@ -4197,6 +4218,11 @@ globpath(
 			((char_u **)ga->ga_data)[ga->ga_len] = p[i];
 			++ga->ga_len;
 		    }
+		}
+		else
+		{
+		    FreeWild(num_p, p);
+		    p = NULL;
 		}
 		vim_free(p);
 	    }
@@ -4236,7 +4262,7 @@ wildmenu_translate_key(
 	}
     }
 
-    if (did_wild_list)
+    if (cmdline_pum_active() || did_wild_list || wild_menu_showing)
     {
 	if (c == K_LEFT)
 	    c = Ctrl_P;
@@ -4470,7 +4496,7 @@ wildmenu_cleanup(cmdline_info_T *cclp UNUSED)
 	RedrawingDisabled = 0;
 #endif
 
-#if defined(FEAT_SEARCH_EXTRA) || defined(PROTO)
+#if defined(FEAT_SEARCH_EXTRA)
     // Clear highlighting applied during wildmenu activity
     set_no_hlsearch(TRUE);
 #endif
@@ -4504,7 +4530,7 @@ wildmenu_cleanup(cmdline_info_T *cclp UNUSED)
 #endif
 }
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 /*
  * "getcompletion()" function
  */
@@ -4744,7 +4770,7 @@ copy_substring_from_pos(pos_T *start, pos_T *end, char_u **match,
     if (!is_single_line)
     {
 	if (exacttext)
-	    ga_concat_len(&ga, (char_u *)"\\n", 2);
+	    GA_CONCAT_LITERAL(&ga, "\\n");
 	else
 	    ga_append(&ga, '\n');
     }
@@ -4754,12 +4780,15 @@ copy_substring_from_pos(pos_T *start, pos_T *end, char_u **match,
     {
 	for (lnum = start->lnum + 1; lnum < end->lnum; lnum++)
 	{
+	    int  linelen;
+
 	    line = ml_get(lnum);
-	    if (ga_grow(&ga, ml_get_len(lnum) + 2) != OK)
+	    linelen = (int)ml_get_len(lnum);
+	    if (ga_grow(&ga, linelen + 2) != OK)
 		return FAIL;
-	    ga_concat(&ga, line);
+	    ga_concat_len(&ga, line, linelen);
 	    if (exacttext)
-		ga_concat_len(&ga, (char_u *)"\\n", 2);
+		GA_CONCAT_LITERAL(&ga, "\\n");
 	    else
 		ga_append(&ga, '\n');
 	}
@@ -4846,7 +4875,7 @@ concat_pattern_with_buffer_match(
     mch_memmove(match, pat, pat_len);
     if (match_len > 0)
     {
-#if defined(FEAT_EVAL) || defined(FEAT_SPELL) || defined(PROTO)
+#if defined(FEAT_EVAL) || defined(FEAT_SPELL)
 	if (lowercase)
 	{
 	    char_u  *mword = vim_strnsave(line + end_match_pos->col,
@@ -4867,7 +4896,7 @@ concat_pattern_with_buffer_match(
     match[pat_len + match_len] = NUL;
     return match;
 
-#if defined(FEAT_EVAL) || defined(FEAT_SPELL) || defined(PROTO)
+#if defined(FEAT_EVAL) || defined(FEAT_SPELL)
 cleanup:
     vim_free(match);
     return NULL;

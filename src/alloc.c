@@ -17,7 +17,7 @@
  * Various routines dealing with allocation and deallocation of memory.
  */
 
-#if defined(MEM_PROFILE) || defined(PROTO)
+#if defined(MEM_PROFILE)
 
 # define MEM_SIZES  8200
 static long_u mem_allocs[MEM_SIZES];
@@ -151,7 +151,7 @@ alloc(size_t size)
     return lalloc(size, TRUE);
 }
 
-#if defined(FEAT_QUICKFIX) || defined(PROTO)
+#if defined(FEAT_QUICKFIX)
 /*
  * alloc() with an ID for alloc_fail().
  */
@@ -293,19 +293,19 @@ theend:
 /*
  * lalloc() with an ID for alloc_fail().
  */
-#if defined(FEAT_SIGNS) || defined(PROTO)
+#if defined(FEAT_SIGNS)
     void *
 lalloc_id(size_t size, int message, alloc_id_T id UNUSED)
 {
-#ifdef FEAT_EVAL
+# ifdef FEAT_EVAL
     if (alloc_fail_id == id && alloc_does_fail(size))
 	return NULL;
-#endif
+# endif
     return (lalloc(size, message));
 }
 #endif
 
-#if defined(MEM_PROFILE) || defined(PROTO)
+#if defined(MEM_PROFILE)
 /*
  * realloc() with memory profiling.
  */
@@ -350,7 +350,7 @@ do_outofmem_msg(size_t size)
 	mch_exit(123);
 }
 
-#if defined(EXITFREE) || defined(PROTO)
+#if defined(EXITFREE)
 
 /*
  * Free everything that we allocated.
@@ -496,7 +496,9 @@ free_all_mem(void)
 
 	set_bufref(&bufref, buf);
 	nextbuf = buf->b_next;
-	close_buffer(NULL, buf, DOBUF_WIPE, FALSE, FALSE);
+	// All windows were freed.  Reset b_nwindows so buffers can be wiped.
+	buf->b_nwindows = 0;
+	close_buffer(NULL, buf, DOBUF_WIPE, FALSE, FALSE, FALSE);
 	if (bufref_valid(&bufref))
 	    buf = nextbuf;	// didn't work, try next one
 	else
@@ -645,7 +647,7 @@ ga_clear_strings(garray_T *gap)
     ga_clear(gap);
 }
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 /*
  * Copy a growing array that contains a list of strings.
  */
@@ -877,8 +879,7 @@ ga_append(garray_T *gap, int c)
     return OK;
 }
 
-#if (defined(UNIX) && !defined(USE_SYSTEM)) || defined(MSWIN) \
-	|| defined(PROTO)
+#if (defined(UNIX) && !defined(USE_SYSTEM)) || defined(MSWIN)
 /*
  * Append the text in "gap" below the cursor line and clear "gap".
  */

@@ -818,25 +818,87 @@ func Test_WinClosed_switch_tab()
   %bwipe!
 endfunc
 
-" This used to trigger WinClosed twice for the same window, and the window's
-" buffer was NULL in the second autocommand.
-func Test_WinClosed_BufUnload_close_other()
-  tabnew
+" This used to trigger WinClosed/WinLeave/BufLeave twice for the same window,
+" and the window's buffer was NULL in the second autocommand.
+func Run_test_BufUnload_close_other(extra_cmd)
+  let oldtab = tabpagenr()
+  tabnew Xb1
   let g:tab = tabpagenr()
-  let g:buf = bufnr()
-  new
-  setlocal bufhidden=wipe
-  augroup test-WinClosed
-    autocmd BufUnload * ++once exe g:buf .. 'bwipe!'
-    autocmd WinClosed * call tabpagebuflist(g:tab)
+  let g:w1 = win_getid()
+  new Xb2
+  let g:w2 = win_getid()
+  let g:log = []
+  exe a:extra_cmd
+
+  augroup test-BufUnload-close-other
+    autocmd BufUnload * ++nested ++once bwipe! Xb1
+    for event in ['WinClosed', 'BufLeave', 'WinLeave', 'TabLeave']
+      exe $'autocmd {event} * call tabpagebuflist(g:tab)'
+      exe $'autocmd {event} * let g:log += ["{event}:" .. expand("<afile>")]'
+    endfor
   augroup END
+
   close
+  " WinClosed is triggered once for each of the 2 closed windows.
+  " Others are only triggered once.
+  call assert_equal(['BufLeave:Xb2', 'WinLeave:Xb2', $'WinClosed:{g:w2}',
+        \ $'WinClosed:{g:w1}', 'TabLeave:Xb2'], g:log)
+  call assert_equal(oldtab, tabpagenr())
+  call assert_equal([0, 0], win_id2tabwin(g:w1))
+  call assert_equal([0, 0], win_id2tabwin(g:w2))
 
   unlet g:tab
-  unlet g:buf
-  autocmd! test-WinClosed
-  augroup! test-WinClosed
+  unlet g:w1
+  unlet g:w2
+  unlet g:log
+  autocmd! test-BufUnload-close-other
+  augroup! test-BufUnload-close-other
   %bwipe!
+endfunc
+
+func Test_BufUnload_close_other()
+  call Run_test_BufUnload_close_other('')
+  call Run_test_BufUnload_close_other('setlocal bufhidden=wipe')
+endfunc
+
+func Run_test_BufUnload_tabonly(first_cmd)
+  exe a:first_cmd
+  tabnew Xa
+  setlocal bufhidden=wipe
+  tabprevious
+  autocmd BufWinLeave Xa ++once tabnext
+  autocmd BufUnload Xa ++once tabonly
+  tabonly
+
+  %bwipe!
+endfunc
+
+func Test_BufUnload_tabonly()
+  " This used to dereference a NULL curbuf.
+  call Run_test_BufUnload_tabonly('setlocal bufhidden=hide')
+  " This used to dereference a NULL firstbuf.
+  call Run_test_BufUnload_tabonly('setlocal bufhidden=wipe')
+endfunc
+
+func Run_test_BufUnload_tabonly_nested(second_autocmd)
+  file Xa
+  tabnew Xb
+  setlocal bufhidden=wipe
+  tabnew Xc
+  setlocal bufhidden=wipe
+  autocmd BufUnload Xb ++once ++nested bwipe! Xa
+  exe $'autocmd BufUnload Xa ++once ++nested {a:second_autocmd}'
+  autocmd BufWinLeave Xc ++once tabnext
+  tabfirst
+  2tabclose
+
+  %bwipe!
+endfunc
+
+func Test_BufUnload_tabonly_nested()
+  " These used to cause heap-use-after-free.
+  call Run_test_BufUnload_tabonly_nested('tabonly')
+  call Run_test_BufUnload_tabonly_nested('tabonly | tabprevious')
 endfunc
 
 func s:AddAnAutocmd()
@@ -1067,6 +1129,71 @@ func Test_BufEnter()
 
   au! BufEnter
   only
+endfunc
+
+func Test_autocmd_SessLoadPre()
+  tabnew
+  set noswapfile
+  mksession! Session.vim
+
+  call assert_false(exists('g:session_loaded_var'))
+
+  let content =<< trim [CODE]
+    set nocp noswapfile
+
+    func! Assert(cond, msg)
+      if !a:cond
+        echomsg "ASSERT_FAIL: " .. a:msg
+      else
+        echomsg "ASSERT_OK: " .. a:msg
+      endif
+    endfunc
+
+    func! OnSessionLoadPre()
+      call Assert(!exists('g:session_loaded_var'),
+            \ 'SessionLoadPre: var NOT set')
+    endfunc
+    au SessionLoadPre * call OnSessionLoadPre()
+
+    func! OnSessionLoadPost()
+      call Assert(exists('g:session_loaded_var'),
+            \ 'SessionLoadPost: var IS set')
+      echomsg "SessionLoadPost DONE"
+    endfunc
+    au SessionLoadPost * call OnSessionLoadPost()
+
+    func! WriteErrors()
+      call writefile([execute("messages")], "XerrorsPost")
+    endfunc
+    au VimLeave * call WriteErrors()
+  [CODE]
+
+  call writefile(content, 'Xvimrc', 'D')
+
+  call writefile(
+        \ ['let g:session_loaded_var = 1'],
+        \ 'Sessionx.vim',
+        \ 'b'
+        \ )
+
+  " --- Run child Vim ---
+  call system(
+        \ GetVimCommand('Xvimrc')
+        \ .. ' --not-a-term --noplugins -S Session.vim -c cq'
+        \ )
+
+  call WaitForAssert({-> assert_true(filereadable('XerrorsPost'))})
+
+  let errors = join(readfile('XerrorsPost'), "\n")
+  call assert_notmatch('ASSERT_FAIL', errors)
+  call assert_match('ASSERT_OK: SessionLoadPre: var NOT set', errors)
+  call assert_match('ASSERT_OK: SessionLoadPost: var IS set', errors)
+  call assert_match('SessionLoadPost DONE', errors)
+
+  set swapfile
+  for file in ['Session.vim', 'Sessionx.vim', 'XerrorsPost']
+    call delete(file)
+  endfor
 endfunc
 
 " Closing a window might cause an endless loop
@@ -2462,7 +2589,10 @@ func Test_BufReadCmd()
 
   call writefile(['one', 'two', 'three'], 'Xcmd.test', 'D')
   edit Xcmd.test
+  set noruler
   call assert_match('Xcmd.test" line 1 of 3', execute('file'))
+  set ruler
+  call assert_match('Xcmd.test" 3 lines --33%--', execute('file'))
   normal! Gofour
   write
   call assert_equal(['one', 'two', 'three', 'four'], readfile('Xcmd.test'))
@@ -3671,7 +3801,7 @@ func Test_BufReadPre_changebuf()
   close!
 endfunc
 
-" Test for BufWipeouti autocmd changing the current buffer when reading a file
+" Test for BufWipeout autocmd changing the current buffer when reading a file
 " in an empty buffer with 'f' flag in 'cpo'
 func Test_BufDelete_changebuf()
   new
@@ -3988,6 +4118,29 @@ func Test_bufwipeout_changes_window()
 
   unlet g:window_id
   au! BufWipeout
+  %bwipe!
+endfunc
+
+func Test_autocmd_prevent_buf_wipe()
+  " Xa must be the first buffer so that win_close_othertab() puts it in
+  " another window, which causes wiping the buffer to fail.
+  %bwipe!
+
+  file Xa
+  call setline(1, 'foo')
+  setlocal bufhidden=wipe
+  tabnew Xb
+  setlocal bufhidden=wipe
+  autocmd BufUnload Xa ++once ++nested tabonly
+  autocmd BufWinLeave Xb ++once tabnext
+  tabfirst
+
+  edit! Xc
+  call assert_equal('Xc', bufname('%'))
+  tabnext
+  call assert_equal('Xa', bufname('%'))
+  call assert_equal("\n\"Xa\" --No lines in buffer--", execute('file'))
+
   %bwipe!
 endfunc
 
@@ -4669,16 +4822,17 @@ func Test_autocmd_invalidates_undo_on_textchanged()
   call StopVimInTerminal(buf)
 endfunc
 
-func Test_autocmd_creates_new_buffer_on_bufleave()
+func Test_autocmd_creates_new_window_on_bufleave()
   e a.txt
   e b.txt
   setlocal bufhidden=wipe
   autocmd BufLeave <buffer> diffsplit c.txt
   bn
-  call assert_equal(1, winnr('$'))
+  " curbuf set for the new split opened for c.txt, due to BufLeave
+  call assert_equal(2, winnr('$'))
   call assert_equal('a.txt', bufname('%'))
-  bw a.txt
-  bw c.txt
+  call assert_equal('b.txt', bufname('#'))
+  %bw!
 endfunc
 
 " Ensure `expected` was just recently written as a Vim session
@@ -5075,6 +5229,32 @@ func Test_autocmd_BufWinLeave_with_vsp()
   exe "bw! " .. dummy
 endfunc
 
+func Test_autocmd_BufWinLeave_with_vsp2()
+  edit Xfoo
+  split Xbar
+  split
+  let s:fired = 0
+  augroup testing
+    autocmd!
+    autocmd BufWinLeave Xfoo ++once ++nested
+          \ execute 'autocmd WinEnter * ++once let s:fired = 1'
+          \  .. '| call assert_equal(3, win_findbuf(bufnr(''Xbar''))->len())'
+          \  .. '| quit'
+          \| call assert_fails('vsplit Xfoo', 'E1546:')
+  augroup END
+  bw Xfoo
+  call assert_equal(1, s:fired)
+  " After 9.1.0764, Xbar's b_nwindows would be 0 if autocmds closed the new
+  " split before E1546, causing it to be unloaded despite being in a window.
+  call assert_equal(0, bufexists('Xfoo'))
+  call assert_equal(1, win_findbuf(bufnr('Xbar'))->len())
+  call assert_equal(1, bufloaded('Xbar'))
+
+  call CleanUpTestAuGroup()
+  unlet! s:fired
+  %bw!
+endfunc
+
 func Test_OptionSet_cmdheight()
   set mouse=a laststatus=2
   au OptionSet cmdheight :let &l:ch = v:option_new
@@ -5089,6 +5269,7 @@ func Test_OptionSet_cmdheight()
   call test_setmouse(&lines - 2, 1)
   call feedkeys("\<LeftDrag>", 'xt')
   call assert_equal(2, &l:ch)
+  call feedkeys("\<LeftRelease>", 'xt')
 
   tabnew | resize +1
   call assert_equal(1, &l:ch)
@@ -5160,7 +5341,7 @@ func Test_WinScrolled_Resized_eiw()
 endfunc
 
 " Test that TabClosedPre and TabClosed are triggered when closing a tab.
-func Test_autocmd_tabclosedpre()
+func Test_autocmd_TabClosedPre()
   augroup testing
     au TabClosedPre * call add(g:tabpagenr_pre, t:testvar)
     au TabClosed * call add(g:tabpagenr_post, t:testvar)
@@ -5226,7 +5407,65 @@ func Test_autocmd_tabclosedpre()
   call assert_equal([1, 2], g:tabpagenr_pre)
   call assert_equal([2, 3], g:tabpagenr_post)
 
-  func ClearAutomcdAndCreateTabs()
+  " Test failing to close tab page
+  let g:tabpagenr_pre = []
+  let g:tabpagenr_post = []
+  let t:testvar = 1
+  call setline(1, 'foo')
+  setlocal bufhidden=wipe
+  tabnew
+  let t:testvar = 2
+  tabnew
+  let t:testvar = 3
+  call setline(1, 'bar')
+  setlocal bufhidden=wipe
+  tabnew
+  let t:testvar = 4
+  call setline(1, 'baz')
+  setlocal bufhidden=wipe
+  new
+  call assert_fails('tabclose', 'E445:')
+  call assert_equal([4], g:tabpagenr_pre)
+  call assert_equal([], g:tabpagenr_post)
+  " :tabclose! after failed :tabclose should trigger TabClosedPre again.
+  tabclose!
+  call assert_equal([4, 4], g:tabpagenr_pre)
+  call assert_equal([3], g:tabpagenr_post)
+  call assert_fails('tabclose', 'E37:')
+  call assert_equal([4, 4, 3], g:tabpagenr_pre)
+  call assert_equal([3], g:tabpagenr_post)
+  " The same for :close! if the tab page only has one window.
+  close!
+  call assert_equal([4, 4, 3, 3], g:tabpagenr_pre)
+  call assert_equal([3, 2], g:tabpagenr_post)
+  " Also test with :close! after failed :tabonly.
+  call assert_fails('tabonly', 'E37:')
+  call assert_equal([4, 4, 3, 3, 1], g:tabpagenr_pre)
+  call assert_equal([3, 2], g:tabpagenr_post)
+  tabprevious | close!
+  call assert_equal([4, 4, 3, 3, 1, 1], g:tabpagenr_pre)
+  call assert_equal([3, 2, 2], g:tabpagenr_post)
+  %bwipe!
+
+  " Test closing another tab page in BufWinLeave
+  let g:tabpagenr_pre = []
+  let g:tabpagenr_post = []
+  split
+  let t:testvar = 1
+  tabnew
+  let t:testvar = 2
+  tabnew Xsomebuf
+  let t:testvar = 3
+  new
+  autocmd BufWinLeave Xsomebuf ++once ++nested tabclose 1
+  tabclose
+  " TabClosedPre should not be triggered for tab page 3 twice.
+  call assert_equal([3, 1], g:tabpagenr_pre)
+  " When tab page 1 was closed, tab page 3 was still the current tab page.
+  call assert_equal([3, 2], g:tabpagenr_post)
+  %bwipe!
+
+  func ClearAutocmdAndCreateTabs()
     au! TabClosedPre
     bw!
     e Z
@@ -5249,41 +5488,41 @@ func Test_autocmd_tabclosedpre()
   call CleanUpTestAuGroup()
 
   " Close tab in TabClosedPre autocmd
-  call ClearAutomcdAndCreateTabs()
+  call ClearAutocmdAndCreateTabs()
   au TabClosedPre * tabclose
   call assert_fails('tabclose', 'E1312:')
-  call ClearAutomcdAndCreateTabs()
+  call ClearAutocmdAndCreateTabs()
   au TabClosedPre * tabclose
   call assert_fails('tabclose 2', 'E1312:')
-  call ClearAutomcdAndCreateTabs()
+  call ClearAutocmdAndCreateTabs()
   au TabClosedPre * tabclose 1
   call assert_fails('tabclose', 'E1312:')
 
   " Close other (all) tabs in TabClosedPre autocmd
-  call ClearAutomcdAndCreateTabs()
+  call ClearAutocmdAndCreateTabs()
   au TabClosedPre * tabonly
   call assert_fails('tabclose', 'E1312:')
-  call ClearAutomcdAndCreateTabs()
+  call ClearAutocmdAndCreateTabs()
   au TabClosedPre * tabonly
   call assert_fails('tabclose 2', 'E1312:')
-  call ClearAutomcdAndCreateTabs()
+  call ClearAutocmdAndCreateTabs()
   au TabClosedPre * tabclose 4
   call assert_fails('tabclose 2', 'E1312:')
 
   " Open new tabs in TabClosedPre autocmd
-  call ClearAutomcdAndCreateTabs()
+  call ClearAutocmdAndCreateTabs()
   au TabClosedPre * tabnew D
   call assert_fails('tabclose', 'E1312:')
-  call ClearAutomcdAndCreateTabs()
+  call ClearAutocmdAndCreateTabs()
   au TabClosedPre * tabnew D
   call assert_fails('tabclose 1', 'E1312:')
 
   " Moving the tab page in TabClosedPre autocmd
-  call ClearAutomcdAndCreateTabs()
+  call ClearAutocmdAndCreateTabs()
   au TabClosedPre * tabmove 0
   tabclose
   call assert_equal('1>Z2A3B', GetTabs())
-  call ClearAutomcdAndCreateTabs()
+  call ClearAutocmdAndCreateTabs()
   au TabClosedPre * tabmove 0
   tabclose 1
   call assert_equal('1A2B3>C', GetTabs())
@@ -5291,11 +5530,11 @@ func Test_autocmd_tabclosedpre()
   call assert_equal('1>C', GetTabs())
 
   " Switching tab page in TabClosedPre autocmd
-  call ClearAutomcdAndCreateTabs()
+  call ClearAutocmdAndCreateTabs()
   au TabClosedPre * tabnext | e Y
   tabclose
   call assert_equal('1Y2A3>B', GetTabs())
-  call ClearAutomcdAndCreateTabs()
+  call ClearAutocmdAndCreateTabs()
   au TabClosedPre * tabnext | e Y
   tabclose 1
   call assert_equal('1Y2B3>C', GetTabs())
@@ -5303,10 +5542,10 @@ func Test_autocmd_tabclosedpre()
   call assert_equal('1>Y', GetTabs())
 
   " Create new windows in TabClosedPre autocmd
-  call ClearAutomcdAndCreateTabs()
+  call ClearAutocmdAndCreateTabs()
   au TabClosedPre * split | e X| vsplit | e Y | split | e Z
   call assert_fails('tabclose', 'E242:')
-  call ClearAutomcdAndCreateTabs()
+  call ClearAutocmdAndCreateTabs()
   au TabClosedPre * new X | new Y | new Z
   call assert_fails('tabclose 1', 'E242:')
 
@@ -5341,6 +5580,94 @@ func Test_autocmd_tabclosedpre()
   only
   tabonly
   bw!
+  delfunc ClearAutocmdAndCreateTabs
+  delfunc GetTabs
+endfunc
+
+" This used to cause heap-use-after-free.
+func Run_test_TabClosedPre_wipe_buffer(split_cmds)
+  file Xa
+  exe a:split_cmds
+  autocmd TabClosedPre * ++once tabnext | bwipe! Xa
+  " Closing window inside TabClosedPre is not allowed.
+  call assert_fails('tabonly', 'E1312:')
+
+  %bwipe!
+endfunc
+
+func Test_TabClosedPre_wipe_buffer()
+  " Test with Xa only in other tab pages.
+  call Run_test_TabClosedPre_wipe_buffer('split | tab split | tabnew Xb')
+  " Test with Xa in both current and other tab pages.
+  call Run_test_TabClosedPre_wipe_buffer('split | tab split | new Xb')
+endfunc
+
+func Test_TabClosedPre_mouse()
+  func MyTabline()
+    let cnt = tabpagenr('$')
+    return range(1, cnt)->mapnew({_, n -> $'%{n}X|Close{n}|%X'})->join('')
+  endfunc
+
+  let save_mouse = &mouse
+  if has('gui')
+    set guioptions-=e
+  endif
+  set mouse=a tabline=%!MyTabline()
+
+  func OpenTwoTabPages()
+    %bwipe!
+    file Xa | split | split
+    let g:Xa_bufnr = bufnr()
+    tabnew Xb | split
+    let g:Xb_bufnr = bufnr()
+    redraw!
+    call assert_match('^|Close1||Close2| *$', Screenline(1))
+    call assert_equal(2, tabpagenr('$'))
+  endfunc
+
+  autocmd! TabClosedPre
+  call OpenTwoTabPages()
+  let g:autocmd_bufnrs = []
+  autocmd TabClosedPre * let g:autocmd_bufnrs += [tabpagebuflist()]
+  call test_setmouse(1, 2)
+  call feedkeys("\<LeftMouse>\<LeftRelease>", 'tx')
+  call assert_equal(1, tabpagenr('$'))
+  call assert_equal([[g:Xa_bufnr]->repeat(3)], g:autocmd_bufnrs)
+  call assert_equal([g:Xb_bufnr]->repeat(2), tabpagebuflist())
+
+  call OpenTwoTabPages()
+  let g:autocmd_bufnrs = []
+  autocmd TabClosedPre * call feedkeys("\<LeftRelease>\<LeftMouse>", 'tx')
+  call test_setmouse(1, 2)
+  " Closing tab page inside TabClosedPre is not allowed.
+  call assert_fails('call feedkeys("\<LeftMouse>", "tx")', 'E1312:')
+  call feedkeys("\<LeftRelease>", 'tx')
+
+  autocmd! TabClosedPre
+  call OpenTwoTabPages()
+  let g:autocmd_bufnrs = []
+  autocmd TabClosedPre * let g:autocmd_bufnrs += [tabpagebuflist()]
+  call test_setmouse(1, 10)
+  call feedkeys("\<LeftMouse>\<LeftRelease>", 'tx')
+  call assert_equal(1, tabpagenr('$'))
+  call assert_equal([[g:Xb_bufnr]->repeat(2)], g:autocmd_bufnrs)
+  call assert_equal([g:Xa_bufnr]->repeat(3), tabpagebuflist())
+
+  call OpenTwoTabPages()
+  let g:autocmd_bufnrs = []
+  autocmd TabClosedPre * call feedkeys("\<LeftRelease>\<LeftMouse>", 'tx')
+  call test_setmouse(1, 10)
+  " Closing tab page inside TabClosedPre is not allowed.
+  call assert_fails('call feedkeys("\<LeftMouse>", "tx")', 'E1312:')
+  call feedkeys("\<LeftRelease>", 'tx')
+
+  autocmd! TabClosedPre
+  %bwipe!
+  unlet g:Xa_bufnr g:Xb_bufnr g:autocmd_bufnrs
+  let &mouse = save_mouse
+  set tabline& guioptions&
+  delfunc MyTabline
+  delfunc OpenTwoTabPages
 endfunc
 
 func Test_eventignorewin_non_current()
@@ -5510,6 +5837,129 @@ func Test_VimResized_and_window_width_not_equalized()
   call WaitForAssert({-> assert_match('^window_width: 10$', term_getline(buf, 10))}, 1000)
 
   call StopVimInTerminal(buf)
+endfunc
+
+func Test_win_tabclose_autocmd()
+
+  defer CleanUpTestAuGroup()
+  new
+  augroup testing
+    au WinClosed * wincmd p
+  augroup END
+
+  tabnew
+  new
+  new
+
+  call assert_equal(2, tabpagenr('$'))
+  try
+    tabclose
+  catch
+    " should not happen
+    call assert_report("closing tabpage failed")
+  endtry
+  call assert_equal(1, tabpagenr('$'))
+  bw!
+endfunc
+
+func Test_buffer_b_nwindows()
+  " In these cases, b_nwindows of the Xbars was 1 despite being in no windows.
+  " Would cause weird failures in other tests, as they would be un-deletable.
+  edit Xfoo1
+  augroup testing
+    autocmd!
+    autocmd BufUnload * ++once edit Xbar1
+  augroup END
+  bdelete
+  call assert_equal([], win_findbuf(bufnr('Xfoo1')))
+  call assert_equal([], win_findbuf(bufnr('Xbar1')))
+  call assert_equal(1, bufexists('Xfoo1'))
+  call assert_equal(1, bufexists('Xbar1'))
+  %bw!
+  call assert_equal(0, bufexists('Xfoo1'))
+  call assert_equal(0, bufexists('Xbar1'))
+
+  split Xbar2
+  enew
+  augroup testing
+    autocmd!
+    autocmd BufWinLeave * ++once buffer Xbar2
+  augroup END
+  quit
+  call assert_equal([], win_findbuf(bufnr('Xbar2')))
+  call assert_equal(1, bufexists('Xbar2'))
+  %bw!
+  call assert_equal(0, bufexists('Xbar2'))
+
+  edit Xbar3
+  enew
+  setlocal bufhidden=hide
+  let s:win = win_getid()
+  tabnew
+  augroup testing
+    autocmd!
+    autocmd BufHidden * ++once call win_execute(s:win, 'buffer Xbar3')
+  augroup END
+  tabonly
+  call assert_equal([], win_findbuf(bufnr('Xbar3')))
+  call assert_equal(1, bufexists('Xbar3'))
+  %bw!
+  call assert_equal(0, bufexists('Xbar3'))
+  unlet! s:win
+
+  edit Xbar4
+  split Xfoo4
+  augroup testing
+    autocmd!
+    autocmd BufWinLeave * ++once call assert_equal('Xfoo4', bufname())
+          \| edit Xbar4
+  augroup END
+  edit Xbar4
+  call assert_equal(0, bufloaded('Xfoo4'))
+  call assert_equal(1, bufexists('Xfoo4'))
+  " After 8.2.2354, Xfoo4 wrongly had b_nwindows of 1, so couldn't be wiped.
+  call assert_equal([], win_findbuf('Xfoo4'))
+  %bw!
+  call assert_equal(0, bufexists('Xfoo4'))
+
+  call CleanUpTestAuGroup()
+  %bw!
+endfunc
+
+" Test that an autocmd triggered by v:swapchoice == 'q' that switches buffers
+" doesn't cause b_nwindows to be wrong.
+func Test_SwapExists_b_nwindows()
+  let lines =<< trim END
+    set nocompatible directory=.
+
+    let g:buf = bufnr()
+    new
+
+    func SwapExists()
+      let v:swapchoice = 'q'
+      autocmd BufWinLeave * ++nested ++once buffer Xfoo
+    endfunc
+
+    func SafeState()
+      edit Xfoo
+      edit <script>
+      %bw!
+      call writefile([bufexists('Xfoo')], 'XnwindowsSwapExists.out')
+      qall!
+    endfunc
+
+    autocmd SwapExists * ++nested ++once call SwapExists()
+    autocmd SafeState * ++nested ++once call SafeState()
+  END
+  call writefile(lines, 'XnwindowsSwapExists.vim', 'D')
+
+  new XnwindowsSwapExists.vim
+  if RunVim('', '', ' -S XnwindowsSwapExists.vim')
+    call assert_equal(['0'], readfile('XnwindowsSwapExists.out'))
+    call delete('XnwindowsSwapExists.out')
+  endif
+
+  %bw!
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

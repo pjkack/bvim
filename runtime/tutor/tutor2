@@ -40,7 +40,7 @@
 
   4. Advanced combinations:
      - ciwnew<ESC>    - Change current word to "new"
-     - yss"<ESC>      - Wrap entire line in quotes (vim-surround plugin style)
+     - ciw"<CTRL-R>-"<ESC> - Wrap current word in quotes
      - gUit           - Uppercase inner HTML tag content
      - va"p           - Select quoted text and paste over it
 
@@ -59,7 +59,7 @@
 
 MNEMONIC: into register(") named (a) (y)ank (i)nner (w)ord
 
-  3. Navigate forward to the word 'cookie' (fk or 2fc or $2b or /co<ENTER>)
+  3. Navigate forward to the word 'cookie' (fk or 3fc or $2b or /co<ENTER>)
      and type   "byiw
 
   4. Navigate to any point on the word 'Vince' and type   ciw<CTRL-R>a<ESC>
@@ -115,12 +115,12 @@ REFERENCE: 	Expression Register 	:h quote=
 
   1. Move the cursor to the line below marked --->
 
-  2. yank the zeroth line, then inspect registers with :reg<ENTER>
+  2. Yank the zeroth line, then inspect registers with  :reg<ENTER>
 
-  3. delete line 0. with "cdd, then inspect registers
+  3. Delete line 0. with "cdd, then inspect registers
      (Where do you expect line 0 to be?)
 
-  4. continue deleting each successive line, inspecting :reg as you go
+  4. Continue deleting each successive line, inspecting :reg as you go
 
 NOTE: You should notice that old full-line deletions move down the list
       as new full-line deletions are added
@@ -173,7 +173,7 @@ REFERENCE: 	Numbered Registers 	:h quote0
 
   3. Combine with visual selections:
      - Select text with V then "+y
-     - To paste from clipboard in insert mode: Ctrl-R +
+     - To paste from clipboard in insert mode: <CTRL-R>+
      - Try opening another application and paste from clipboard
 
   4. Remember:
@@ -245,7 +245,6 @@ REFERENCE: 	Marks 		:h marks
 
 		     Lesson 2.1 SUMMARY
 
-
   1. Text objects provide precision editing:
      - iw/aw - inner/around word
      - i[/a[ - inner/around bracket
@@ -258,7 +257,7 @@ REFERENCE: 	Marks 		:h marks
      26 registers (a-z) 
   3. Yank a whole word from anywhere within a word:   yiw
   4. Change a whole word from anywhere within a word:   ciw
-  5. Insert text directly from registers in insert mode:   (C-r)a
+  5. Insert text directly from registers in insert mode:   <CTRL-R>a
 
   6. Insert the results of simple arithmetic operations: <CTRL-R> followed by
      =60*60<ENTER>
@@ -279,14 +278,15 @@ REFERENCE: 	Marks 		:h marks
  12. Move line-wise to a mark with   '
 
  13. Special registers:
-     - "+/*  - System clipboard (OS dependent)
-     - "_    - Blackhole (discard deleted/yanked text)
-     - "=    - Expression register
+     - "+/"*  - System clipboard (OS dependent)
+     - "_     - Blackhole (discard deleted/yanked text)
+     - "=     - Expression register
+     - "-     - Small delete register
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   This concludes chapter two of the Vim Tutor. It is a work in progress.
 
-  This chapter was written by Paul D. Parker.
+  This chapter was written by Paul D. Parker and Christian Brabandt.
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

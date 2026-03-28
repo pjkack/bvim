@@ -12,6 +12,9 @@
 /* Define unless no Wayland support found */
 #undef HAVE_WAYLAND
 
+/* Define if you want focus stealing support with Wayland clipboard  */
+#undef FEAT_WAYLAND_CLIPBOARD_FS
+
 /* Define when terminfo support found */
 #undef TERMINFO
 
@@ -308,9 +311,6 @@
 /* Define if you have <sys/wait.h> that is POSIX.1 compatible.  */
 #undef HAVE_SYS_WAIT_H
 
-/* Define if you have a <sys/wait.h> that is not POSIX.1 compatible. */
-#undef HAVE_UNION_WAIT
-
 /* This is currently unused in vim: */
 /* Define if you have the ANSI C header files. */
 /* #undef STDC_HEADERS */
@@ -408,9 +408,6 @@
 
 /* Define if you want to use sockets for clientserver communication. */
 #undef WANT_SOCKETSERVER
-
-/* Define if you want to use sockets for clientserver communication if it makes sense. */
-#undef MAYBE_SOCKETSERVER
 
 /* Define if you want to include fontset support. */
 #undef FEAT_XFONTSET

@@ -297,6 +297,8 @@ static int on_text(const char bytes[], size_t len, void *user)
     !(bytes[eaten] & 0x80) ? &state->encoding[state->gl_set] :
     state->vt->mode.utf8   ? &state->encoding_utf8 :
                              &state->encoding[state->gr_set];
+  if (encoding->enc == state->encoding_utf8.enc)
+    encoding = &state->encoding_utf8;  // Only use one UTF-8 encoding state.
 
   (*encoding->enc->decode)(encoding->enc, encoding->data,
       codepoints, &npoints, state->gsingle_set ? 1 : (int)maxpoints,
@@ -981,6 +983,7 @@ static int on_csi(const char *leader, const long args[], int argcount, const cha
     switch(leader[0]) {
     case '?':
     case '>':
+    case '<':
       leader_byte = leader[0];
       break;
     default:

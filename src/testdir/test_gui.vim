@@ -664,6 +664,20 @@ func Test_set_guioptions()
     set guioptions&
     call assert_equal('egmrLtT', &guioptions)
 
+    set guioptions+=s
+    exec 'sleep' . duration
+    call assert_equal('egmrLtTs', &guioptions)
+    set guioptions-=s
+    exec 'sleep' . duration
+    call assert_equal('egmrLtT', &guioptions)
+
+    set guioptions+=d
+    exec 'sleep' . duration
+    call assert_equal('egmrLtTd', &guioptions)
+    set guioptions-=d
+    exec 'sleep' . duration
+    call assert_equal('egmrLtT', &guioptions)
+
   else
     " Default Value
     set guioptions&
@@ -943,6 +957,34 @@ func Test_gui_run_cmd_in_terminal()
   exe "silent !" . cmd . " test_gui.vim"
   " TODO: how to check that the command ran in a separate terminal?
   " Maybe check for $TERM (dumb vs xterm) in the spawned shell?
+  let &guioptions = save_guioptions
+endfunc
+
+" Test that :! with guioptions+=! doesn't scroll more than necessary.
+" With ConPTY on Windows 11, the terminal may damage all rows on init,
+" which previously caused the entire screen to scroll up.
+func Test_gui_system_term_scroll()
+  CheckFeature terminal
+  CheckFeature conpty
+  let save_guioptions = &guioptions
+  set guioptions+=!
+
+  enew
+  call setline(1, repeat(['AAAA'], &lines + 5))
+  redraw
+
+  if has('win32')
+    !echo.
+  else
+    !echo
+  endif
+
+  " With the ConPTY scroll bug, the screen scrolled up entirely and row 1
+  " became blank.  With the fix, only the output lines scroll and the buffer
+  " content remains visible near the top of the screen.
+  call assert_equal('A', screenstring(1, 1))
+
+  %bwipe!
   let &guioptions = save_guioptions
 endfunc
 
@@ -1233,6 +1275,19 @@ func Test_gui_mouse_event()
   call feedkeys("\<Esc>", 'Lx!')
   call assert_equal([0, 2, 7, 0], getpos('.'))
   call assert_equal('wo thrfour five sixteen', getline(2))
+
+  " Test P option (use '+' register for modeless)
+  set guioptions+=AP
+  call cursor(1, 6)
+  redraw!
+  let @+ = ''
+  let args = #{button: 2, row: 1, col: 11, multiclick: 0, modifiers: 0}
+  call test_gui_event('mouse', args)
+  let args.button = 3
+  call test_gui_event('mouse', args)
+  call feedkeys("\<Esc>", 'Lx!')
+  call assert_equal([0, 1, 6, 0], getpos('.'))
+  call assert_equal('wo thr', @+)
 
   set mouse&
   let &guioptions = save_guioptions
@@ -1798,6 +1853,40 @@ func Test_Buffers_Menu()
   endfor
 
   %bw!
+endfunc
+
+" Test if 'guioptions=a' only copies to the primary selection and
+" 'guioptions=aP' only copies to the regular selection.
+func Test_guioptions_clipboard()
+  CheckX11BasedGui
+
+  set mouse=
+  let save_guioptions = &guioptions
+  set guioptions=a
+
+  let @+ = ""
+  let @* = ""
+
+  call setline(1, ['one two three', 'four five six'])
+  call cursor(1, 1)
+  call feedkeys("\<Esc>vee\<Esc>", "Lx!")
+
+  call assert_equal("one two", @*)
+  call assert_equal("", @+)
+
+  set guioptions=aP
+
+  let @+ = ""
+  let @* = ""
+
+  call cursor(1, 1)
+  call feedkeys("\<Esc>veee\<Esc>", "Lx!")
+
+  call assert_equal("one two three", @+)
+  call assert_equal("", @*)
+
+  set mouse&
+  let &guioptions = save_guioptions
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

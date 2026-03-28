@@ -1077,7 +1077,7 @@ ex_copy(linenr_T line1, linenr_T line2, linenr_T n)
 
 static char_u	*prevcmd = NULL;	// the previous command
 
-#if defined(EXITFREE) || defined(PROTO)
+#if defined(EXITFREE)
     void
 free_prev_shellcmd(void)
 {
@@ -1253,7 +1253,7 @@ do_bang(
 	msg_putchar('!');
 	msg_outtrans(newcmd);
 	msg_clr_eos();
-	windgoto(msg_row, msg_col);
+	windgoto(msg_row, cmdline_col_off + msg_col);
 
 	do_shell(newcmd, 0);
     }
@@ -1404,7 +1404,7 @@ do_filter(
     if (cmd_buf == NULL)
 	goto filterend;
 
-    windgoto((int)Rows - 1, 0);
+    windgoto((int)Rows - 1, cmdline_col_off);
     cursor_on();
 
     /*
@@ -1659,7 +1659,7 @@ do_shell(
     // This windgoto is required for when the '\n' resulted in a "delete line
     // 1" command to the terminal.
     if (!swapping_screen())
-	windgoto(msg_row, msg_col);
+	windgoto(msg_row, cmdline_col_off + msg_col);
     cursor_on();
     (void)call_shell(cmd, SHELL_COOKED | flags);
     did_check_timestamps = FALSE;
@@ -1810,14 +1810,17 @@ make_filter_cmd(
 				|| fnamecmp(shell_name, "powershell.exe") == 0
 				|| fnamecmp(shell_name, "pwsh") == 0
 				|| fnamecmp(shell_name, "pwsh.exe") == 0);
-	len = (long_u)STRLEN(cmd) + 3;		// "()" + NUL
+	if (is_powershell)
+	    len = (long_u)STRLEN(cmd) + 7; // "& { " + " }" + NUL
+	else
+	    len = (long_u)STRLEN(cmd) + 3; // "()" + NUL
     }
 
     if (itmp != NULL)
     {
 	if (is_powershell)
-	    // "& { Get-Content " + " | & " + " }"
-	    len += (long_u)STRLEN(itmp) + 24;
+	    // "Get-Content " + " | & "
+	    len += (long_u)STRLEN(itmp) + 17;
 	else
 	    len += (long_u)STRLEN(itmp) + 9;	// " { < " + " } "
     }
@@ -1836,7 +1839,7 @@ make_filter_cmd(
 	    vim_snprintf((char *)buf, len, "& { Get-Content %s | & %s }",
 								itmp, cmd);
 	else
-	    vim_snprintf((char *)buf, len, "(%s)", cmd);
+	    vim_snprintf((char *)buf, len, "& { %s }", cmd);
     }
     else
     {
@@ -2498,6 +2501,7 @@ do_wqall(exarg_T *eap)
     buf_T	*buf;
     int		error = 0;
     int		save_forceit = eap->forceit;
+    int		save_exiting = exiting;
 
     if (eap->cmdidx == CMD_xall || eap->cmdidx == CMD_wqall)
     {
@@ -2509,9 +2513,9 @@ do_wqall(exarg_T *eap)
     FOR_ALL_BUFFERS(buf)
     {
 #ifdef FEAT_TERMINAL
-	if (exiting && term_job_running(buf->b_term))
+	if (exiting && !eap->forceit && term_job_running(buf->b_term))
 	{
-	    no_write_message_nobang(buf);
+	    no_write_message_buf(buf);
 	    ++error;
 	}
 	else
@@ -2564,7 +2568,7 @@ do_wqall(exarg_T *eap)
     {
 	if (!error)
 	    getout(0);		// exit Vim
-	not_exiting();
+	not_exiting(save_exiting);
     }
 }
 
@@ -2896,24 +2900,26 @@ do_ecmd(
     if ((command != NULL || newlnum > (linenr_T)0)
 	    && *get_vim_var_str(VV_SWAPCOMMAND) == NUL)
     {
-	int	len;
-	char_u	*p;
+	string_T    val;
+	size_t	    valsize;
 
 	// Set v:swapcommand for the SwapExists autocommands.
 	if (command != NULL)
-	    len = (int)STRLEN(command) + 3;
+	    valsize = (int)STRLEN(command) + 3;
 	else
-	    len = 30;
-	p = alloc(len);
-	if (p != NULL)
+	    valsize = 30;
+	val.string = alloc(valsize);
+	if (val.string != NULL)
 	{
 	    if (command != NULL)
-		vim_snprintf((char *)p, len, ":%s\r", command);
+		val.length = vim_snprintf_safelen((char *)val.string,
+		    valsize, ":%s\r", command);
 	    else
-		vim_snprintf((char *)p, len, "%ldG", (long)newlnum);
-	    set_vim_var_string(VV_SWAPCOMMAND, p, -1);
+		val.length = vim_snprintf_safelen((char *)val.string,
+		    valsize, "%ldG", (long)newlnum);
+	    set_vim_var_string(VV_SWAPCOMMAND, val.string, (int)val.length);
 	    did_set_swapcommand = TRUE;
-	    vim_free(p);
+	    vim_free(val.string);
 	}
     }
 #endif
@@ -2978,12 +2984,6 @@ do_ecmd(
 	// result in more windows displaying it; abort
 	if (buf->b_locked_split)
 	{
-	    // window was split, but not editing the new buffer,
-	    // reset b_nwindows again
-	    if (oldwin == NULL
-		    && curwin->w_buffer != NULL
-		    && curwin->w_buffer->b_nwindows > 1)
-		--curwin->w_buffer->b_nwindows;
 	    emsg(_(e_cannot_switch_to_a_closing_buffer));
 	    goto theend;
 	}
@@ -3079,26 +3079,25 @@ do_ecmd(
 	    else
 	    {
 		win_T	    *the_curwin = curwin;
-		int	    did_decrement;
-		buf_T	    *was_curbuf = curbuf;
 
 		// Set the w_locked flag to avoid that autocommands close the
 		// window.  And set b_locked for the same reason.
-		the_curwin->w_locked = TRUE;
+		++the_curwin->w_locked;
 		++buf->b_locked;
 
 		if (curbuf == old_curbuf.br_buf)
 		    buf_copy_options(buf, BCO_ENTER);
 
-		// Close the link to the current buffer. This will set
-		// oldwin->w_buffer to NULL.
+		// Close the link to the current buffer. This may set
+		// curwin->w_buffer to NULL.
 		u_sync(FALSE);
-		did_decrement = close_buffer(oldwin, curbuf,
-			 (flags & ECMD_HIDE) ? 0 : DOBUF_UNLOAD, FALSE, FALSE);
+		close_buffer(curwin, curbuf,
+			 (flags & ECMD_HIDE) ? 0 : DOBUF_UNLOAD, FALSE, FALSE,
+			 oldwin != NULL);
 
 		// Autocommands may have closed the window.
 		if (win_valid(the_curwin))
-		    the_curwin->w_locked = FALSE;
+		    --the_curwin->w_locked;
 		--buf->b_locked;
 
 #ifdef FEAT_EVAL
@@ -3113,21 +3112,19 @@ do_ecmd(
 		// Be careful again, like above.
 		if (!bufref_valid(&au_new_curbuf))
 		{
-		    // new buffer has been deleted
-		    delbuf_msg(new_name);	// frees new_name
-		    au_new_curbuf = save_au_new_curbuf;
-		    goto theend;
+		    // New buffer was deleted.  If curwin->w_buffer is NULL, we
+		    // must enter some buffer.  Hopefully the last one is OK.
+		    if (curwin->w_buffer == NULL)
+			buf = lastbuf;
+		    else
+		    {
+			delbuf_msg(new_name);	// frees new_name
+			au_new_curbuf = save_au_new_curbuf;
+			goto theend;
+		    }
 		}
 		if (buf == curbuf)		// already in new buffer
-		{
-		    // close_buffer() has decremented the window count,
-		    // increment it again here and restore w_buffer.
-		    if (did_decrement && buf_valid(was_curbuf))
-			++was_curbuf->b_nwindows;
-		    if (win_valid_any_tab(oldwin) && oldwin->w_buffer == NULL)
-			oldwin->w_buffer = was_curbuf;
 		    auto_buf = TRUE;
-		}
 		else
 		{
 #ifdef FEAT_SYN_HL
@@ -3139,6 +3136,9 @@ do_ecmd(
 			    || curwin->w_s == &(curwin->w_buffer->b_s))
 			curwin->w_s = &(buf->b_s);
 #endif
+		    if (curwin->w_buffer != NULL)
+			--curwin->w_buffer->b_nwindows;
+
 		    curwin->w_buffer = buf;
 		    curbuf = buf;
 		    ++curbuf->b_nwindows;
@@ -4126,8 +4126,11 @@ ex_substitute(exarg_T *eap)
 		vim_free(old_sub);
 		old_sub = vim_strsave(sub);
 		if (old_sub == NULL)
+		{
 		    // out of memory
+		    vim_free(sub);
 		    return;
+		}
 	    }
 	}
     }
@@ -4694,7 +4697,7 @@ ex_substitute(exarg_T *eap)
 			    msg_no_more = FALSE;
 			    msg_scroll = i;
 			    showruler(TRUE);
-			    windgoto(msg_row, msg_col);
+			    windgoto(msg_row, cmdline_col_off + msg_col);
 			    RedrawingDisabled = save_RedrawingDisabled;
 
 #ifdef USE_ON_FLY_SCROLL
@@ -5489,12 +5492,18 @@ ex_global(exarg_T *eap)
 	}
 	else
 	{
+#ifdef FEAT_CLIPBOARD_PROVIDER
+	    inc_clip_provider();
+#endif
 #ifdef FEAT_CLIPBOARD
 	    start_global_changes();
 #endif
 	    global_exe(cmd);
 #ifdef FEAT_CLIPBOARD
 	    end_global_changes();
+#endif
+#ifdef FEAT_CLIPBOARD_PROVIDER
+	    dec_clip_provider();
 #endif
 	}
 
@@ -5579,7 +5588,7 @@ set_old_sub(char_u *val)
 }
 #endif // FEAT_VIMINFO
 
-#if defined(EXITFREE) || defined(PROTO)
+#if defined(EXITFREE)
     void
 free_old_sub(void)
 {
@@ -5587,7 +5596,7 @@ free_old_sub(void)
 }
 #endif
 
-#if defined(FEAT_QUICKFIX) || defined(PROTO)
+#if defined(FEAT_QUICKFIX)
 /*
  * Set up for a tagpreview.
  * Makes the preview window the current window.
@@ -5871,7 +5880,7 @@ skip_vimgrep_pat_ext(char_u *p, char_u **s, int *flags, char_u **nulp, int *cp)
     return p;
 }
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 /*
  * List v:oldfiles in a nice way.
  */

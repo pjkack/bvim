@@ -809,7 +809,7 @@ file_is_readable(char_u *fname)
     return FALSE;
 }
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 
 /*
  * "chdir(dir)" function
@@ -838,9 +838,9 @@ f_chdir(typval_T *argvars, typval_T *rettv)
     {
 	if (mch_dirname(cwd, MAXPATHL) != FAIL)
 	{
-#ifdef BACKSLASH_IN_FILENAME
+# ifdef BACKSLASH_IN_FILENAME
 	    slash_adjust(cwd);
-#endif
+# endif
 	    rettv->vval.v_string = vim_strsave(cwd);
 	}
 	vim_free(cwd);
@@ -1159,10 +1159,10 @@ f_getcwd(typval_T *argvars, typval_T *rettv)
 	    }
 	}
     }
-#ifdef BACKSLASH_IN_FILENAME
+# ifdef BACKSLASH_IN_FILENAME
     if (rettv->vval.v_string != NULL)
 	slash_adjust(rettv->vval.v_string);
-#endif
+# endif
 }
 
 /*
@@ -2084,15 +2084,15 @@ f_readfile(typval_T *argvars, typval_T *rettv)
 f_resolve(typval_T *argvars, typval_T *rettv)
 {
     char_u	*p;
-#ifdef HAVE_READLINK
+# ifdef HAVE_READLINK
     char_u	*buf = NULL;
-#endif
+# endif
 
     if (in_vim9script() && check_for_string_arg(argvars, 0) == FAIL)
 	return;
 
     p = tv_get_string(&argvars[0]);
-#ifdef FEAT_SHORTCUT
+# ifdef FEAT_SHORTCUT
     {
 	char_u	*v = NULL;
 
@@ -2102,8 +2102,8 @@ f_resolve(typval_T *argvars, typval_T *rettv)
 	else
 	    rettv->vval.v_string = vim_strsave(p);
     }
-#else
-# ifdef HAVE_READLINK
+# else
+#  ifdef HAVE_READLINK
     {
 	char_u	*cpy;
 	int	len;
@@ -2275,17 +2275,17 @@ f_resolve(typval_T *argvars, typval_T *rettv)
 
 	rettv->vval.v_string = p;
     }
-# else
+#  else
     rettv->vval.v_string = vim_strsave(p);
+#  endif
 # endif
-#endif
 
     simplify_filename(rettv->vval.v_string);
 
-#ifdef HAVE_READLINK
+# ifdef HAVE_READLINK
 fail:
     vim_free(buf);
-#endif
+# endif
     rettv->v_type = VAR_STRING;
 }
 
@@ -2322,9 +2322,9 @@ f_writefile(typval_T *argvars, typval_T *rettv)
     int		binary = FALSE;
     int		append = FALSE;
     int		defer = FALSE;
-#ifdef HAVE_FSYNC
+# ifdef HAVE_FSYNC
     int		do_fsync = p_fs;
-#endif
+# endif
     char_u	*fname;
     FILE	*fd;
     int		ret = 0;
@@ -2377,12 +2377,12 @@ f_writefile(typval_T *argvars, typval_T *rettv)
 	    append = TRUE;
 	if (vim_strchr(arg2, 'D') != NULL)
 	    defer = TRUE;
-#ifdef HAVE_FSYNC
+# ifdef HAVE_FSYNC
 	if (vim_strchr(arg2, 's') != NULL)
 	    do_fsync = TRUE;
 	else if (vim_strchr(arg2, 'S') != NULL)
 	    do_fsync = FALSE;
-#endif
+# endif
     }
 
     fname = tv_get_string_chk(&argvars[1]);
@@ -2431,12 +2431,12 @@ f_writefile(typval_T *argvars, typval_T *rettv)
 		if (write_list(fd, list, binary) == FAIL)
 		    ret = -1;
 	    }
-#ifdef HAVE_FSYNC
+# ifdef HAVE_FSYNC
 	    if (ret == 0 && do_fsync)
 		// Ignore the error, the user wouldn't know what to do about
 		// it.  May happen for a device.
 		vim_ignored = vim_fsync(fileno(fd));
-#endif
+# endif
 	    fclose(fd);
 	}
     }
@@ -2446,7 +2446,7 @@ f_writefile(typval_T *argvars, typval_T *rettv)
 
 #endif // FEAT_EVAL
 
-#if defined(FEAT_BROWSE) || defined(PROTO)
+#if defined(FEAT_BROWSE)
 /*
  * Generic browse function.  Calls gui_mch_browse() when possible.
  * Later this may pop-up a non-GUI file selector (external command?).
@@ -2608,7 +2608,7 @@ do_browse(
 }
 #endif
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 
 /*
  * "browse(save, title, initdir, default)" function
@@ -3341,9 +3341,9 @@ expand_wildcards(
 	    ffname = FullName_save((*files)[i], FALSE);
 	    if (ffname == NULL)		// out of memory
 		break;
-# ifdef VMS
+#ifdef VMS
 	    vms_remove_version(ffname);
-# endif
+#endif
 	    if (match_file_list(p_wig, (*files)[i], ffname))
 	    {
 		// remove this matching file from the list
@@ -3429,8 +3429,6 @@ match_suffix(char_u *fname)
     return (setsuflen != 0);
 }
 
-#ifdef VIM_BACKTICK
-
 /*
  * Return TRUE if we can expand this backtick thing here.
  */
@@ -3497,7 +3495,6 @@ expand_backtick(
     vim_free(buffer);
     return cnt;
 }
-#endif // VIM_BACKTICK
 
 #if defined(MSWIN)
 /*
@@ -3523,7 +3520,7 @@ pstrcmp(const void *a, const void *b)
  * Return the number of matches found.
  * NOTE: much of this is identical to unix_expandpath(), keep in sync!
  */
-    static int
+    int
 dos_expandpath(
     garray_T	*gap,
     char_u	*path,
@@ -3751,19 +3748,9 @@ dos_expandpath(
 						   sizeof(char_u *), pstrcmp);
     return matches;
 }
-
-    int
-mch_expandpath(
-    garray_T	*gap,
-    char_u	*path,
-    int		flags)		// EW_* flags
-{
-    return dos_expandpath(gap, path, 0, flags, FALSE);
-}
 #endif // MSWIN
 
-#if (defined(UNIX) && !defined(VMS)) || defined(USE_UNIXFILENAME) \
-	|| defined(PROTO)
+#if (defined(UNIX) && !defined(VMS)) || defined(USE_UNIXFILENAME)
 /*
  * Unix style wildcard expansion code.
  * It's here because it's used both for Unix and Mac.
@@ -3976,7 +3963,7 @@ unix_expandpath(
 		    if ((flags & EW_ALLLINKS) ? mch_lstat((char *)buf, &sb) >= 0
 						      : mch_getperm(buf) >= 0)
 		    {
-#ifdef MACOS_CONVERT
+# ifdef MACOS_CONVERT
 			size_t precomp_len = STRLEN(buf)+1;
 			char_u *precomp_buf =
 			    mac_precompose_path(buf, precomp_len, &precomp_len);
@@ -3986,7 +3973,7 @@ unix_expandpath(
 			    mch_memmove(buf, precomp_buf, precomp_len);
 			    vim_free(precomp_buf);
 			}
-#endif
+# endif
 			addfile(gap, buf, flags);
 		    }
 		}
@@ -4115,9 +4102,7 @@ gen_expand_wildcards(
     for (i = 0; i < num_pat; i++)
     {
 	if (has_special_wildchar(pat[i])
-# ifdef VIM_BACKTICK
 		&& !(vim_backtick(pat[i]) && pat[i][1] == '=')
-# endif
 	   )
 	    return mch_expand_wildcards(num_pat, pat, num_file, file, flags);
     }
@@ -4135,7 +4120,6 @@ gen_expand_wildcards(
 	add_pat = -1;
 	p = pat[i];
 
-#ifdef VIM_BACKTICK
 	if (vim_backtick(p))
 	{
 	    add_pat = expand_backtick(&ga, p, flags);
@@ -4143,7 +4127,6 @@ gen_expand_wildcards(
 		retval = FAIL;
 	}
 	else
-#endif
 	{
 	    /*
 	     * First expand environment variables, "~/" and "~user/".

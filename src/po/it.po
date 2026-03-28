@@ -14,8 +14,8 @@
 msgid ""
 msgstr ""
 "Report-Msgid-Bugs-To: vim-dev@vim.org\n"
-"POT-Creation-Date: 2025-08-19 09:37+0200\n"
-"PO-Revision-Date: 2025-08-19 14:49+0100\n"
+"POT-Creation-Date: 2026-03-21 16:35+0100\n"
+"PO-Revision-Date: 2026-03-21 17:45+0100\n"
 "Last-Translator: Antonio Colombo <azc100@gmail.com>\n"
 "Language-Team: Italian\n"
 "Language: it\n"
@@ -166,8 +166,8 @@ msgid "%d%%"
 msgstr "%d%%"
 
 #, c-format
-msgid "%2s"
-msgstr "%2s"
+msgid "%3s"
+msgstr "%3s"
 
 #, c-format
 msgid " (%d of %d)"
@@ -2064,6 +2064,9 @@ msgstr "???BLOCCO VUOTO"
 msgid "???LINES MISSING"
 msgstr "???RIGHE MANCANTI"
 
+msgid "???ILLEGAL BLOCK NUMBER"
+msgstr "???NUMERO DI BLOCCO NON VALIDO"
+
 msgid "???BLOCK MISSING"
 msgstr "???BLOCCO MANCANTE"
 
@@ -2701,6 +2704,7 @@ msgstr "XSMP osservazione connessione ICE fallita"
 msgid "XSMP SmcOpenConnection failed: %s"
 msgstr "XSMP SmcOpenConnection fallita: %s"
 
+#, c-format
 msgid "Failed creating socket directory: %s"
 msgstr "Creazione di directory di socket fallita: %s"
 
@@ -3790,8 +3794,8 @@ msgstr "Vim è 'open source' e può essere distribuito liberamente"
 msgid "Help poor children in Uganda!"
 msgstr "Aiuta i bambini poveri dell'Uganda!"
 
-msgid "type  :help iccf<Enter>       for information "
-msgstr "batti :help iccf<Invio>       per informazioni            "
+msgid "type  :help Kuwasha<Enter>    for information "
+msgstr "batti :help Kuwasha<Invio>    per informazioni "
 
 msgid "type  :q<Enter>               to exit         "
 msgstr "batti :q<Invio>               per uscire                  "
@@ -3832,17 +3836,11 @@ msgstr "                            modo Vim predefinito "
 msgid "Sponsor Vim development!"
 msgstr "Sponsorizza lo sviluppo di Vim!"
 
-msgid "Become a registered Vim user!"
-msgstr "Diventa un utente Vim registrato!"
-
 msgid "type  :help sponsor<Enter>    for information "
 msgstr "batti :help sponsor<Invio>    per informazioni "
 
-msgid "type  :help register<Enter>   for information "
-msgstr "batti :help register<Invio>   per informazioni "
-
-msgid "menu  Help->Sponsor/Register  for information    "
-msgstr "menu  Aiuto->Sponsor/Registrazione  per informazioni "
+msgid "menu  Help->Sponsor           for information    "
+msgstr "menu  Aiuto->Sponsor  per informazioni  "
 
 msgid "global"
 msgstr "global"
@@ -8292,8 +8290,8 @@ msgid "E1238: Blob required for argument %d"
 msgstr "E1238: Blob richiesto per argomento %d"
 
 #, c-format
-msgid "E1239: Invalid value for blob: %d"
-msgstr "E1239: Valore non valido per blob: %d"
+msgid "E1239: Invalid value for blob: 0x%lX"
+msgstr "E1239: Valore non valido per blob: 0x%lX"
 
 msgid "E1240: Resulting text too long"
 msgstr "E1240: Testo risultante troppo lungo"
@@ -8497,10 +8495,9 @@ msgstr "E1291: Argomento non valido: %ld"
 msgid "E1292: Command-line window is already open"
 msgstr "E1292: Finestra della riga-di-comando già aperta"
 
-msgid "E1293: Cannot use a negative id after adding a textprop with text"
+msgid "E1293: Cannot use a negative id for a text property"
 msgstr ""
-"E1293: Impossibile usare un id negativo dopo aver aggiunto del testo a una "
-"'textprop'"
+"E1293: Impossibile usare un id negativo per una proprietà del testo"
 
 msgid "E1294: Can only use text_align when column is zero"
 msgstr "E1294: Si può usare 'text_align' solo quando la colonna è zero"
@@ -8626,8 +8623,8 @@ msgid "E1329: Invalid class variable declaration: %s"
 msgstr "E1329: Dichiarazione di variabile Classe non valida: %s"
 
 #, c-format
-msgid "E1330: Invalid type for object variable: %s"
-msgstr "E1330: Tipo non valido per variabile Object: %s"
+msgid "E1330: Invalid type used in variable declaration: %s"
+msgstr "E1330: Tipo non valido usato nella dichiarazione di variabile: %s"
 
 msgid ""
 "E1331: public must be followed by \"var\" or \"static\" or \"final\" or "
@@ -8654,13 +8651,6 @@ msgstr "E1335: La variabile \"%s\" nella Classe \"%s\" è in sola-lettura"
 #, c-format
 msgid "E1337: Class variable \"%s\" not found in class \"%s\""
 msgstr "E1337: Variabile di Classe \"%s\" non trovata nella Classe \"%s\""
-
-msgid ""
-"E1339: Cannot add a textprop with text after using a textprop with a "
-"negative id"
-msgstr ""
-"E1339: Non posso aggiungere textprop a un testo dopo aver usato una  "
-"textprop con un identificativo negativo"
 
 #, c-format
 msgid "E1340: Argument already declared in the class: %s"
@@ -9034,6 +9024,9 @@ msgstr "E1435: Enum può solo essere usato in uno script"
 msgid "E1436: Interface can only be used in a script"
 msgstr "E1436: Interface può solo essere usato in uno script"
 
+msgid "E1437: Can only compare Object with Object"
+msgstr "E1437: Si può solo confrontare compare Object con Object"
+
 #, c-format
 msgid "E1500: Cannot mix positional and non-positional arguments: %s"
 msgstr ""
@@ -9274,27 +9267,51 @@ msgid "E1561: Duplicate type variable name: %s"
 msgstr "E1561: Nome del tipo della variabile duplicato: %s"
 
 msgid "E1562: Diff anchors cannot be used with hidden diff windows"
-msgstr "E1562: Punti di ancoraggio Diff non disponibili per finestre "
-"Diff nascoste"
+msgstr ""
+"E1562: Punti di ancoraggio Diff non disponibili per finestre Diff nascoste"
 
 msgid "E1563: Socket path is too big"
 msgstr "E1563: Il percorso al socket è troppo lungo"
 
 msgid "E1564: Socket name cannot have slashes in it without being a path"
-msgstr ""
-"E1564: Il nome del socket non può contenere barre se non è un percorso"
+msgstr "E1564: Il nome del socket non può contenere barre se non è un percorso"
 
 msgid "E1565: Socket server is not online, call remote_startserver() first"
-msgstr "E1565: Il server di socket non è online, chiamare prima "
-"remote_startserver()"
+msgstr ""
+"E1565: Il server di socket non è online, chiamare prima remote_startserver()"
 
 #, c-format
 msgid "E1566: Failed connecting to socket %s: %s"
 msgstr "E1566: Connessione al socket %s: %s fallita"
 
 msgid "E1567: Cannot start socket server, socket path is unavailable"
-msgstr "E1567: Non posso far partire il server di socket, percorso di "
-"socket non disponibile"
+msgstr ""
+"E1567: Non posso far partire il server di socket, percorso di socket non "
+"disponibile"
+
+#, c-format
+msgid "E1568: OSC command response timed out: %.*s"
+msgstr "E1568: tempo di risposta a comando OSC terminato: %.*s"
+
+msgid "E1569: Cannot use listener_add in a listener callback"
+msgstr "E1569: Non posso usare listener_add in una callback listener"
+
+msgid "E1570: Cannot use redraw_listener_add in a redraw listener callback"
+msgstr "E1570: Non posso usare redraw_listener_add in una callback listener"
+
+msgid "E1571: Must specify at least one callback for redraw_listener_add"
+msgstr "E1571: Va specificata almeno una callback per redraw_listener_add"
+
+msgid "E1572: 'listchars' field \"leadtab\" requires \"tab\" to be specified"
+msgstr "E1572: elemento 'listchars' in \"leadtab\" richiede che sia stato "
+"specificato \"tab\""
+
+msgid "E1573: Cannot listen on port"
+msgstr "E1573: Non posso rimanere in ascolto alla porta"
+
+msgid "E1574: gethostbyname(): cannot resolve hostname in channel_listen()"
+msgstr "E1574: gethostbyname(): non riesco a risolvere il nome dell'host in "
+"channel_listen()"
 
 #. type of cmdline window or 0
 #. result of cmdline window or 0
@@ -9950,11 +9967,12 @@ msgstr ""
 "non visibili"
 
 msgid ""
-"characters to use for the status line, folds, diffs, buffer text, filler "
-"lines and truncation in the completion menu"
+"characters to use for the status line, folds, diffs,\n"
+"buffer text, filler lines and truncation in the completion menu"
 msgstr ""
-"caratteri da usare per riga di status, piegature, differenze, testo di un "
-"buffer, riempitivo di riga e troncamento nel menu di completamento"
+"caratteri da usare per riga-di-stato, piegature, differenze,\n"
+"testo di un buffer, righe di riempitivo e troncamento nel menu di "
+"completamento"
 
 msgid "number of lines used for the command-line"
 msgstr "numero di righe disponibili per la riga-di-comando"
@@ -9970,6 +9988,12 @@ msgstr "numero di righe da scorrere con i comandi CTRL-F e CTRL-B"
 
 msgid "don't redraw while executing macros"
 msgstr "non aggiornare lo schermo mentre si stanno eseguendo delle macro"
+
+msgid "configure method of receiving terminal size changes"
+msgstr "configura il metodo per gestire modifiche di dimensione del terminale receiving terminal size changes"
+
+msgid "enable terminal sync mode"
+msgstr "abilita modo Sync per il terminale"
 
 msgid "timeout for 'hlsearch' and :match highlighting in msec"
 msgstr "ritardo in millisecondi prima di evidenziare 'hlsearch' e :match"
@@ -10037,6 +10061,9 @@ msgstr "evidenziare tutte le occorrenze dell'ultima ricerca effettuata"
 msgid "highlight group to use for the window"
 msgstr "gruppo evidenziazione da usare per la finestra"
 
+msgid "highlight group mappings for the window"
+msgstr "mappature gruppi di evidenziazione da usare per questa finestra"
+
 msgid "use GUI colors for the terminal"
 msgstr "usare colori della GUI per il terminale"
 
@@ -10081,10 +10108,13 @@ msgid "multiple windows"
 msgstr "più di una finestra"
 
 msgid "0, 1 or 2; when to use a status line for the last window"
-msgstr "0, 1 o 2; quando usare una riga di status per l'ultima finestra"
+msgstr "0, 1 o 2; quando usare una riga-di-stato per l'ultima finestra"
 
 msgid "alternate format to be used for a status line"
-msgstr "formato alternativo da usare per una riga di status"
+msgstr "formato alternativo da usare per una riga-di-stato"
+
+msgid "optional settings for the status line"
+msgstr "impostazioni opzionali per la riga-di-stato"
 
 msgid "make all windows the same size when adding/removing windows"
 msgstr ""
@@ -10260,6 +10290,9 @@ msgstr "se specificata, testo per l'icona di questa finestra"
 msgid "restore the screen contents when exiting Vim"
 msgstr "ripristinare i contenuti dello schermo all'uscita da Vim"
 
+msgid "timeout used for terminal OSC responses"
+msgstr "tempo-di-attesa usato per risposte di OSC al terminale"
+
 msgid "using the mouse"
 msgstr "usare il mouse"
 
@@ -10329,9 +10362,11 @@ msgstr "dimensione icone sulla barra degli strumenti"
 msgid "room (in pixels) left above/below the window"
 msgstr "spazio (in pixel) da lasciare sopra/sotto la finestra"
 
-msgid "list of ASCII characters that can be combined into complex shapes"
+msgid ""
+"list of ASCII characters that can be combined into complex\n"
+"shapes"
 msgstr ""
-"lista caratteri ASCII che possono combinarsi per generare forme\n"
+"lista caratteri ASCII combinabili per generare forme\n"
 "complesse"
 
 msgid "options for text rendering"
@@ -10341,10 +10376,10 @@ msgid "use a pseudo-tty for I/O to external commands"
 msgstr "usare una pseudo-tty per i comandi esterni di I/O"
 
 msgid ""
-"\"last\", \"buffer\" or \"current\": which directory used for the file "
-"browser"
+"\"last\", \"buffer\" or \"current\": which directory used for\n"
+"the file browser"
 msgstr ""
-"\"last\", \"buffer\" o \"current\": quale directory usare per\n"
+"\"last\", \"buffer\" o \"current\": directory da usare per\n"
 "esplorare i file"
 
 msgid "language to be used for the menus"
@@ -10365,8 +10400,12 @@ msgstr "ritardo in millisecondi prima di visualizzare una didascalia"
 msgid "use balloon evaluation in the GUI"
 msgstr "valutare didascalie nella GUI"
 
-msgid "use balloon evaluation in the terminal"
-msgstr "valutare didascalie nella finestra-terminale"
+msgid ""
+" \n"
+"use balloon evaluation in the terminal"
+msgstr ""
+" \n"
+"valutare didascalie nel terminale"
 
 msgid "expression to show in balloon eval"
 msgstr "espressione da mostrare nella valutazione di una didascalia"
@@ -10415,7 +10454,7 @@ msgid "options for outputting messages"
 msgstr "opzioni per emettere messaggi"
 
 msgid "show (partial) command keys in location given by 'showcmdloc'"
-msgstr "mostrare (una parte dei) tasti di comando nella riga di status"
+msgstr "mostrare (una parte dei) tasti di comando nella riga-di-stato"
 
 msgid "location where to show the (partial) command keys for 'showcmd'"
 msgstr ""
@@ -10423,7 +10462,7 @@ msgstr ""
 "per 'showcmd'"
 
 msgid "display the current mode in the status line"
-msgstr "visualizzare modo corrente nella riga di status"
+msgstr "visualizzare modo corrente nella riga-di-stato"
 
 msgid "show cursor position below each window"
 msgstr "mostrare la posizione del cursore sotto ogni finestra"
@@ -10543,6 +10582,9 @@ msgstr ""
 msgid "definition of what comment lines look like"
 msgstr "definizioni per individuare le righe di commento"
 
+msgid "template for comments; used to put the marker in"
+msgstr "modello per i commenti; usata per marcature nelle piegature"
+
 msgid "list of flags that tell how automatic formatting works"
 msgstr ""
 "lista di flag con specifiche riguardo alla\n"
@@ -10562,18 +10604,38 @@ msgstr ""
 msgid "automatic completion in insert mode"
 msgstr "completamente automatico in modo Insert"
 
-msgid "delay in msec before menu appears after typing"
-msgstr "attesa in millisecondi prima di visualizzare il menù "
-"dopo aver immesso caratteri"
+msgid ""
+" \n"
+"initial decay timeout for 'autocomplete' algorithm"
+msgstr ""
+" \n"
+"tempo-di-attesa iniziale prima di interrompere l'algoritmo di 'autocomplete'"
+
+msgid ""
+" \n"
+"initial decay timeout for CTRL-N and CTRL-P completion"
+msgstr ""
+" \n"
+"tempo-di-attesa iniziale prima di interrompere il completamento con CTRL-N e "
+"CTRL-P"
+
+msgid ""
+" \n"
+"delay in msec before menu appears after typing"
+msgstr ""
+" \n"
+"attesa in millisecondi prima di visualizzare il menù dopo aver immesso "
+"caratteri"
 
 msgid "whether to use a popup menu for Insert mode completion"
 msgstr "se usare un menù dinamico per il completamento in modo Insert"
 
-msgid "popup menu item align order"
-msgstr "ordine di allineamento elemento menù dinamico (popup)"
-
-msgid "use fuzzy collection for specific completion modes"
-msgstr "usare raccolta approssimata per modi di completamento specificati"
+msgid ""
+" \n"
+"popup menu item align order"
+msgstr ""
+" \n"
+"ordine di allineamento elemento menù dinamico (popup)"
 
 msgid "options for the Insert mode completion info popup"
 msgstr ""
@@ -10588,6 +10650,9 @@ msgstr "larghezza minima del menù dinamico"
 
 msgid "maximum width of the popup menu"
 msgstr "larghezza massima del menù dinamico"
+
+msgid "popup border style"
+msgstr "stile bordo menù dinamico"
 
 msgid "user defined function for Insert mode completion"
 msgstr "funzione definita dall'utente per il completamento in modo Insert"
@@ -10750,9 +10815,6 @@ msgid "minimum number of screen lines for a fold to be closed"
 msgstr ""
 "numero minimo di righe sullo schermo per visualizzare come chiusa\n"
 "una piegatura"
-
-msgid "template for comments; used to put the marker in"
-msgstr "modello per i commenti; usata per marcature nelle piegature"
 
 msgid ""
 "folding type: \"manual\", \"indent\", \"expr\", \"marker\",\n"
@@ -11074,10 +11136,12 @@ msgstr "lista dei formati per l'output di 'grepprg'"
 msgid "encoding of the \":make\" and \":grep\" output"
 msgstr "codifica dell'output dei programmi \":make\" e \":grep\""
 
-msgid "function to display text in the quickfix window"
+msgid ""
+" \n"
+"function to display text in the quickfix window"
 msgstr ""
-"funzione che visualizza del testo\n"
-"nella finestra quickfix"
+" \n"
+"funzione che visualizza del testo nella finestra quickfix"
 
 msgid "system specific"
 msgstr "caratteristiche del sistema"
@@ -11098,9 +11162,6 @@ msgstr "lista dei caratteri contenuti in un nome di file"
 
 msgid "specifies the characters in an identifier"
 msgstr "lista dei caratteri contenuti in un identificativo"
-
-msgid "defines trigger strings for complete_match()"
-msgstr "lista stringhe che innescano complete_match()"
 
 msgid "specifies the characters in a keyword"
 msgstr "lista dei caratteri contenuti in una parola"
@@ -11322,8 +11383,12 @@ msgstr "nome della home directory di Python 2"
 msgid "name of the Python 3 dynamic library"
 msgstr "nome della libreria dinamica Python 3"
 
-msgid "name of the Python 3 home directory"
-msgstr "nome della home directory di Python 3"
+msgid ""
+" \n"
+"name of the Python 3 home directory"
+msgstr ""
+" \n"
+"nome della home directory di Python 3"
 
 msgid "name of the Ruby dynamic library"
 msgstr "nome della libreria dinamica Ruby"
@@ -11345,6 +11410,45 @@ msgstr "personalizzazione pagine scheda nel pannello-schede"
 
 msgid "options for using tabpanel"
 msgstr "opzioni per usare il pannello-schede"
+
+msgid "Notice"
+msgstr "Avviso"
+
+msgid "Quickfix list not found, stopping the job"
+msgstr "Lista quickfix non trovata, arresto il Job"
+
+msgid "Success!"
+msgstr "Successo!"
+
+msgid "Job terminated"
+msgstr "Job terminato"
+
+msgid "There are errors."
+msgstr "Ci sono errori."
+
+msgid "Could not create quickfix list"
+msgstr "Non riesco a creare lista quickfix"
+
+msgid "File not readable:"
+msgstr "File non leggibile:"
+
+msgid "Failed to start job"
+msgstr "Fallita partenza Job"
+
+msgid "Typesetting..."
+msgstr "Componendo..."
+
+msgid "Jobs still running:"
+msgstr "Job ancora attivi:"
+
+msgid "Done."
+msgstr "Fatto."
+
+msgid "Typeset"
+msgstr "Composizione"
+
+msgid "Please save the buffer first."
+msgstr "Siete pregati di salvare prima il buffer."
 
 msgid "You discovered the command-line window! You can close it with \":q\"."
 msgstr ""

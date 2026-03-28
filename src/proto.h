@@ -177,9 +177,9 @@ void mbyte_im_set_active(int active_arg);
 #  include "profiler.pro"
 # endif
 # include "quickfix.pro"
-#ifdef FEAT_WAYLAND
-# include "wayland.pro"
-#endif
+# ifdef FEAT_WAYLAND
+#  include "wayland.pro"
+# endif
 # include "regexp.pro"
 # include "register.pro"
 # include "scriptfile.pro"
@@ -341,7 +341,6 @@ extern char_u *vimpty_getenv(const char_u *string);	// in misc2.c
 # if defined(FEAT_PERL) && !defined(IN_PERL_FILE)
 #  define CV void
 #  include "if_perl.pro"
-#  include "if_perlsfio.pro"
 # endif
 
 # ifdef MACOS_CONVERT

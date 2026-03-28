@@ -13,7 +13,7 @@
 
 #include "vim.h"
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 
 /*
  * When recursively copying lists and dicts we need to remember which ones we
@@ -121,8 +121,11 @@ garbage_collect(int testing)
 
     // buffer-local variables
     FOR_ALL_BUFFERS(buf)
+    {
 	abort = abort || set_ref_in_item(&buf->b_bufvar.di_tv, copyID,
 							NULL, NULL, NULL);
+	abort = abort || set_ref_in_list(buf->b_recorded_changes, copyID);
+    }
 
     // window-local variables
     FOR_ALL_TAB_WINDOWS(tp, wp)
@@ -363,8 +366,7 @@ set_ref_in_ht(
     return abort;
 }
 
-#if defined(FEAT_LUA) || defined(FEAT_PYTHON) || defined(FEAT_PYTHON3) \
-							|| defined(PROTO)
+#if defined(FEAT_LUA) || defined(FEAT_PYTHON) || defined(FEAT_PYTHON3)
 /*
  * Mark a dict and its items with "copyID".
  * Returns TRUE if setting references failed somehow.

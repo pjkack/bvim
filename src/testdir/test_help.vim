@@ -58,6 +58,13 @@ func Test_help_errors()
   bwipe!
 endfunc
 
+func Test_helpclose_errors()
+  call assert_fails('42helpclose', 'E481:')
+  call assert_fails('helpclose 42', 'E488:')
+  call assert_fails('helpclose foo', 'E488:')
+  call assert_fails('helpclose!', 'E477:')
+endfunc
+
 func Test_help_expr()
   help expr-!~?
   call assert_equal('eval.txt', expand('%:t'))
@@ -139,11 +146,17 @@ func Test_helptag_cmd()
   call delete('Xtagdir/tags')
 
   " Test parsing tags
-  call writefile(['*tag1*', 'Example: >', '  *notag*', 'Example end: *tag2*'],
+  call writefile(['*tag1*', 'Example: >', '  *notag1*', 'Example end: *tag2*',
+                \ '>', '  *notag2*', '<',
+                \ '*tag3*', 'Code: >vim', '  *notag3*', 'Code end: *tag4*',
+                \ '>i3config', '  *notag4*', '<'],
     \ 'Xtagdir/a/doc/sample.txt')
   helptags Xtagdir
   call assert_equal(["tag1\ta/doc/sample.txt\t/*tag1*",
-                  \  "tag2\ta/doc/sample.txt\t/*tag2*"], readfile('Xtagdir/tags'))
+                   \ "tag2\ta/doc/sample.txt\t/*tag2*",
+                   \ "tag3\ta/doc/sample.txt\t/*tag3*",
+                   \ "tag4\ta/doc/sample.txt\t/*tag4*"],
+    \ readfile('Xtagdir/tags'))
 
   " Duplicate tags in the help file
   call writefile(['*tag1*', '*tag1*', '*tag2*'], 'Xtagdir/a/doc/sample.txt')
@@ -221,5 +234,59 @@ func Test_helptag_navigation()
   bw
 endfunc
 
+func Test_help_command_termination()
+  " :help {arg}
+  call execute('help |')
+  call assert_match('*bar\*', getline('.'))
+
+  " :help {arg}
+  call execute('help ||')
+  call assert_match('*expr-barbar\*', getline('.'))
+
+  " :help | <whitespace> <empty-command>
+  call execute('help | ')
+  call assert_match('*help.txt\*', getline('.'))
+
+  " :help {arg} | <whitespace> <empty-command>
+  call execute('help || ')
+  call assert_match('*bar\*', getline('.'))
+
+  " :help {arg}
+  call assert_fails('help |||', 'E149:')
+  " :help {arg} | <whitespace> <empty-command>
+  call execute('help ||| ')
+  call assert_match('*expr-barbar\*', getline('.'))
+
+  " :help {invalid-arg}
+  call assert_fails('help ||||', 'E149:')
+  " :help {invalid-arg} | <whitespace> <empty-command>
+  "   (aborted command sequence)
+  call assert_fails('help |||| ', 'E149:')
+
+  call assert_equal("nextcmd",
+        \ execute("help |     echo 'nextcmd'")->split("\n")[-1])
+  call assert_equal("nextcmd",
+        \ execute("help ||    echo 'nextcmd'")->split("\n")[-1])
+  call assert_equal("nextcmd",
+        \ execute("help \<NL> echo 'nextcmd'")->split("\n")[-1])
+  call assert_equal("nextcmd",
+        \ execute("help \<CR> echo 'nextcmd'")->split("\n")[-1])
+
+  helpclose
+endfunc
+
+" This caused a buffer overflow
+func Test_helpfile_overflow()
+  let _helpfile = &helpfile
+  let &helpfile = repeat('A', 5000)
+  help
+  helpclose
+  for i in range(4089, 4096)
+    let &helpfile = repeat('A', i) .. '/A'
+    help
+    helpclose
+  endfor
+  let &helpfile = _helpfile
+endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

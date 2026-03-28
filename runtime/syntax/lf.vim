@@ -1,12 +1,12 @@
 " Vim syntax file
 " Language: lf file manager configuration file (lfrc)
-" Maintainer: Andis Sprinkis <andis@sprinkis.com>
+" Maintainer: Andis Sprinkis <andis@sprinkis.com>, @CatsDeservePets
 " Former Maintainer: Cameron Wright
 " URL: https://github.com/andis-sprinkis/lf-vim
-" Last Change: 16 August 2025
+" Last Change: 4 Feb 2026
 "
 " The shell syntax highlighting is configurable. See $VIMRUNTIME/doc/syntax.txt
-" lf version: 37
+" lf version: 41
 
 if exists("b:current_syntax") | finish | endif
 
@@ -56,12 +56,14 @@ syn keyword lfOptions
   \ cmd-history-next
   \ cmd-history-prev
   \ cmd-home
+  \ cmd-insert
   \ cmd-interrupt
   \ cmd-left
   \ cmd-lowercase-word
   \ cmd-menu-accept
   \ cmd-menu-complete
   \ cmd-menu-complete-back
+  \ cmd-menu-discard
   \ cmd-right
   \ cmd-transpose
   \ cmd-transpose-word
@@ -78,12 +80,10 @@ syn keyword lfOptions
   \ cut
   \ cutfmt
   \ delete
-  \ dircache
   \ dircounts
   \ dirfirst
   \ dironly
   \ dirpreviews
-  \ doc
   \ down
   \ draw
   \ drawbox
@@ -104,6 +104,7 @@ syn keyword lfOptions
   \ glob-unselect
   \ half-down
   \ half-up
+  \ help
   \ hidden
   \ hiddenfiles
   \ high
@@ -121,12 +122,15 @@ syn keyword lfOptions
   \ jump-next
   \ jump-prev
   \ load
-  \ locale
   \ low
   \ maps
   \ mark-load
   \ mark-remove
   \ mark-save
+  \ menufmt
+  \ menuheaderfmt
+  \ menuselectfmt
+  \ mergeindicators
   \ middle
   \ mouse
   \ nmaps
@@ -146,6 +150,7 @@ syn keyword lfOptions
   \ paste
   \ period
   \ pre-cd
+  \ preload
   \ preserve
   \ preview
   \ previewer
@@ -160,6 +165,7 @@ syn keyword lfOptions
   \ rename
   \ reverse
   \ roundbox
+  \ rulerfile
   \ rulerfmt
   \ scroll-down
   \ scroll-up
@@ -180,7 +186,7 @@ syn keyword lfOptions
   \ shellflag
   \ shellopts
   \ showbinds
-  \ sixel
+  \ sizeunits
   \ smartcase
   \ smartdia
   \ sortby

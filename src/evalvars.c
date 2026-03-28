@@ -13,7 +13,7 @@
 
 #include "vim.h"
 
-#if defined(FEAT_EVAL) || defined(PROTO)
+#if defined(FEAT_EVAL)
 
 static dictitem_T	globvars_var;		// variable used for g:
 static dict_T		globvardict;		// Dictionary with g: variables
@@ -141,8 +141,8 @@ static struct vimvar
     {VV_NAME("t_blob",		 VAR_NUMBER), NULL, VV_RO},
     {VV_NAME("t_class",		 VAR_NUMBER), NULL, VV_RO},
     {VV_NAME("t_object",	 VAR_NUMBER), NULL, VV_RO},
-    {VV_NAME("termrfgresp",	 VAR_STRING), NULL, 0},
-    {VV_NAME("termrbgresp",	 VAR_STRING), NULL, 0},
+    {VV_NAME("termrfgresp",	 VAR_STRING), NULL, VV_RO},
+    {VV_NAME("termrbgresp",	 VAR_STRING), NULL, VV_RO},
     {VV_NAME("termu7resp",	 VAR_STRING), NULL, VV_RO},
     {VV_NAME("termstyleresp",	 VAR_STRING), NULL, VV_RO},
     {VV_NAME("termblinkresp",	 VAR_STRING), NULL, VV_RO},
@@ -167,6 +167,8 @@ static struct vimvar
     {VV_NAME("clipmethod",	 VAR_STRING), NULL, VV_RO},
     {VV_NAME("termda1",		 VAR_STRING), NULL, VV_RO},
     {VV_NAME("termosc",	 VAR_STRING), NULL, VV_RO},
+    {VV_NAME("vim_did_init",	 VAR_NUMBER), NULL, VV_RO},
+    {VV_NAME("clipproviders",	 VAR_DICT), NULL, VV_RO},
 };
 
 // shorthand
@@ -287,7 +289,7 @@ evalvars_init(void)
     set_reg_var(0);
 }
 
-#if defined(EXITFREE) || defined(PROTO)
+#if defined(EXITFREE)
 /*
  * Free all vim variables information on exit
  */
@@ -416,7 +418,7 @@ eval_charconvert(
     return OK;
 }
 
-# if defined(FEAT_POSTSCRIPT) || defined(PROTO)
+#if defined(FEAT_POSTSCRIPT)
     int
 eval_printexpr(char_u *fname, char_u *args)
 {
@@ -444,9 +446,9 @@ eval_printexpr(char_u *fname, char_u *args)
     }
     return OK;
 }
-# endif
+#endif
 
-# if defined(FEAT_DIFF) || defined(PROTO)
+#if defined(FEAT_DIFF)
     void
 eval_diff(
     char_u	*origfile,
@@ -502,9 +504,9 @@ eval_patch(
     set_vim_var_string(VV_FNAME_OUT, NULL, -1);
     current_sctx = saved_sctx;
 }
-# endif
+#endif
 
-#if defined(FEAT_SPELL) || defined(PROTO)
+#if defined(FEAT_SPELL)
 /*
  * Evaluate an expression to a list with suggestions.
  * For the "expr:" part of 'spellsuggest'.
@@ -947,6 +949,7 @@ heredoc_get(exarg_T *eap, char_u *cmd, int script_get, int vim9compile)
 	    {
 		vim_free(theline);
 		vim_free(text_indent);
+		list_free(l);
 		return FAIL;
 	    }
 	    count++;
@@ -968,7 +971,11 @@ heredoc_get(exarg_T *eap, char_u *cmd, int script_get, int vim9compile)
 	    }
 
 	    if (list_append_string(l, str, -1) == FAIL)
+	    {
+		if (free_str)
+		    vim_free(str);
 		break;
+	    }
 	    if (free_str)
 		vim_free(str);
 	}
@@ -1083,8 +1090,6 @@ ex_let(exarg_T *eap)
     argend = skip_var_list(arg, TRUE, &var_count, &semicolon, FALSE);
     if (argend == NULL)
 	return;
-    if (argend > arg && argend[-1] == '.')  // for var.='str'
-	--argend;
     expr = skipwhite(argend);
     concat = expr[0] == '.'
 	&& ((expr[1] == '=' && in_old_script(2))
@@ -1707,7 +1712,7 @@ ex_let_env(
 	else if (endchars != NULL
 			      && vim_strchr(endchars, *skipwhite(arg)) == NULL)
 	    emsg(_(e_unexpected_characters_in_let));
-	else if (!check_secure())
+	else if (!check_secure() && !check_restricted())
 	{
 	    char_u	*tofree = NULL;
 	    int		c1 = name[len];
@@ -2017,7 +2022,7 @@ ex_let_one(
     void
 ex_unlet(exarg_T *eap)
 {
-    ex_unletlock(eap, eap->arg, 0, 0, do_unlet_var, NULL);
+    ex_unletlock(eap, eap->arg, 0, eap->forceit ? GLV_QUIET : 0, do_unlet_var, NULL);
 }
 
 /*
@@ -2145,9 +2150,14 @@ do_unlet_var(
     else if (lp->ll_list != NULL)
 	// unlet a List item.
 	listitem_remove(lp->ll_list, lp->ll_li);
-    else
+    else if (lp->ll_dict != NULL)
 	// unlet a Dictionary item.
 	dictitem_remove(lp->ll_dict, lp->ll_di, "unlet");
+    else
+    {
+	semsg(_(e_cannot_unlet_imported_item_str), lp->ll_name);
+	return FAIL;
+    }
 
     return ret;
 }
@@ -2254,7 +2264,7 @@ report_lockvar_member(char *msg, lval_T *lp)
     int did_alloc = FALSE;
     char_u *vname = (char_u *)"";
     char_u *class_name = lp->ll_class != NULL
-				    ? lp->ll_class->class_name : (char_u *)"";
+				    ? lp->ll_class->class_name.string : (char_u *)"";
     if (lp->ll_name != NULL)
     {
 	if (lp->ll_name_end == NULL)
@@ -2520,7 +2530,7 @@ item_lock(typval_T *tv, int deep, int lock, int check_refcount)
     --recurse;
 }
 
-#if (defined(FEAT_MENU) && defined(FEAT_MULTI_LANG)) || defined(PROTO)
+#if defined(FEAT_MENU) && defined(FEAT_MULTI_LANG)
 /*
  * Delete all "menutrans_" variables.
  */
@@ -2840,16 +2850,19 @@ get_vim_var_dict(int idx)
     void
 set_vim_var_char(int c)
 {
-    char_u	buf[MB_MAXBYTES + 1];
+    char_u  buf[MB_MAXBYTES + 1];
+    size_t  buflen;
 
     if (has_mbyte)
-	buf[(*mb_char2bytes)(c, buf)] = NUL;
+	buflen = (*mb_char2bytes)(c, buf);
     else
     {
 	buf[0] = c;
-	buf[1] = NUL;
+	buflen = 1;
     }
-    set_vim_var_string(VV_CHAR, buf, -1);
+    buf[buflen] = NUL;
+
+    set_vim_var_string(VV_CHAR, buf, (int)buflen);
 }
 
 /*
@@ -2982,7 +2995,7 @@ reset_reg_var(void)
 
     // Adjust the register according to 'clipboard', so that when
     // "unnamed" is present it becomes '*' or '+' instead of '"'.
-#ifdef FEAT_CLIPBOARD
+#ifdef HAVE_CLIPMETHOD
     adjust_clip_reg(&regname);
 #endif
     set_reg_var(regname);
@@ -2994,15 +3007,16 @@ reset_reg_var(void)
     void
 set_reg_var(int c)
 {
-    char_u	regname;
+    char_u  regname[2];
 
     if (c == 0 || c == ' ')
-	regname = '"';
+	regname[0] = '"';
     else
-	regname = c;
+	regname[0] = c;
+    regname[1] = NUL;
     // Avoid free/alloc when the value is already right.
     if (vimvars[VV_REG].vv_str == NULL || vimvars[VV_REG].vv_str[0] != c)
-	set_vim_var_string(VV_REG, &regname, 1);
+	set_vim_var_string(VV_REG, regname, 1);
 }
 
 /*
@@ -3359,7 +3373,7 @@ eval_variable(
 		    }
 		}
 	    }
-	    copy_tv(tv, rettv);
+	    ret = copy_tv(tv, rettv);
 	}
     }
 
@@ -4749,8 +4763,8 @@ setwinvar(typval_T *argvars, int off)
     void
 reset_v_option_vars(void)
 {
-    set_vim_var_string(VV_OPTION_NEW,  NULL, -1);
-    set_vim_var_string(VV_OPTION_OLD,  NULL, -1);
+    set_vim_var_string(VV_OPTION_NEW, NULL, -1);
+    set_vim_var_string(VV_OPTION_OLD, NULL, -1);
     set_vim_var_string(VV_OPTION_OLDLOCAL, NULL, -1);
     set_vim_var_string(VV_OPTION_OLDGLOBAL, NULL, -1);
     set_vim_var_string(VV_OPTION_TYPE, NULL, -1);
@@ -5275,6 +5289,13 @@ put_callback(callback_T *cb, typval_T *tv)
     }
 }
 
+    static bool
+does_callback_own_cb_name(callback_T *cb)
+{
+    // If cb_partial != NULL then *cb->cb_name is owned by the partial.
+    return cb->cb_partial || cb->cb_free_name;
+}
+
 /*
  * Make a copy of "src" into "dest", allocating the function name if needed,
  * without incrementing the refcount.
@@ -5282,19 +5303,13 @@ put_callback(callback_T *cb, typval_T *tv)
     void
 set_callback(callback_T *dest, callback_T *src)
 {
-    if (src->cb_partial == NULL)
+    *dest = *src;
+    if (!does_callback_own_cb_name(src))
     {
-	// just a function name, make a copy
 	dest->cb_name = vim_strsave(src->cb_name);
 	dest->cb_free_name = TRUE;
     }
-    else
-    {
-	// cb_name is a pointer into cb_partial
-	dest->cb_name = src->cb_name;
-	dest->cb_free_name = FALSE;
-    }
-    dest->cb_partial = src->cb_partial;
+    *src = (callback_T){0};
 }
 
 /*
