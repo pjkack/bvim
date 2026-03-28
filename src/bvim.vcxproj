@@ -99,34 +99,9 @@
     <IntDir>$(SolutionDir)ObjVS$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
     <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <ClCompile>
-      <PreprocessorDefinitions>WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;HAVE_STDINT_H;HAVE_PATHDEF;FEAT_GUI_MSWIN;FEAT_DIRECTX;DYNAMIC_DIRECTX;FEAT_DIRECTX_COLOR_EMOJI;DYNAMIC_ICONV;DYNAMIC_GETTEXT;FEAT_BIG;FEAT_PROFILE;FEAT_JOB_CHANNEL;FEAT_TERMINAL;FEAT_BORE;VSNPRINTF=vim_vsnprintf;SNPRINTF=vim_snprintf;</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>.;proto;libvterm/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <WarningLevel>Level3</WarningLevel>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <Optimization>Disabled</Optimization>
-      <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <MinimalRebuild>false</MinimalRebuild>
-      <AdditionalOptions>/source-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
-    </ClCompile>
-    <Link>
-      <TargetMachine>MachineX86</TargetMachine>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>version.lib;comctl32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;WSock32.lib;Netapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalOptions>/cgthreads:8 %(AdditionalOptions)</AdditionalOptions>
-      <StackReserveSize>8388608</StackReserveSize>
-    </Link>
-    <PreBuildEvent>
-      <Command>$(ProjectDir)pathdef.bat $(Configuration) $(PlatformTarget)</Command>
-      <Message>Generate pathdef.c</Message>
-    </PreBuildEvent>
-  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <PreprocessorDefinitions>WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;HAVE_STDINT_H;HAVE_PATHDEF;FEAT_GUI_MSWIN;FEAT_DIRECTX;DYNAMIC_DIRECTX;FEAT_DIRECTX_COLOR_EMOJI;DYNAMIC_ICONV;DYNAMIC_GETTEXT;FEAT_BIG;FEAT_PROFILE;FEAT_JOB_CHANNEL;FEAT_TERMINAL;FEAT_BORE;VSNPRINTF=vim_vsnprintf;SNPRINTF=vim_snprintf;</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;HAVE_STDINT_H;HAVE_PATHDEF;FEAT_GUI_MSWIN;FEAT_DIRECTX;DYNAMIC_DIRECTX;FEAT_DIRECTX_COLOR_EMOJI;DYNAMIC_ICONV;DYNAMIC_GETTEXT;FEAT_BIG;FEAT_PROFILE;FEAT_JOB_CHANNEL;FEAT_TERMINAL;FEAT_TERMGUICOLORS;FEAT_BORE;VSNPRINTF=vim_vsnprintf;SNPRINTF=vim_snprintf;</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>.;proto;libvterm/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
@@ -140,40 +115,6 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Windows</SubSystem>
       <AdditionalDependencies>version.lib;comctl32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;WSock32.lib;Netapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalOptions>/cgthreads:8 %(AdditionalOptions)</AdditionalOptions>
-      <StackReserveSize>8388608</StackReserveSize>
-    </Link>
-    <PreBuildEvent>
-      <Command>$(ProjectDir)pathdef.bat $(Configuration) $(PlatformTarget)</Command>
-      <Message>Generate pathdef.c</Message>
-    </PreBuildEvent>
-  </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <ClCompile>
-      <PreprocessorDefinitions>WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;HAVE_STDINT_H;HAVE_PATHDEF;FEAT_GUI_MSWIN;FEAT_DIRECTX;DYNAMIC_DIRECTX;FEAT_DIRECTX_COLOR_EMOJI;DYNAMIC_ICONV;DYNAMIC_GETTEXT;FEAT_BIG;FEAT_PROFILE;FEAT_JOB_CHANNEL;FEAT_TERMINAL;FEAT_BORE;VSNPRINTF=vim_vsnprintf;SNPRINTF=vim_snprintf;NDEBUG</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>.;proto;libvterm/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <WarningLevel>Level3</WarningLevel>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <Optimization>Full</Optimization>
-      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
-      <IntrinsicFunctions>true</IntrinsicFunctions>
-      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
-      <OmitFramePointers>true</OmitFramePointers>
-      <WholeProgramOptimization>true</WholeProgramOptimization>
-      <ExceptionHandling>false</ExceptionHandling>
-      <BufferSecurityCheck>false</BufferSecurityCheck>
-      <MinimalRebuild>false</MinimalRebuild>
-      <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalOptions>/source-charset:utf-8 %(AdditionalOptions)</AdditionalOptions>
-    </ClCompile>
-    <Link>
-      <TargetMachine>MachineX86</TargetMachine>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
-      <SubSystem>Windows</SubSystem>
-      <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>version.lib;comctl32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;WSock32.lib;Netapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <AdditionalOptions>/cgthreads:8 %(AdditionalOptions)</AdditionalOptions>
       <StackReserveSize>8388608</StackReserveSize>
     </Link>
@@ -184,7 +125,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <PreprocessorDefinitions>WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;HAVE_STDINT_H;HAVE_PATHDEF;FEAT_GUI_MSWIN;FEAT_DIRECTX;DYNAMIC_DIRECTX;FEAT_DIRECTX_COLOR_EMOJI;DYNAMIC_ICONV;DYNAMIC_GETTEXT;FEAT_BIG;FEAT_PROFILE;FEAT_JOB_CHANNEL;FEAT_TERMINAL;FEAT_BORE;VSNPRINTF=vim_vsnprintf;SNPRINTF=vim_snprintf;NDEBUG</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;WINVER=0x0601;_WIN32_WINNT=0x0601;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;HAVE_STDINT_H;HAVE_PATHDEF;FEAT_GUI_MSWIN;FEAT_DIRECTX;DYNAMIC_DIRECTX;FEAT_DIRECTX_COLOR_EMOJI;DYNAMIC_ICONV;DYNAMIC_GETTEXT;FEAT_BIG;FEAT_PROFILE;FEAT_JOB_CHANNEL;FEAT_TERMINAL;FEAT_TERMGUICOLORS;FEAT_BORE;VSNPRINTF=vim_vsnprintf;SNPRINTF=vim_snprintf;NDEBUG</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>.;proto;libvterm/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>

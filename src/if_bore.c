@@ -855,7 +855,7 @@ static int bore_extract_projects_and_files_from_sln(bore_t* b, const char* sln_p
             }
             else
             {
-		// \t\tRelease|Win32 = Release|Win32
+		// \t\tRelease|x64 = Release|x64
                 char* ends = strstr(buf, " = ");
                 char* div = strchr(buf + 2, '|');
                 if (ends && div && div < ends)
