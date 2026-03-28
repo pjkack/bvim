@@ -17,11 +17,11 @@
 #endif
 #include <windows.h>
 
-void SaveInst(HINSTANCE hInst);
+void SaveInst(HINSTANCE hInst, int nCmdShow);
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved)
 {
     if (fdwReason == DLL_PROCESS_ATTACH)
-	SaveInst(hinstDLL);
+	SaveInst(hinstDLL, 0);
     return TRUE;
 }
