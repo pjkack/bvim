@@ -166,6 +166,12 @@ struct terminal_S {
 			     // be NULL
     int		tl_using_altscreen;
     garray_T	tl_osc_buf;	    // incomplete OSC string
+
+#if defined(FEAT_BORE) && defined(MSWIN)
+    proftime_T	tl_prof_start;
+    int		tl_prof_first_data;
+    LONGLONG	tl_coalesce_start;
+#endif
 };
 
 #define TMODE_ONCE 1	    // CTRL-\ CTRL-N used
@@ -1407,6 +1413,19 @@ write_to_term(buf_T *buffer, char_u *msg, channel_T *channel)
 	ch_log(channel, "NOT writing %d bytes to terminal", (int)len);
 	return;
     }
+#if defined(FEAT_BORE) && defined(MSWIN)
+    if (term->tl_prof_first_data == 0)
+    {
+	if (eval_to_number((char_u *)"g:term_profile", FALSE) > 0)
+	{
+	    proftime_T elapsed = term->tl_prof_start;
+	    profile_end(&elapsed);
+	    smsg("[term] first data: %.0fms (%d bytes)",
+		    profile_float(&elapsed) * 1000.0, (int)len);
+	}
+	term->tl_prof_first_data = 1;
+    }
+#endif
     ch_log(channel, "writing %d bytes to terminal", (int)len);
     cursor_off();
     term_write_job_output(term, msg, len);
@@ -1430,10 +1449,57 @@ write_to_term(buf_T *buffer, char_u *msg, channel_T *channel)
 	ch_log(term->tl_job->jv_channel, "updating screen");
 	if (buffer == curbuf && (State & MODE_CMDLINE) == 0)
 	{
+#if defined(FEAT_BORE) && defined(MSWIN)
+	    // Coalesce fragmented ConPTY output: defer update_screen for
+	    // up to 2 ms to let more data accumulate, then render once.
+	    if (term->tl_job != NULL && term->tl_job->jv_channel != NULL)
+	    {
+		DWORD avail = 0;
+		sock_T fd = term->tl_job->jv_channel ->ch_part[PART_OUT].ch_fd;
+
+		if (term->tl_coalesce_start == 0)
+		    QueryPerformanceCounter(
+				    (LARGE_INTEGER *)&term->tl_coalesce_start);
+
+		if (fd != INVALID_FD
+			&& PeekNamedPipe((HANDLE)fd, NULL, 0, NULL,
+							    &avail, NULL)
+			&& avail > 0)
+		{
+		    LARGE_INTEGER now, freq;
+		    double elapsed_ms;
+
+		    QueryPerformanceCounter(&now);
+		    QueryPerformanceFrequency(&freq);
+		    elapsed_ms = (double)(now.QuadPart
+					    - term->tl_coalesce_start)
+				    / (double)freq.QuadPart * 1000.0;
+		    if (elapsed_ms < 2.0)
+		    {
+			must_redraw = UPD_VALID;
+			return;
+		    }
+		}
+		term->tl_coalesce_start = 0;
+	    }
+#endif
 	    update_screen(UPD_VALID_NO_UPDATE);
 #if defined(FEAT_TABPANEL)
 	    if (redraw_tabpanel)
 		draw_tabpanel();
+#endif
+#if defined(FEAT_BORE) && defined(MSWIN)
+	    if (term->tl_prof_first_data == 1)
+	    {
+		if (eval_to_number((char_u *)"g:term_profile", FALSE) > 0)
+		{
+		    proftime_T elapsed = term->tl_prof_start;
+		    profile_end(&elapsed);
+		    smsg("[term] first render: %.0fms",
+			    profile_float(&elapsed) * 1000.0);
+		}
+		term->tl_prof_first_data = 2;
+	    }
 #endif
 	    // update_screen() can be slow, check the terminal wasn't closed
 	    // already
@@ -7083,6 +7149,15 @@ conpty_term_and_job_init(
     HANDLE	    i_ours = NULL;
     HANDLE	    o_ours = NULL;
     char	    *errmsg = NULL;
+#if defined(FEAT_BORE) && defined(MSWIN)
+    proftime_T	    prof_conpty, prof_create, prof_resume;
+    int		    prof_enabled;
+
+    prof_enabled = eval_to_number((char_u *)"g:term_profile", FALSE) > 0;
+    if (prof_enabled)
+	profile_start(&term->tl_prof_start);
+    term->tl_prof_first_data = prof_enabled ? 0 : -1;
+#endif
 
     ga_init2(&ga_cmd, sizeof(char*), 20);
     ga_init2(&ga_env, sizeof(char*), 20);
@@ -7137,6 +7212,14 @@ conpty_term_and_job_init(
     consize.Y = term->tl_rows;
     hr = pCreatePseudoConsole(consize, i_theirs, o_theirs, 0,
 							     &term->tl_conpty);
+#if defined(FEAT_BORE) && defined(MSWIN)
+    if (prof_enabled)
+    {
+	prof_conpty = term->tl_prof_start;
+	profile_end(&prof_conpty);
+    }
+#endif
+
     if (FAILED(hr))
 	goto failed;
 
@@ -7197,6 +7280,13 @@ conpty_term_and_job_init(
 	errmsg = GetWin32Error();
 	goto failed;
     }
+#if defined(FEAT_BORE) && defined(MSWIN)
+    if (prof_enabled)
+    {
+	prof_create = term->tl_prof_start;
+	profile_end(&prof_create);
+    }
+#endif
 
     CloseHandle(i_theirs);
     CloseHandle(o_theirs);
@@ -7227,6 +7317,18 @@ conpty_term_and_job_init(
 
     ResumeThread(proc_info.hThread);
     CloseHandle(proc_info.hThread);
+
+#if defined(FEAT_BORE) && defined(MSWIN)
+    if (prof_enabled)
+    {
+	prof_resume = term->tl_prof_start;
+	profile_end(&prof_resume);
+	smsg("[term] CreateConPTY: %.0fms => CreateProcess: %.0fms => ResumeThread: %.0fms",
+		profile_float(&prof_conpty) * 1000.0,
+		profile_float(&prof_create) * 1000.0,
+		profile_float(&prof_resume) * 1000.0);
+    }
+#endif
 
     vim_free(cmd_wchar);
     vim_free(cmd_wchar_copy);

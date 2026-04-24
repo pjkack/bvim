@@ -2661,6 +2661,20 @@ gui_mch_wait_for_chars(int wtime)
 		process_message();
 		break;
 	    }
+#if defined(FEAT_BORE) && defined(MSWIN)
+	    else
+	    {
+		// Wait for 2 ms and wake up on channel output
+		HANDLE  ch_handles[MAXIMUM_WAIT_OBJECTS - 1];
+		DWORD   nhandles = channel_get_pipe_handles(
+				    ch_handles, MAXIMUM_WAIT_OBJECTS - 1);
+
+		if (MsgWaitForMultipleObjects(nhandles,
+			    nhandles > 0 ? ch_handles : NULL,
+			    FALSE, 2, QS_ALLINPUT) != WAIT_TIMEOUT)
+		    break;
+	    }
+#else
 	    else if (input_available()
 		    // TODO: The 10 msec is a compromise between laggy response
 		    // and consuming more CPU time.  Better would be to handle
@@ -2668,6 +2682,7 @@ gui_mch_wait_for_chars(int wtime)
 		    || MsgWaitForMultipleObjects(0, NULL, FALSE, 10,
 						  QS_ALLINPUT) != WAIT_TIMEOUT)
 		break;
+#endif
 	}
 #else
 	// Don't use gui_mch_update() because then we will spin-lock until a
@@ -5401,7 +5416,7 @@ _WndProc(
 	extern void bore_async_execute_update(DWORD flags);
 	bore_async_execute_update(lParam);
 	break;
-    } 
+    }
 #endif
 
     default:

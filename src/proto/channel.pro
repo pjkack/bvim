@@ -32,6 +32,7 @@ int channel_in_blocking_wait(void);
 channel_T *get_channel_arg(typval_T *tv, int check_open, int reading, ch_part_T part);
 void channel_handle_events(int only_keep_open);
 int channel_any_keep_open(void);
+int channel_get_pipe_handles(HANDLE *handles, int max);
 void channel_set_nonblock(channel_T *channel, ch_part_T part);
 int channel_send(channel_T *channel, ch_part_T part, char_u *buf_arg, int len_arg, char *fun);
 int channel_poll_setup(int nfd_in, void *fds_in, int *towait);

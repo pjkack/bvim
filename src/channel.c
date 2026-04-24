@@ -4790,6 +4790,31 @@ channel_any_keep_open(void)
 	    return TRUE;
     return FALSE;
 }
+
+#if defined(FEAT_BORE) && defined(MSWIN)
+/*
+ * Collect active channel output pipe handles for use with
+ * MsgWaitForMultipleObjects().  Returns the number of handles.
+ */
+    int
+channel_get_pipe_handles(HANDLE *handles, int max)
+{
+    channel_T	*channel;
+    int		n = 0;
+
+    FOR_ALL_CHANNELS(channel)
+    {
+	sock_T fd = channel->ch_part[PART_OUT].ch_fd;
+	if (fd != INVALID_FD && n < max)
+	    handles[n++] = (HANDLE)fd;
+	fd = channel->ch_part[PART_ERR].ch_fd;
+	if (fd != INVALID_FD && fd != channel->ch_part[PART_OUT].ch_fd
+								&& n < max)
+	    handles[n++] = (HANDLE)fd;
+    }
+    return n;
+}
+#endif
 #endif
 
 /*
