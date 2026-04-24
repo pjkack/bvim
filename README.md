@@ -1,9 +1,9 @@
-`README.md` for version 9.0 of BVIM: Bore Vi IMproved.
+`README.md` for version 9.2 of BVIM: Bore Vi IMproved.
 
-BVIM: gVim 9.0 with Visual Studio extensions
+BVIM: gVim 9.2 with Visual Studio extensions
 =======================================================
 
-BVIM is a version of gVim which adds a few features which helps working on large Visual Studio projects. The goal is to make all common programming actions take less than 500 ms on a fast machine. It is supported on Windows 7 and above, it builds with Visual Studio 2017 using src/bvim.sln, and it is developed and maintained by Jonas Kjellström and Per-Jonny Käck.
+BVIM is a version of gVim which adds a few features which helps working on large Visual Studio projects. The goal is to make all common programming actions take less than 500 ms on a fast machine. It is supported on Windows 7 and above, it builds with Visual Studio 2017 using src/bvim.sln, and it is developed and maintained by Jonas KjellstrÃ¶m and Per-Jonny KÃ¤ck.
 
 boresln <.sln file | directory>
 ------------------------------------------------------
