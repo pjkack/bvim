@@ -629,6 +629,34 @@ get_job_options(typval_T *tv, jobopt_T *opt, int supported, int supported2)
 		    return FAIL;
 		}
 	    }
+#ifdef FEAT_BORE
+	    else if (STRCMP(hi->hi_key, "term_stdin") == 0)
+	    {
+		if (!(supported2 & JO2_TERM_STDIN))
+		    break;
+		opt->jo_set2 |= JO2_TERM_STDIN;
+		opt->jo_term_stdin = tv_get_string_buf_chk(item,
+						    opt->jo_term_stdin_buf);
+		if (opt->jo_term_stdin == NULL)
+		{
+		    semsg(_(e_invalid_value_for_argument_str), "term_stdin");
+		    return FAIL;
+		}
+	    }
+	    else if (STRCMP(hi->hi_key, "term_stdout") == 0)
+	    {
+		if (!(supported2 & JO2_TERM_STDOUT))
+		    break;
+		opt->jo_set2 |= JO2_TERM_STDOUT;
+		opt->jo_term_stdout = tv_get_string_buf_chk(item,
+						    opt->jo_term_stdout_buf);
+		if (opt->jo_term_stdout == NULL)
+		{
+		    semsg(_(e_invalid_value_for_argument_str), "term_stdout");
+		    return FAIL;
+		}
+	    }
+#endif
 #endif
 	    else if (STRCMP(hi->hi_key, "env") == 0)
 	    {

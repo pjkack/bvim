@@ -76,6 +76,11 @@ typedef struct sb_line_S {
 # ifndef PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
 #  define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE 0x00020016
 # endif
+# ifdef FEAT_BORE
+#  ifndef PROC_THREAD_ATTRIBUTE_HANDLE_LIST
+#   define PROC_THREAD_ATTRIBUTE_HANDLE_LIST 0x00020002
+#  endif
+# endif
 typedef struct _DYN_STARTUPINFOEXW
 {
     STARTUPINFOW StartupInfo;
@@ -6948,6 +6953,9 @@ f_term_start(typval_T *argvars, typval_T *rettv)
 		    + JO_CALLBACK + JO_OUT_CALLBACK + JO_ERR_CALLBACK
 		    + JO_EXIT_CB + JO_CLOSE_CALLBACK + JO_OUT_IO,
 		JO2_TERM_NAME + JO2_TERM_FINISH + JO2_HIDDEN + JO2_TERM_OPENCMD
+#ifdef FEAT_BORE
+		    + JO2_TERM_STDIN + JO2_TERM_STDOUT
+#endif
 		    + JO2_TERM_COLS + JO2_TERM_ROWS + JO2_VERTICAL + JO2_CURWIN
 		    + JO2_CWD + JO2_ENV + JO2_EOF_CHARS
 		    + JO2_NORESTORE + JO2_TERM_KILL + JO2_TERM_HIGHLIGHT
@@ -7123,6 +7131,44 @@ dyn_conpty_init(int verbose)
     return OK;
 }
 
+#ifdef FEAT_BORE
+/*
+ * Override hStdInput/hStdOutput in the StartupInfo by opening
+ * the files for the term_stdin/term_stdout options.
+ */
+    static int
+conpty_setup_std_handles(jobopt_T *opt, DYN_STARTUPINFOEXW *siex)
+{
+    SECURITY_ATTRIBUTES sa = {sizeof(SECURITY_ATTRIBUTES), NULL, TRUE};
+
+    if (opt->jo_term_stdin == NULL && opt->jo_term_stdout == NULL)
+    {
+	// No direct I/O — keep INVALID_HANDLE_VALUE defaults.
+	return OK;
+    }
+
+    if (opt->jo_term_stdin != NULL)
+    {
+	HANDLE h = CreateFileA((char *)opt->jo_term_stdin,
+		GENERIC_READ, FILE_SHARE_READ,
+		&sa, OPEN_EXISTING, 0, NULL);
+	if (h == INVALID_HANDLE_VALUE)
+	    return FAIL;
+	siex->StartupInfo.hStdInput = h;
+    }
+    if (opt->jo_term_stdout != NULL)
+    {
+	HANDLE h = CreateFileA((char *)opt->jo_term_stdout,
+		GENERIC_WRITE, 0,
+		&sa, CREATE_ALWAYS, 0, NULL);
+	if (h == INVALID_HANDLE_VALUE)
+	    return FAIL;
+	siex->StartupInfo.hStdOutput = h;
+    }
+    return OK;
+}
+#endif
+
     static int
 conpty_term_and_job_init(
 	term_T	    *term,
@@ -7235,11 +7281,20 @@ conpty_term_and_job_init(
     term->tl_siex.StartupInfo.hStdError = INVALID_HANDLE_VALUE;
 
     // Set up pipe inheritance safely: Vista or later.
-    pInitializeProcThreadAttributeList(NULL, 1, 0, &breq);
+    int anum = 1;
+#ifdef FEAT_BORE
+    if (conpty_setup_std_handles(opt, &term->tl_siex) == FAIL)
+	goto failed;
+    if (term->tl_siex.StartupInfo.hStdInput != INVALID_HANDLE_VALUE
+	    || term->tl_siex.StartupInfo.hStdOutput != INVALID_HANDLE_VALUE)
+	anum = 2;
+#endif
+
+    pInitializeProcThreadAttributeList(NULL, anum, 0, &breq);
     term->tl_siex.lpAttributeList = alloc(breq);
     if (!term->tl_siex.lpAttributeList)
 	goto failed;
-    if (!pInitializeProcThreadAttributeList(term->tl_siex.lpAttributeList, 1,
+    if (!pInitializeProcThreadAttributeList(term->tl_siex.lpAttributeList, anum,
 								     0, &breq))
 	goto failed;
     if (!pUpdateProcThreadAttribute(
@@ -7247,6 +7302,22 @@ conpty_term_and_job_init(
 	    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, term->tl_conpty,
 	    sizeof(HPCON), NULL, NULL))
 	goto failed;
+#ifdef FEAT_BORE
+    if (anum > 1)
+    {
+	HANDLE handles[2];
+	int count = 0;
+	if (term->tl_siex.StartupInfo.hStdInput != INVALID_HANDLE_VALUE)
+	    handles[count++] = term->tl_siex.StartupInfo.hStdInput;
+	if (term->tl_siex.StartupInfo.hStdOutput != INVALID_HANDLE_VALUE)
+	    handles[count++] = term->tl_siex.StartupInfo.hStdOutput;
+	if (!pUpdateProcThreadAttribute(
+		    term->tl_siex.lpAttributeList, 0,
+		    PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+		    handles, count * sizeof(HANDLE), NULL, NULL))
+	    goto failed;
+    }
+#endif
 
     channel = add_channel();
     if (channel == NULL)
@@ -7271,7 +7342,12 @@ conpty_term_and_job_init(
     if (opt->jo_set & JO_IN_BUF)
 	job->jv_in_buf = buflist_findnr(opt->jo_io_buf[PART_IN]);
 
-    if (!CreateProcessW(NULL, cmd_wchar_copy, NULL, NULL, FALSE,
+    if (!CreateProcessW(NULL, cmd_wchar_copy, NULL, NULL,
+#ifdef FEAT_BORE
+	    opt->jo_term_stdin != NULL || opt->jo_term_stdout != NULL,
+#else
+	    FALSE,
+#endif
 	    EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT
 	    | CREATE_SUSPENDED | CREATE_DEFAULT_ERROR_MODE,
 	    env_wchar, cwd_wchar,
@@ -7290,6 +7366,13 @@ conpty_term_and_job_init(
 
     CloseHandle(i_theirs);
     CloseHandle(o_theirs);
+
+#ifdef FEAT_BORE
+    if (term->tl_siex.StartupInfo.hStdInput != INVALID_HANDLE_VALUE)
+	CloseHandle(term->tl_siex.StartupInfo.hStdInput);
+    if (term->tl_siex.StartupInfo.hStdOutput != INVALID_HANDLE_VALUE)
+	CloseHandle(term->tl_siex.StartupInfo.hStdOutput);
+#endif
 
     channel_set_pipes(channel,
 	    (sock_T)i_ours,
