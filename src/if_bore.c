@@ -1192,6 +1192,72 @@ static int bore_build_extension_list(bore_t* b)
     return OK;
 }
 
+static const char* const bore_toggle_transp_suffixes[] = {
+    "Internal",
+    "Private",
+    "Impl",
+};
+
+static const char* const bore_toggle_transp_dirs[] = {
+    "Public",
+    "Private",
+    "Internal",
+    "detail",
+    "details",
+    "impl",
+};
+
+// Computes normalized basename len, skipping transparent basename suffixes.
+// This makes e.g. FeatureInternal.h and Feature.cpp the same len, hence they hash identically
+static int bore_strip_toggle_suffix(const char* name, int name_len)
+{
+    int i;
+    for (i = 0; i < (int)(sizeof(bore_toggle_transp_suffixes)/sizeof(bore_toggle_transp_suffixes[0])); ++i)
+    {
+        int suf_len = (int)strlen(bore_toggle_transp_suffixes[i]);
+        if (name_len > suf_len && 0 == STRNICMP(name + name_len - suf_len, bore_toggle_transp_suffixes[i], suf_len))
+            return name_len - suf_len;
+    }
+    return name_len;
+}
+
+// Computes normalized dir and parent-dir hashes, skipping transparent directory segments.
+// This makes e.g. Module\Public\Sub\ and Module\Private\Sub\ hash identically.
+static void bore_compute_dir_hashes(const char* path, int dir_len,
+                                    u32* out_dir_hash, u32* out_parent_dir_hash)
+{
+    u32 h = 0, prev_h = 0;
+    int i = 0;
+    while (i < dir_len)
+    {
+        int seg_start = i, seg_len, s, k, transparent;
+        while (i < dir_len && path[i] != '\\')
+            ++i;
+        seg_len = i - seg_start;
+        if (i < dir_len) ++i;
+
+        transparent = 0;
+        for (s = 0; s < (int)(sizeof(bore_toggle_transp_dirs)/sizeof(bore_toggle_transp_dirs[0])); ++s)
+        {
+            int tlen = (int)strlen(bore_toggle_transp_dirs[s]);
+            if (seg_len == tlen && 0 == STRNICMP(path + seg_start, bore_toggle_transp_dirs[s], tlen))
+            {
+                transparent = 1;
+                break;
+            }
+        }
+        if (transparent)
+            continue;
+
+        prev_h = h;
+        for (k = seg_start; k < seg_start + seg_len; ++k)
+            h = 33 * h + TOLOWER_LOC((u8)path[k]);
+        h = 33 * h + '\\';
+    }
+    *out_dir_hash = h + (h >> 5);
+    *out_parent_dir_hash = prev_h + (prev_h >> 5);
+}
+
 static int bore_sort_toggle_entry(const void* vx, const void* vy)
 {
     const bore_toggle_entry_t* x = (const bore_toggle_entry_t*)vx;
@@ -1249,11 +1315,18 @@ static int bore_build_toggle_index(bore_t* b)
         ext = ext ? ext + 1 : path + path_len;
         basename = basename ? basename + 1 : path;
 
+        int dir_len = (int)(basename - path);
+        u32 dir_hash, parent_dir_hash;
+        bore_compute_dir_hashes(path, dir_len, &dir_hash, &parent_dir_hash);
+        int basename_len = bore_strip_toggle_suffix(basename, (int)(ext - basename) - 1);
+
         bore_toggle_entry_t* e = (bore_toggle_entry_t*)bore_alloc(&b->toggle_index_alloc,
             sizeof(bore_toggle_entry_t));
         e->file = files[i].file;
         e->extension_index = ext_index;
-        e->basename_hash = bore_string_hash_n(basename, (int)(ext - basename));
+        e->basename_hash = bore_string_hash_n(basename, basename_len);
+        e->dir_hash = dir_hash;
+        e->parent_dir_hash = parent_dir_hash;
         b->toggle_entry_count++;
     }
     qsort(b->toggle_index_alloc.base, b->toggle_entry_count, sizeof(bore_toggle_entry_t),
@@ -2576,6 +2649,13 @@ void ex_boreconfig(exarg_T *eap)
     }
 }
 
+static int bore_toggle_dirs_match(const bore_toggle_entry_t* e, u32 dir_hash, u32 parent_dir_hash)
+{
+    return e->parent_dir_hash == parent_dir_hash // siblings
+        || e->parent_dir_hash == dir_hash        // entry is one level deeper than current
+        || e->dir_hash == parent_dir_hash;       // entry is one level shallower than current
+}
+
 void ex_boretoggle(exarg_T *eap)
 {
     if (!g_bore)
@@ -2588,6 +2668,10 @@ void ex_boretoggle(exarg_T *eap)
         size_t path_len;
         u32 basename_hash;
         u32 ext_hash;
+        u32 dir_hash;
+        u32 parent_dir_hash;
+        int dir_len;
+        int basename_len;
         const bore_toggle_entry_t* e_begin = (const bore_toggle_entry_t*)g_bore->toggle_index_alloc.base;
         const bore_toggle_entry_t* e = e_begin;
         const bore_toggle_entry_t* e_end = e + g_bore->toggle_entry_count;
@@ -2606,7 +2690,10 @@ void ex_boretoggle(exarg_T *eap)
 
         basename = vim_strrchr(path, '\\');
         basename = basename ? basename + 1 : path;
-        basename_hash = bore_string_hash_n(basename, ext - basename);
+        dir_len = (int)(basename - path);
+        bore_compute_dir_hashes(path, dir_len, &dir_hash, &parent_dir_hash);
+        basename_len = bore_strip_toggle_suffix(basename, (int)(ext - basename) - 1);
+        basename_hash = bore_string_hash_n(basename, basename_len);
 
         // find first entry with identical basename using binary search
         while (e_begin < e_end)
@@ -2642,10 +2729,8 @@ void ex_boretoggle(exarg_T *eap)
                 e = e_begin;
             if (e == e_buf)
                 return; // no match
-            if (e->extension_index != e_buf->extension_index)
-            {
+            if (bore_toggle_dirs_match(e, dir_hash, parent_dir_hash) && e->extension_index != e_buf->extension_index)
                 break;
-            }
         }
 
         // Find the best matching ext
@@ -2654,6 +2739,8 @@ void ex_boretoggle(exarg_T *eap)
         ++e;
         for(; e != e_end && e_best->extension_index == e->extension_index; ++e)
         {
+            if (!bore_toggle_dirs_match(e, dir_hash, parent_dir_hash))
+                continue;
             int score = bore_str_match_score(path, bore_str(g_bore, e->file));
             if (score > e_best_score)
             {

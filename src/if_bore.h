@@ -95,6 +95,8 @@ typedef struct bore_toggle_entry_t
     u32 basename_hash;
     int extension_index;
     u32 file;
+    u32 dir_hash;
+    u32 parent_dir_hash;
 } bore_toggle_entry_t;
 
 typedef struct bore_t
