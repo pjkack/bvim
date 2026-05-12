@@ -1199,6 +1199,7 @@ static const char* const bore_toggle_transp_suffixes[] = {
 };
 
 static const char* const bore_toggle_transp_dirs[] = {
+    "Classes",
     "Public",
     "Private",
     "Internal",
